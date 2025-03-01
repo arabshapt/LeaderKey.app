@@ -123,7 +123,7 @@ class AppDelegate: NSObject, NSApplicationDelegate,
       controller.show()
     }
   }
- // Add this method to handle URL scheme
+
 func application(_ application: NSApplication, open urls: [URL]) {
     for url in urls {
         handleIncomingURL(url)

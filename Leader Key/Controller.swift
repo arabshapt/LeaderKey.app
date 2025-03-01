@@ -283,7 +283,6 @@ NotificationCenter.default.addObserver(
     alert.addButton(withTitle: "OK")
     alert.runModal()
   }
-  // ...existing code...
 
  @objc private func handleNavigateToGroup(_ notification: Notification) {
     print("Received NavigateToGroup notification")
@@ -388,7 +387,6 @@ private func findGroupByKey(_ key: String, in parentGroup: Group?) -> Group? {
 }
 
 class DontActivateConfiguration {
-  // ...existing code...
   let configuration = NSWorkspace.OpenConfiguration()
 
   static var shared = DontActivateConfiguration()
