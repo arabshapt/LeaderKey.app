@@ -21,16 +21,24 @@ class Controller {
 
   private var cancellables = Set<AnyCancellable>()
 
-  init(userState: UserState, userConfig: UserConfig) {
+init(userState: UserState, userConfig: UserConfig) {
     self.userState = userState
     self.userConfig = userConfig
 
     Task {
-      for await value in Defaults.updates(.theme) {
-        let windowClass = Theme.classFor(value)
-        self.window = await windowClass.init(controller: self)
-      }
+        for await value in Defaults.updates(.theme) {
+            let windowClass = Theme.classFor(value)
+            self.window = await windowClass.init(controller: self)
+        }
     }
+    
+// In the init method
+NotificationCenter.default.addObserver(
+    self,
+    selector: #selector(handleNavigateToGroup(_:)),
+    name: NSNotification.Name("NavigateToGroup"),
+    object: nil
+)
 
     Events.sink { event in
       switch event {
@@ -275,9 +283,112 @@ class Controller {
     alert.addButton(withTitle: "OK")
     alert.runModal()
   }
+  // ...existing code...
+
+ @objc private func handleNavigateToGroup(_ notification: Notification) {
+    print("Received NavigateToGroup notification")
+    guard let userInfo = notification.userInfo else {
+        print("Missing userInfo in notification")
+        return
+    }
+    
+    // Handle both legacy single key and new path-based navigation
+    if let groupKey = userInfo["groupKey"] as? String {
+        navigateToGroupByKey(groupKey)
+    } else if let groupPath = userInfo["groupPath"] as? [String] {
+        navigateToGroupByPath(groupPath)
+    } else {
+        print("Missing or invalid group identifiers in notification")
+    }
+}
+
+private func navigateToGroupByKey(_ groupKey: String) {
+    print("Looking for group with key: \(groupKey)")
+    if let group = findGroupByKey(groupKey, in: userConfig.root) {
+        print("Found group: \(group.key)")
+        // Show the app window
+        show()
+        
+        // Navigate to the group
+        userState.display = group.key
+        userState.currentGroup = group
+        print("Group navigation completed")
+    } else {
+        print("No group found with key: \(groupKey)")
+    }
+}
+
+private func navigateToGroupByPath(_ groupPath: [String]) {
+    print("Looking for group with path: \(groupPath)")
+    
+    // Start at the root group
+    var currentGroup = userConfig.root
+    
+    // Navigate through each component of the path
+    for (index, key) in groupPath.enumerated() {
+        if let nextGroup = findDirectChildGroupByKey(key, in: currentGroup) {
+            currentGroup = nextGroup
+            
+            // If we've reached the end of the path, select this group
+            if index == groupPath.count - 1 {
+                print("Found target group: \(nextGroup.key)")
+                show()
+                userState.display = nextGroup.key
+                userState.currentGroup = nextGroup
+                print("Group navigation completed")
+                return
+            }
+        } else {
+            print("Could not find group with key '\(key)' at path level \(index)")
+            return
+        }
+    }
+}
+
+private func findDirectChildGroupByKey(_ key: String, in parentGroup: Group?) -> Group? {
+    print("Looking for direct child '\(key)' in group: \(parentGroup?.key ?? "root")")
+    guard let parent = parentGroup else { return nil }
+    
+    // Debug: print all available child group keys
+    let childKeys = parent.actions.compactMap { action -> String? in
+        if case let .group(subgroup) = action {
+            return subgroup.key
+        }
+        return nil
+    }
+    print("Available child groups: \(childKeys)")
+    
+    // Search only through direct children
+    for action in parent.actions {
+        if case let .group(subgroup) = action, subgroup.key == key {
+            return subgroup
+        }
+    }
+    
+    return nil
+}
+
+private func findGroupByKey(_ key: String, in parentGroup: Group?) -> Group? {
+  guard let parent = parentGroup else { return nil }
+  
+  // Check if this is the group we're looking for
+  if parent.key == key {
+    return parent
+  }
+  
+  // Search through subgroups
+  for case let .group(subgroup) in parent.actions {
+    if let found = findGroupByKey(key, in: subgroup) {
+      return found
+    }
+  }
+  
+  return nil
+}
 }
 
 class DontActivateConfiguration {
+  // ...existing code...
   let configuration = NSWorkspace.OpenConfiguration()
 
   static var shared = DontActivateConfiguration()

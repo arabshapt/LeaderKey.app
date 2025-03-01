@@ -123,6 +123,48 @@ class AppDelegate: NSObject, NSApplicationDelegate,
       controller.show()
     }
   }
+ // Add this method to handle URL scheme
+func application(_ application: NSApplication, open urls: [URL]) {
+    for url in urls {
+        handleIncomingURL(url)
+    }
+}
+
+private func handleIncomingURL(_ url: URL) {
+    print("Handling URL: \(url.absoluteString)")
+    guard url.scheme?.lowercased() == "leaderkey" else { 
+        print("Invalid scheme: \(url.scheme ?? "nil")")
+        return 
+    }
+    
+    // Check if this is a group URL by looking at the host
+    if url.host?.lowercased() == "group" {
+        // Get all path components after the host
+        let pathComponents = url.pathComponents
+        print("URL components: \(pathComponents)")
+        
+        if pathComponents.count >= 2 {
+            // Remove the first component which is "/"
+            let groupPath = Array(pathComponents.dropFirst())
+            print("Group path: \(groupPath)")
+            
+            // Notify the app to navigate to the specified group path
+            DispatchQueue.main.async {
+                print("Posting NavigateToGroup notification with path: \(groupPath)")
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("NavigateToGroup"),
+                    object: nil,
+                    userInfo: ["groupPath": groupPath]
+                )
+            }
+        } else {
+            print("Missing group path in URL")
+        }
+    } else {
+        print("Invalid URL host: \(url.host ?? "nil"), expected 'group'")
+    }
+}
+
 
   func applicationWillTerminate(_ notification: Notification) {
     config.saveConfig()
