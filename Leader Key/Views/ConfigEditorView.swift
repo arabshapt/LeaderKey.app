@@ -31,7 +31,7 @@ struct GroupContentView: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
-    VStack(spacing: generalPadding) {
+    LazyVStack(spacing: generalPadding) {
       ForEach(group.actions.indices, id: \.self) { index in
         let currentPath = parentPath + [index]
         ActionOrGroupRow(
