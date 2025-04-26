@@ -287,7 +287,7 @@ class AppDelegate: NSObject, NSApplicationDelegate,
   }
 
   func applicationWillTerminate(_ notification: Notification) {
-    config.saveConfig()
+    config.saveCurrentlyEditingConfig()
   }
 
   @IBAction
