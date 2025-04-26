@@ -115,6 +115,14 @@ class AppDelegate: NSObject, NSApplicationDelegate,
         self.show()
       }
     }
+    
+    registerGroupShortcuts()
+    
+    Task {
+      for await _ in Defaults.updates(.groupShortcuts) {
+        self.registerGroupShortcuts()
+      }
+    }
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -127,8 +135,8 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     NSApp.activate(ignoringOtherApps: true)
   }
 
-  func show() {
-    controller.show()
+  func show(completion: (() -> Void)? = nil) {
+    controller.show(completion: completion)
   }
 
   func hide() {
@@ -235,6 +243,41 @@ class AppDelegate: NSObject, NSApplicationDelegate,
           self?.controller.handleKey(key)
         }
         delayMs += 100
+      }
+    }
+  }
+
+  // MARK: - Group Shortcuts
+
+  private func registerGroupShortcuts() {
+    // Clear existing group shortcuts
+    for (groupPath, _) in Defaults[.groupShortcuts] {
+      let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
+      KeyboardShortcuts.disable(shortcutName)
+    }
+    
+    // Register new ones
+    for (groupPath, _) in Defaults[.groupShortcuts] {
+      let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
+      KeyboardShortcuts.onKeyUp(for: shortcutName) { [weak self] in
+        guard let self = self else { return }
+        
+        // Open LeaderKey and navigate to the specific group
+        if let group = self.config.findGroupByPath(groupPath) {
+          if self.controller.window.isKeyWindow {
+            // If already open, just navigate to the group
+            self.controller.userState.clear()
+            self.controller.userState.navigateToGroupPath(group)
+          } else {
+            // Show the window and then navigate to the group
+            self.show {
+              self.controller.userState.clear()
+              self.controller.userState.navigateToGroupPath(group)
+            }
+          }
+        } else {
+          self.show()
+        }
       }
     }
   }

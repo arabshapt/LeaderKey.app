@@ -55,10 +55,15 @@ class Controller {
   }
 
   func show() {
+    show(completion: nil)
+  }
+
+  func show(completion: (() -> Void)? = nil) {
     Events.send(.willActivate)
 
     window.show {
       Events.send(.didActivate)
+      completion?()
     }
 
     if !window.hasCheatsheet || userState.isShowingRefreshState {

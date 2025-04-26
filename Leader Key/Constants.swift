@@ -2,6 +2,16 @@ import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
   static let activate = Self("navigate")
+  
+  // Creates a shortcut name for a specific group ID
+  static func forGroup(_ groupID: String) -> Self {
+    return Self("group_\(groupID)")
+  }
+  
+  // Gets a unique shortcut ID for a group
+  static func getGroupShortcutID(for groupPath: String) -> String {
+    return "group_\(groupPath)"
+  }
 }
 
 // Key map for English characters based on US QWERTY keyboard layout

@@ -1,5 +1,6 @@
 import Cocoa
 import Defaults
+import SwiftUI
 
 var defaultsSuite =
   ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -33,6 +34,9 @@ extension Defaults.Keys {
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
+
+  // Group shortcuts - maps group paths to shortcut names
+  static let groupShortcuts = Key<[String: String]>("groupShortcuts", default: [:], suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
