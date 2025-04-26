@@ -430,11 +430,11 @@ class AppDelegate: NSObject, NSApplicationDelegate,
             self.controller.userState.clear()
             self.controller.userState.navigateToGroupPath(group)
           } else {
-            // Show the window and then navigate to the group
-            self.show {
-              self.controller.userState.clear()
-              self.controller.userState.navigateToGroupPath(group)
-            }
+            // Navigate to the group before showing the window
+            self.controller.userState.clear()
+            self.controller.userState.navigateToGroupPath(group)
+            // Then show the window
+            self.show()
           }
         } else {
           self.show()
