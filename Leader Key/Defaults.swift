@@ -1,6 +1,7 @@
 import Cocoa
 import Defaults
 import SwiftUI
+import KeyboardShortcuts
 
 var defaultsSuite =
   ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -65,4 +66,22 @@ enum ReactivateBehavior: String, Defaults.Serializable {
   case hide
   case reset
   case nothing
+}
+
+// Extend KeyboardShortcuts.Name to add app-specific names
+extension KeyboardShortcuts.Name {
+  static let activate = KeyboardShortcuts.Name("activate")
+  static let activateDefaultOnly = KeyboardShortcuts.Name(
+    "activateDefaultOnly", 
+    default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
+  )
+  static let activateAppSpecific = KeyboardShortcuts.Name(
+    "activateAppSpecific", 
+    default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])
+  )
+
+  // Helper for group-specific shortcuts
+  static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
+    KeyboardShortcuts.Name("group_\(path)")
+  }
 }

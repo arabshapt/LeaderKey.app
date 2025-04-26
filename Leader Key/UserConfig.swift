@@ -16,6 +16,7 @@ class UserConfig: ObservableObject {
 
   let fileName = "config.json"
   let appConfigPrefix = "app."
+  let defaultAppConfigFileName = "app.default.json" // Added default app config filename
   private var appConfigs: [String: Group?] = [:] // Cache for app-specific configs
   private let alertHandler: AlertHandler
   private let fileManager: FileManager
@@ -262,29 +263,58 @@ class UserConfig: ObservableObject {
     }
   }
 
+  // Gets the config for a specific app bundle ID, falling back to app.default.json, then default config.json
   func getConfig(for bundleId: String?) -> Group {
-      guard let bundleId = bundleId, !bundleId.isEmpty else {
-          return root
-      }
+      // 1. Try specific app config
+      if let bundleId = bundleId, !bundleId.isEmpty {
+          // Check cache first
+          if let cachedConfig = appConfigs[bundleId] {
+              return cachedConfig ?? root // Return cached config or default if cache entry is nil (load failed previously)
+          }
 
-      if let cachedConfig = appConfigs[bundleId] {
-          return cachedConfig ?? root
-      }
+          // Construct app-specific config path
+          let appFileName = "\(appConfigPrefix)\(bundleId).json"
+          let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
 
-      let appFileName = "\(appConfigPrefix)\(bundleId).json"
-      let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
-
-      if fileManager.fileExists(atPath: appConfigPath) {
-          if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true, isDefaultConfig: false) {
-              appConfigs[bundleId] = appRoot
-              return appRoot
+          if fileManager.fileExists(atPath: appConfigPath) {
+              // Attempt to load and decode app-specific config
+              if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true, isDefaultConfig: false) {
+                  appConfigs[bundleId] = appRoot // Cache successful load
+                  return appRoot
+              } else {
+                  appConfigs[bundleId] = nil // Cache failed load explicitly as nil
+                  // Fall through to try app.default.json
+              }
           } else {
+              // File doesn't exist, cache this fact by storing nil
               appConfigs[bundleId] = nil
+              // Fall through to try app.default.json
+          }
+      }
+
+      // 2. Try default app config (app.default.json)
+      let defaultAppKey = "app.default"
+      // Check cache first
+      if let cachedDefaultAppConfig = appConfigs[defaultAppKey] {
+          return cachedDefaultAppConfig ?? root // Return cached or default if nil
+      }
+
+      let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
+      if fileManager.fileExists(atPath: defaultAppConfigPath) {
+          // Attempt to load and decode app.default.json
+          if let defaultAppRoot = decodeConfig(from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false) {
+              appConfigs[defaultAppKey] = defaultAppRoot // Cache successful load
+              return defaultAppRoot
+          } else {
+              appConfigs[defaultAppKey] = nil // Cache failed load as nil
+              // Fall through to default config.json
           }
       } else {
-          appConfigs[bundleId] = nil
+          // File doesn't exist, cache this fact
+          appConfigs[defaultAppKey] = nil
       }
 
+      // 3. Fallback to default config.json (already loaded into self.root)
       return root
   }
 

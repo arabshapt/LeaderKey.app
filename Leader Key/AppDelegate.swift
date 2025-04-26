@@ -154,8 +154,15 @@ fileprivate struct KeyboardShortcutsView: View {
   
   var body: some View {
     Settings.Container(contentWidth: 800.0) {
-      Settings.Section(title: "Global Shortcut") {
-        KeyboardShortcuts.Recorder(for: .activate)
+      Settings.Section(title: "Global Shortcuts") {
+        Form {
+            KeyboardShortcuts.Recorder("Activate (App-Specific):", name: .activateAppSpecific)
+            KeyboardShortcuts.Recorder("Activate (Default Only):", name: .activateDefaultOnly)
+        }
+        Text("App-Specific tries to use the config for the active app (e.g., app.com.app.bundle.json), falls back to app.default.json, then config.json. Default Only always uses config.json.")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .padding(.top, 4)
       }
       
       Settings.Section(title: "For Groups", verticalAlignment: .top) {
@@ -259,24 +266,15 @@ class AppDelegate: NSObject, NSApplicationDelegate,
       }
     }
 
-    KeyboardShortcuts.onKeyUp(for: .activate) {
-      if self.controller.window.isKeyWindow {
-        switch Defaults[.reactivateBehavior] {
-        case .hide:
-          self.hide()
-        case .reset:
-          self.controller.userState.clear()
-        case .nothing:
-          return
-        }
-      } else if self.controller.window.isVisible {
-        // should never happen as the window will self-hide when not key
-        self.controller.window.makeKeyAndOrderFront(nil)
-      } else {
-        self.show()
-      }
+    // Register new shortcuts
+    KeyboardShortcuts.onKeyUp(for: .activateDefaultOnly) { [weak self] in
+      self?.handleActivation(type: .defaultOnly)
     }
-    
+
+    KeyboardShortcuts.onKeyUp(for: .activateAppSpecific) { [weak self] in
+      self?.handleActivation(type: .appSpecificWithFallback)
+    }
+
     registerGroupShortcuts()
     
     Task {
@@ -296,12 +294,33 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     NSApp.activate(ignoringOtherApps: true)
   }
 
-  func show(completion: (() -> Void)? = nil) {
-    controller.show(completion: completion)
+  func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
+    controller.show(type: type, completion: completion)
   }
 
   func hide() {
     controller.hide()
+  }
+
+  // Helper function to handle activation logic for both shortcuts
+  private func handleActivation(type: Controller.ActivationType) {
+    if controller.window.isKeyWindow {
+      switch Defaults[.reactivateBehavior] {
+      case .hide:
+        hide()
+      case .reset:
+        controller.userState.clear()
+        // When resetting, ensure we show with the correct config type again
+        show(type: type)
+      case .nothing:
+        return
+      }
+    } else if controller.window.isVisible {
+      // Should never happen as the window will self-hide when not key
+      controller.window.makeKeyAndOrderFront(nil)
+    } else {
+      show(type: type)
+    }
   }
 
   // MARK: - Sparkle Gentle Reminders

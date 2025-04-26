@@ -58,14 +58,27 @@ class Controller {
     show(completion: nil)
   }
 
-  func show(completion: (() -> Void)? = nil) {
+  // Define an enum for activation type
+  enum ActivationType {
+      case defaultOnly
+      case appSpecificWithFallback
+  }
+
+  func show(type: ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
     Events.send(.willActivate)
 
-    // Determine frontmost application and load its config
-    let frontmostApp = NSWorkspace.shared.frontmostApplication
-    let bundleId = frontmostApp?.bundleIdentifier
-    let activeConfigRoot = userConfig.getConfig(for: bundleId)
-    userState.activeRoot = activeConfigRoot // Update UserState
+    // Determine which config to load based on type
+    let configToLoad: Group
+    switch type {
+    case .defaultOnly:
+      configToLoad = userConfig.root // Use the already loaded default config
+    case .appSpecificWithFallback:
+      let frontmostApp = NSWorkspace.shared.frontmostApplication
+      let bundleId = frontmostApp?.bundleIdentifier
+      configToLoad = userConfig.getConfig(for: bundleId) // Use the enhanced getter
+    }
+
+    userState.activeRoot = configToLoad // Update UserState with the selected config
 
     window.show {
       Events.send(.didActivate)
