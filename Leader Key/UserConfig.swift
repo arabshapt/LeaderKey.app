@@ -9,6 +9,8 @@ class UserConfig: ObservableObject {
   @Published var validationErrors: [ValidationError] = []
 
   let fileName = "config.json"
+  let appConfigPrefix = "app."
+  private var appConfigs: [String: Group?] = [:]
   private let alertHandler: AlertHandler
   private let fileManager: FileManager
   private var suppressValidationAlerts = false
@@ -82,6 +84,7 @@ class UserConfig: ObservableObject {
 
   func reloadConfig() {
     Events.send(.willReload)
+    appConfigs = [:]
     loadConfig(suppressAlerts: true)
     Events.send(.didReload)
   }
@@ -188,41 +191,93 @@ class UserConfig: ObservableObject {
   // MARK: - Config Loading
 
   private func loadConfig(suppressAlerts: Bool = false) {
-    guard exists else {
-      root = emptyRoot
-      validationErrors = []
-      return
+    let defaultPath = (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
+    if let loadedRoot = decodeConfig(from: defaultPath, suppressAlerts: suppressAlerts) {
+        self.root = loadedRoot
+        self.validationErrors = ConfigValidator.validate(group: self.root)
+        if !validationErrors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
+          showValidationAlert()
+        }
+    } else {
+        self.root = emptyRoot
+        self.validationErrors = []
+    }
+  }
+
+  func getConfig(for bundleId: String?) -> Group {
+      guard let bundleId = bundleId, !bundleId.isEmpty else {
+          return root
+      }
+
+      if let cachedConfig = appConfigs[bundleId] {
+          return cachedConfig ?? root
+      }
+
+      let appFileName = "\(appConfigPrefix)\(bundleId).json"
+      let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
+
+      if fileManager.fileExists(atPath: appConfigPath) {
+          if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true) {
+              appConfigs[bundleId] = appRoot
+              return appRoot
+          } else {
+              appConfigs[bundleId] = nil
+          }
+      } else {
+          appConfigs[bundleId] = nil
+      }
+
+      return root
+  }
+
+  private func decodeConfig(from filePath: String, suppressAlerts: Bool = false) -> Group? {
+    guard fileManager.fileExists(atPath: filePath) else {
+      if !filePath.contains(appConfigPrefix) {
+          handleError(NSError(domain: "UserConfig", code: 2, userInfo: [NSLocalizedDescriptionKey: "Config file not found at: \(filePath)"]), critical: false)
+      }
+      return nil
     }
 
     do {
-      let configString = try readFile()
+      let configString = try String(contentsOfFile: filePath, encoding: .utf8)
 
       guard let jsonData = configString.data(using: .utf8) else {
         throw NSError(
           domain: "UserConfig",
           code: 1,
           userInfo: [
-            NSLocalizedDescriptionKey: "Failed to encode config file as UTF-8"
+            NSLocalizedDescriptionKey: "Failed to encode config file as UTF-8: \(filePath)"
           ]
         )
       }
 
       let decoder = JSONDecoder()
-      root = try decoder.decode(Group.self, from: jsonData)
+      let decodedRoot = try decoder.decode(Group.self, from: jsonData)
 
-      validationErrors = ConfigValidator.validate(group: root)
-
-      if !validationErrors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
-        let errorCount = validationErrors.count
-        alertHandler.showAlert(
-          style: .warning,
-          message:
-            "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your configuration. Some keys may not work as expected."
-        )
+      let errors = ConfigValidator.validate(group: decodedRoot)
+      if !errors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
+           if !filePath.contains(appConfigPrefix) {
+              validationErrors = errors
+              showValidationAlert()
+           } else {
+              print("Validation issues found in app-specific config: \(filePath)")
+           }
       }
+      return decodedRoot
     } catch {
-      handleError(error, critical: true)
+      let isCritical = !filePath.contains(appConfigPrefix)
+      handleError(error, critical: isCritical)
+      return nil
     }
+  }
+
+  private func showValidationAlert() {
+      let errorCount = validationErrors.count
+      alertHandler.showAlert(
+        style: .warning,
+        message:
+          "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your default configuration (config.json). Some keys may not work as expected."
+      )
   }
 
   // MARK: - Validation

@@ -8,6 +8,7 @@ final class UserState: ObservableObject {
   @Published var display: String?
   @Published var isShowingRefreshState: Bool
   @Published var navigationPath: [Group] = []
+  @Published var activeRoot: Group? // Root group for the current context (app-specific or default)
 
   var currentGroup: Group? {
     return navigationPath.last
@@ -22,12 +23,15 @@ final class UserState: ObservableObject {
     display = lastChar
     self.isShowingRefreshState = isShowingRefreshState
     self.navigationPath = []
+    self.activeRoot = userConfig.root // Initialize with default root
   }
 
   func clear() {
     display = nil
     navigationPath = []
     isShowingRefreshState = false
+    // Reset activeRoot to the default when clearing
+    activeRoot = userConfig.root
   }
 
   func navigateToGroup(_ group: Group) {
@@ -38,9 +42,12 @@ final class UserState: ObservableObject {
   func navigateToGroupPath(_ group: Group) {
     clear()
     
-    // Get the full path to this group
+    // Determine the starting point for building the path
+    let startingRoot = activeRoot ?? userConfig.root
+    
+    // Get the full path to this group relative to the starting root
     var pathGroups: [Group] = []
-    buildGroupPath(from: userConfig.root, to: group, currentPath: [], result: &pathGroups)
+    buildGroupPath(from: startingRoot, to: group, currentPath: [], result: &pathGroups)
     
     // Navigate to each group in the path
     for pathGroup in pathGroups {

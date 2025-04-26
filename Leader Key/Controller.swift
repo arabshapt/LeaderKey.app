@@ -61,6 +61,12 @@ class Controller {
   func show(completion: (() -> Void)? = nil) {
     Events.send(.willActivate)
 
+    // Determine frontmost application and load its config
+    let frontmostApp = NSWorkspace.shared.frontmostApplication
+    let bundleId = frontmostApp?.bundleIdentifier
+    let activeConfigRoot = userConfig.getConfig(for: bundleId)
+    userState.activeRoot = activeConfigRoot // Update UserState
+
     window.show {
       Events.send(.didActivate)
       completion?()
@@ -137,9 +143,11 @@ class Controller {
       return
     }
 
+    // Use the activeRoot from UserState, fallback to default userConfig.root if needed
+    let activeList = userState.activeRoot ?? userConfig.root
     let list =
       (userState.currentGroup != nil)
-      ? userState.currentGroup : userConfig.root
+      ? userState.currentGroup : activeList // Start search from active root
 
     let hit = list?.actions.first { item in
       switch item {
@@ -299,7 +307,7 @@ class Controller {
   }
 
   private func clear() {
-    userState.clear()
+    userState.clear() // This now also resets activeRoot in UserState
   }
 
   private func openURL(_ action: Action) {

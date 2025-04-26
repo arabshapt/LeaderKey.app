@@ -123,8 +123,9 @@ enum Cheatsheet {
     }
 
     var actions: [ActionOrGroup] {
-      (userState.currentGroup != nil)
-        ? userState.currentGroup!.actions : userState.userConfig.root.actions
+      let baseActions = userState.activeRoot?.actions ?? []
+      return (userState.currentGroup != nil)
+        ? userState.currentGroup!.actions : baseActions
     }
 
     var body: some SwiftUI.View {
