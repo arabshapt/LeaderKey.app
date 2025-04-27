@@ -37,9 +37,13 @@ struct GeneralPane: View {
           }
           .labelsHidden()
           .onChange(of: config.selectedConfigKeyForEditing) { newKey in
-              config.loadConfigForEditing(key: newKey)
-              // Reset expanded state when changing file
-              expandedGroups = Set<[Int]>()
+              // First clear expanded groups to avoid any stale references
+              expandedGroups.removeAll()
+              
+              // Use DispatchQueue to ensure state is updated before loading the new config
+              DispatchQueue.main.async {
+                  config.loadConfigForEditing(key: newKey)
+              }
           }
           // TODO: Add buttons for "New App Config" / "Delete App Config"?
         }

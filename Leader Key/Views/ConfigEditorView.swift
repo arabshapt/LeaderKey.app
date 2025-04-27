@@ -33,15 +33,25 @@ struct GroupContentView: View {
   var body: some View {
     LazyVStack(spacing: generalPadding) {
       ForEach(group.actions.indices, id: \.self) { index in
-        let currentPath = parentPath + [index]
-        ActionOrGroupRow(
-          item: binding(for: index),
-          path: currentPath,
-          onDelete: { group.actions.remove(at: index) },
-          onDuplicate: { group.actions.insert(group.actions[index], at: index) },
-          expandedGroups: $expandedGroups
-        )
-        .id(index)
+        if index < group.actions.count {
+          let currentPath = parentPath + [index]
+          ActionOrGroupRow(
+            item: binding(for: index),
+            path: currentPath,
+            onDelete: { 
+              if index < group.actions.count {
+                group.actions.remove(at: index) 
+              }
+            },
+            onDuplicate: { 
+              if index < group.actions.count {
+                group.actions.insert(group.actions[index], at: index) 
+              }
+            },
+            expandedGroups: $expandedGroups
+          )
+          .id(index)
+        }
       }
 
       AddButtons(
@@ -63,8 +73,16 @@ struct GroupContentView: View {
 
   private func binding(for index: Int) -> Binding<ActionOrGroup> {
     Binding(
-      get: { group.actions[index] },
-      set: { group.actions[index] = $0 }
+      get: { 
+        guard index < group.actions.count else {
+          return .action(Action(key: "", type: .application, value: ""))
+        }
+        return group.actions[index] 
+      },
+      set: { 
+        guard index < group.actions.count else { return }
+        group.actions[index] = $0 
+      }
     )
   }
 }

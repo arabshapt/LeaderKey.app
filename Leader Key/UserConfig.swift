@@ -55,7 +55,7 @@ class UserConfig: ObservableObject {
       }
     }
   }
-  
+
   // Find a group by its path
   func findGroupByPath(_ path: String) -> Group? {
     // This should operate on the default config structure
@@ -107,12 +107,30 @@ class UserConfig: ObservableObject {
 
   func reloadConfig() {
     Events.send(.willReload)
+    
+    // Clear caches and reset state
     appConfigs = [:] // Clear app-specific cache
-    discoverConfigFiles() // Re-discover files
+    
+    // Re-discover available config files
+    discoverConfigFiles()
+    
+    // First reload default config with caution
     loadConfig(suppressAlerts: true) // Reload default config into 'root'
-    // Reload the currently selected config for editing
-    loadConfigForEditing(key: selectedConfigKeyForEditing)
-    Events.send(.didReload)
+    
+    // Then safely reload the currently selected config for editing 
+    // Using a dispatch async to separate the state updates
+    DispatchQueue.main.async {
+      // Check if current selection is still valid
+      if self.discoveredConfigFiles[self.selectedConfigKeyForEditing] != nil {
+        self.loadConfigForEditing(key: self.selectedConfigKeyForEditing)
+      } else {
+        // If current selection is no longer valid, fallback to default
+        self.loadConfigForEditing(key: globalDefaultDisplayName)
+      }
+      
+      // Notify that reload is complete
+      Events.send(.didReload)
+    }
   }
 
   // Saves the configuration currently being edited in the Settings window
@@ -387,17 +405,29 @@ class UserConfig: ObservableObject {
       selectedConfigKeyForEditing = globalDefaultDisplayName // Revert selection
       return
     }
-    // Load and decode. Suppress validation alerts for non-default configs during this specific load.
-    let isDefault = (key == globalDefaultDisplayName)
-    if let loadedGroup = decodeConfig(from: filePath, suppressAlerts: !isDefault, isDefaultConfig: isDefault) {
-        currentlyEditingGroup = loadedGroup
-        selectedConfigKeyForEditing = key
-        // Main validationErrors state is only updated when loading/saving the default config itself
+    
+    // Safely clear any cached data first to avoid stale references
+    if key == globalDefaultDisplayName {
+      // If switching to default config, set editing group from existing root
+      // This is safer than reloading from disk
+      currentlyEditingGroup = root
+      selectedConfigKeyForEditing = key
     } else {
-        handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to load config \'\(key)\' for editing from path: \(filePath)"]), critical: false)
-        currentlyEditingGroup = emptyRoot
-        // Consider reverting selectedConfigKeyForEditing? Or let UI show load failed?
-        // For now, keep selection but show empty editor
+      // For other configs, set an empty root first to clear any state
+      // then load from disk with error handling
+      currentlyEditingGroup = emptyRoot
+      
+      // Load and decode. Suppress validation alerts for non-default configs during this specific load.
+      let isDefault = (key == globalDefaultDisplayName)
+      if let loadedGroup = decodeConfig(from: filePath, suppressAlerts: !isDefault, isDefaultConfig: isDefault) {
+          // Only update the state after successfully loading the config
+          currentlyEditingGroup = loadedGroup
+          selectedConfigKeyForEditing = key
+      } else {
+          handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to load config \'\(key)\' for editing from path: \(filePath)"]), critical: false)
+          // Keep using emptyRoot which was set above
+          // Keep selection on the failed key so user can see it failed
+      }
     }
   }
 
