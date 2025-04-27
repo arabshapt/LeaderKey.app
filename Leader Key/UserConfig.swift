@@ -3,7 +3,8 @@ import Combine
 import Defaults
 
 let emptyRoot = Group(key: "🚫", label: "Config error", actions: [])
-let defaultEditKey = "Default"
+let globalDefaultDisplayName = "Global Default"
+let defaultAppConfigDisplayName = "Default App Config"
 
 class UserConfig: ObservableObject {
   // Root for the default config (config.json)
@@ -11,8 +12,8 @@ class UserConfig: ObservableObject {
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
   @Published var validationErrors: [ValidationError] = [] // Errors specific to the default config
-  @Published var discoveredConfigFiles: [String: String] = [:] // Key -> File Path
-  @Published var selectedConfigKeyForEditing: String = defaultEditKey // "Default" or Bundle ID
+  @Published var discoveredConfigFiles: [String: String] = [:] // Display Name -> File Path
+  @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName // Initialize with the new default key
 
   let fileName = "config.json"
   let appConfigPrefix = "app."
@@ -92,15 +93,15 @@ class UserConfig: ObservableObject {
     ensureConfigFileExists() // Ensures default config.json exists
     loadConfig() // Loads the default config into 'root'
     // Initially, load the default config for editing
-    if let defaultPath = discoveredConfigFiles[defaultEditKey] {
+    if let defaultPath = discoveredConfigFiles[globalDefaultDisplayName] {
         currentlyEditingGroup = decodeConfig(from: defaultPath, suppressAlerts: false, isDefaultConfig: true) ?? emptyRoot
-        selectedConfigKeyForEditing = defaultEditKey
+        selectedConfigKeyForEditing = globalDefaultDisplayName
         // Set initial validation errors based on default config
         validationErrors = ConfigValidator.validate(group: root)
     } else {
         // If default doesn't exist somehow, ensure editor has empty root
         currentlyEditingGroup = emptyRoot
-        selectedConfigKeyForEditing = defaultEditKey
+        selectedConfigKeyForEditing = globalDefaultDisplayName
     }
   }
 
@@ -132,13 +133,13 @@ class UserConfig: ObservableObject {
           "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the \'\(selectedConfigKeyForEditing)\' configuration. It will still be saved, but some keys may not work as expected."
       )
       // Update main validationErrors state only if we are saving the default config
-      if selectedConfigKeyForEditing == defaultEditKey {
+      if selectedConfigKeyForEditing == globalDefaultDisplayName {
           self.validationErrors = errors
       } else {
           // Maybe store app-specific errors separately if needed?
           print("Validation issues found in \(selectedConfigKeyForEditing) config, but not setting main validationErrors.")
       }
-    } else if selectedConfigKeyForEditing == defaultEditKey {
+    } else if selectedConfigKeyForEditing == globalDefaultDisplayName {
         // Clear errors if default config is now valid
         self.validationErrors = []
     }
@@ -152,12 +153,12 @@ class UserConfig: ObservableObject {
       try jsonData.write(to: URL(fileURLWithPath: filePath)) // Write to the specific file path
 
       // If the saved config was the default one, update the main 'root' property as well
-      if selectedConfigKeyForEditing == defaultEditKey {
+      if selectedConfigKeyForEditing == globalDefaultDisplayName {
           self.root = currentlyEditingGroup
       }
       // If the saved config was an app-specific one, clear its cache entry
       // so it gets reloaded fresh next time getConfig(for:) is called.
-      if selectedConfigKeyForEditing != defaultEditKey {
+      if selectedConfigKeyForEditing != globalDefaultDisplayName {
           appConfigs[selectedConfigKeyForEditing] = nil
       }
 
@@ -383,11 +384,11 @@ class UserConfig: ObservableObject {
     guard let filePath = discoveredConfigFiles[key] else {
       print("Error: Config file path not found for key: \(key)")
       currentlyEditingGroup = emptyRoot
-      selectedConfigKeyForEditing = defaultEditKey // Revert selection
+      selectedConfigKeyForEditing = globalDefaultDisplayName // Revert selection
       return
     }
     // Load and decode. Suppress validation alerts for non-default configs during this specific load.
-    let isDefault = (key == defaultEditKey)
+    let isDefault = (key == globalDefaultDisplayName)
     if let loadedGroup = decodeConfig(from: filePath, suppressAlerts: !isDefault, isDefaultConfig: isDefault) {
         currentlyEditingGroup = loadedGroup
         selectedConfigKeyForEditing = key
@@ -407,21 +408,27 @@ class UserConfig: ObservableObject {
       let configDir = Defaults[.configDir]
       let configDirUrl = URL(fileURLWithPath: configDir)
 
-      // Add default config first
+      // Add global default config first with the new display name
       let defaultPath = (configDir as NSString).appendingPathComponent(fileName)
       if fileManager.fileExists(atPath: defaultPath) {
-          discovered[defaultEditKey] = defaultPath
+          discovered[globalDefaultDisplayName] = defaultPath
       }
 
       do {
           let fileURLs = try fileManager.contentsOfDirectory(at: configDirUrl, includingPropertiesForKeys: nil)
           for fileURL in fileURLs {
-              let fileName = fileURL.lastPathComponent
-              if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
+              let currentFileName = fileURL.lastPathComponent
+              // Check for default app config
+              if currentFileName == defaultAppConfigFileName {
+                  discovered[defaultAppConfigDisplayName] = fileURL.path
+              }
+              // Check for other app-specific configs
+              else if currentFileName.hasPrefix(appConfigPrefix) && currentFileName.hasSuffix(".json") {
                   // Extract bundle ID
-                  let bundleId = String(fileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
-                  if !bundleId.isEmpty {
-                      discovered[bundleId] = fileURL.path
+                  let bundleId = String(currentFileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
+                  if !bundleId.isEmpty && bundleId != "default" { // Exclude app.default.json here
+                      let appDisplayName = "App: \(bundleId)" // Use new display name format
+                      discovered[appDisplayName] = fileURL.path
                   }
               }
           }
@@ -430,6 +437,18 @@ class UserConfig: ObservableObject {
       }
       // Update the published property
       self.discoveredConfigFiles = discovered
+
+      // Ensure selectedConfigKeyForEditing is valid, reset if not
+      if discovered[selectedConfigKeyForEditing] == nil {
+          print("Warning: Previously selected config key '\(selectedConfigKeyForEditing)' no longer exists. Resetting to Global Default.")
+          selectedConfigKeyForEditing = globalDefaultDisplayName
+          // Force load the default editing group if selection was reset
+          if discovered[globalDefaultDisplayName] != nil {
+               loadConfigForEditing(key: globalDefaultDisplayName)
+          } else {
+              currentlyEditingGroup = emptyRoot // Handle case where even default is gone
+          }
+      }
   }
 
   // MARK: - Validation
@@ -453,7 +472,7 @@ class UserConfig: ObservableObject {
       currentlyEditingGroup = emptyRoot
       validationErrors = []
       // Maybe reset selection?
-      selectedConfigKeyForEditing = defaultEditKey
+      selectedConfigKeyForEditing = globalDefaultDisplayName
       // Re-discover files? Might be problematic if dir access is the issue.
       discoverConfigFiles()
     }

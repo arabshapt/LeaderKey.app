@@ -14,8 +14,13 @@ struct GeneralPane: View {
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
       config.discoveredConfigFiles.keys.sorted { key1, key2 in
-          if key1 == defaultEditKey { return true }
-          if key2 == defaultEditKey { return false }
+          // Prioritize Global Default
+          if key1 == globalDefaultDisplayName { return true }
+          if key2 == globalDefaultDisplayName { return false }
+          // Prioritize Default App Config
+          if key1 == defaultAppConfigDisplayName { return true }
+          if key2 == defaultAppConfigDisplayName { return false }
+          // Sort remaining app-specific keys alphabetically
           return key1 < key2
       }
   }
@@ -131,8 +136,10 @@ struct GeneralPane_Previews: PreviewProvider {
     let previewConfig = UserConfig()
     // Manually add some discovered files for preview
     previewConfig.discoveredConfigFiles = [
-        defaultEditKey: "/path/to/config.json",
-        "com.app.example": "/path/to/app.com.app.example.json"
+        globalDefaultDisplayName: "/path/to/config.json",
+        defaultAppConfigDisplayName: "/path/to/app.default.json",
+        "App: com.app.example": "/path/to/app.com.app.example.json",
+        "App: com.another.app": "/path/to/app.com.another.app.json"
     ]
     previewConfig.currentlyEditingGroup = previewConfig.root // Set initial editing group for preview
 
