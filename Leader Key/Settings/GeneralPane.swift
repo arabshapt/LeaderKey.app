@@ -10,6 +10,8 @@ struct GeneralPane: View {
   @Default(.configDir) var configDir
   @Default(.theme) var theme
   @State private var expandedGroups = Set<[Int]>()
+  @State private var showingRenameAlert = false
+  @State private var newConfigNameInput = ""
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -45,6 +47,19 @@ struct GeneralPane: View {
                   config.loadConfigForEditing(key: newKey)
               }
           }
+
+          Button("Rename") {
+              // Get current custom name or default name to pre-fill
+              if let filePath = config.discoveredConfigFiles[config.selectedConfigKeyForEditing] {
+                  newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? config.selectedConfigKeyForEditing
+                  // Prevent renaming Global Default placeholder if it somehow lost its custom name
+                  if newConfigNameInput == globalDefaultDisplayName { newConfigNameInput = "" }
+              } else {
+                  newConfigNameInput = "" // Should not happen ideally
+              }
+              showingRenameAlert = true
+          }
+          .disabled(config.selectedConfigKeyForEditing == globalDefaultDisplayName)
           // TODO: Add buttons for "New App Config" / "Delete App Config"?
         }
       }
@@ -121,6 +136,42 @@ struct GeneralPane: View {
         LaunchAtLogin.Toggle()
       }
     }
+    .alert("Rename Configuration", isPresented: $showingRenameAlert, actions: {
+        TextField("New Name", text: $newConfigNameInput)
+        Button("Save") {
+            // Get the non-optional selected key first
+            let currentKey = config.selectedConfigKeyForEditing 
+            // Now use if let for the dictionary lookup and combine other checks
+            if let filePath = config.discoveredConfigFiles[currentKey],
+               !newConfigNameInput.isEmpty,
+               newConfigNameInput != globalDefaultDisplayName,
+               newConfigNameInput != defaultAppConfigDisplayName {
+                
+                var currentCustomNames = Defaults[.configFileCustomNames]
+                // Ensure the new name isn't already used (by a custom name or a default name)
+                let existingCustomNamePaths = currentCustomNames.filter { $0.value == newConfigNameInput }.map { $0.key }
+                let existingDefaultNamePaths = config.discoveredConfigFiles.filter { $0.key == newConfigNameInput }.map { $0.value }
+
+                if existingCustomNamePaths.isEmpty && existingDefaultNamePaths.isEmpty {
+                    currentCustomNames[filePath] = newConfigNameInput
+                    Defaults[.configFileCustomNames] = currentCustomNames
+                    // Select the new name and reload to refresh the UI/list
+                    config.selectedConfigKeyForEditing = newConfigNameInput
+                    config.reloadConfig() 
+                } else {
+                    // Handle name collision - maybe show another alert?
+                    print("Error: Name '\(newConfigNameInput)' is already in use.")
+                    // For simplicity, just print error for now.
+                }
+            } else {
+                // Handle invalid input (e.g., empty name or trying to use reserved names)
+                print("Error: Invalid name '\(newConfigNameInput)'. Cannot be empty or a reserved name.")
+            }
+        }
+        Button("Cancel", role: .cancel) { }
+    }, message: {
+        Text("Enter a new name for the configuration '\(config.selectedConfigKeyForEditing)'. Reserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed.")
+    })
   }
 
   private func expandAllGroups(in group: Group, parentPath: [Int]) {

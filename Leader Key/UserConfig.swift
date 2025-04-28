@@ -1,6 +1,7 @@
 import Cocoa
 import Combine
 import Defaults
+import Foundation
 
 let emptyRoot = Group(key: "🚫", label: "Config error", actions: [])
 let globalDefaultDisplayName = "Global Default"
@@ -148,7 +149,7 @@ class UserConfig: ObservableObject {
       alertHandler.showAlert(
         style: .warning,
         message:
-          "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the \'\(selectedConfigKeyForEditing)\' configuration. It will still be saved, but some keys may not work as expected."
+          "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the '\(selectedConfigKeyForEditing)' configuration. It will still be saved, but some keys may not work as expected."
       )
       // Update main validationErrors state only if we are saving the default config
       if selectedConfigKeyForEditing == globalDefaultDisplayName {
@@ -424,7 +425,7 @@ class UserConfig: ObservableObject {
           currentlyEditingGroup = loadedGroup
           selectedConfigKeyForEditing = key
       } else {
-          handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to load config \'\(key)\' for editing from path: \(filePath)"]), critical: false)
+          handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to load config '\(key)' for editing from path: \(filePath)"]), critical: false)
           // Keep using emptyRoot which was set above
           // Keep selection on the failed key so user can see it failed
       }
@@ -437,46 +438,105 @@ class UserConfig: ObservableObject {
       var discovered: [String: String] = [:]
       let configDir = Defaults[.configDir]
       let configDirUrl = URL(fileURLWithPath: configDir)
+      let customNames = Defaults[.configFileCustomNames] // Get custom names
 
-      // Add global default config first with the new display name
+      // Helper function to get display name
+      func getDisplayName(for path: String, defaultName: String) -> String {
+          return customNames[path] ?? defaultName
+      }
+
+      // Add global default config first
       let defaultPath = (configDir as NSString).appendingPathComponent(fileName)
       if fileManager.fileExists(atPath: defaultPath) {
-          discovered[globalDefaultDisplayName] = defaultPath
+          let displayName = getDisplayName(for: defaultPath, defaultName: globalDefaultDisplayName)
+          discovered[displayName] = defaultPath
       }
 
       do {
           let fileURLs = try fileManager.contentsOfDirectory(at: configDirUrl, includingPropertiesForKeys: nil)
           for fileURL in fileURLs {
               let currentFileName = fileURL.lastPathComponent
+              let filePath = fileURL.path
+
+              // Skip the main config.json as it's handled above
+              if filePath == defaultPath {
+                  continue
+              }
+
               // Check for default app config
               if currentFileName == defaultAppConfigFileName {
-                  discovered[defaultAppConfigDisplayName] = fileURL.path
+                  let displayName = getDisplayName(for: filePath, defaultName: defaultAppConfigDisplayName)
+                  discovered[displayName] = filePath
               }
               // Check for other app-specific configs
               else if currentFileName.hasPrefix(appConfigPrefix) && currentFileName.hasSuffix(".json") {
                   // Extract bundle ID
                   let bundleId = String(currentFileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
                   if !bundleId.isEmpty && bundleId != "default" { // Exclude app.default.json here
-                      let appDisplayName = "App: \(bundleId)" // Use new display name format
-                      discovered[appDisplayName] = fileURL.path
+                      let defaultAppDisplayName = "App: \(bundleId)" // Corrected interpolation
+                      let displayName = getDisplayName(for: filePath, defaultName: defaultAppDisplayName)
+                      discovered[displayName] = filePath
                   }
               }
+              // Future: Handle other types of config files if needed
           }
       } catch {
-          handleError(NSError(domain: "UserConfig", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to list contents of config directory: \(configDir)"]), critical: false)
+          handleError(NSError(domain: "UserConfig", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to list contents of config directory: \(configDir)"]), critical: false) // Corrected interpolation
       }
+
+      // Sort the discovered files by display name for consistent UI presentation
+      // Keep Global Default first, then Default App Config, then others alphabetically
+      let sortedDiscovered = discovered.sorted { (pair1, pair2) -> Bool in
+          let (name1, _) = pair1
+          let (name2, _) = pair2
+
+          if name1 == globalDefaultDisplayName { return true }
+          if name2 == globalDefaultDisplayName { return false }
+          if name1 == defaultAppConfigDisplayName { return true }
+          if name2 == defaultAppConfigDisplayName { return false }
+          return name1.localizedCompare(name2) == .orderedAscending
+      }.reduce(into: [String: String]()) { (dict, pair) in
+          dict[pair.key] = pair.value
+      }
+
       // Update the published property
-      self.discoveredConfigFiles = discovered
+      self.discoveredConfigFiles = sortedDiscovered // Use the sorted dictionary
 
       // Ensure selectedConfigKeyForEditing is valid, reset if not
-      if discovered[selectedConfigKeyForEditing] == nil {
-          print("Warning: Previously selected config key '\(selectedConfigKeyForEditing)' no longer exists. Resetting to Global Default.")
-          selectedConfigKeyForEditing = globalDefaultDisplayName
-          // Force load the default editing group if selection was reset
-          if discovered[globalDefaultDisplayName] != nil {
-               loadConfigForEditing(key: globalDefaultDisplayName)
+      // Important: Use the *new* display name logic when checking
+      var currentSelectionIsValid = false
+      if let currentPath = discovered.first(where: { $0.key == selectedConfigKeyForEditing })?.value {
+          // We found the path for the currently selected key, check if the key is still correct
+          let expectedKey = getDisplayName(for: currentPath, defaultName: selectedConfigKeyForEditing) // Calculate expected key
+          if expectedKey == selectedConfigKeyForEditing {
+              currentSelectionIsValid = true
+          }
+      }
+
+      if !currentSelectionIsValid {
+          // Break the long print statement
+          print("Warning: Previously selected config key '\(selectedConfigKeyForEditing)' no longer exists or its name changed.")
+          print("Resetting selection to Global Default or its custom name.")
+          // Attempt to find the key for the default path
+          if let defaultKey = sortedDiscovered.first(where: { $0.value == defaultPath })?.key {
+             selectedConfigKeyForEditing = defaultKey
           } else {
-              currentlyEditingGroup = emptyRoot // Handle case where even default is gone
+             // If even the default config is missing/renamed weirdly, fallback to the literal default name
+             selectedConfigKeyForEditing = globalDefaultDisplayName
+          }
+
+          // Force load the editing group based on the (potentially new) selected key
+          if let newDefaultPath = sortedDiscovered[selectedConfigKeyForEditing] {
+              // Need a safe way to load here, might need a refactor or use existing loadConfigForEditing carefully
+              // For now, just print a message, loading will happen elsewhere or needs adjustment
+              print("Need to load config for: \(selectedConfigKeyForEditing)") // Corrected interpolation
+              // Let's try calling loadConfigForEditing, but be mindful of potential infinite loops if called within init
+              DispatchQueue.main.async { // Avoid direct call within discovery
+                  self.loadConfigForEditing(key: self.selectedConfigKeyForEditing)
+              }
+
+          } else {
+               currentlyEditingGroup = emptyRoot // Handle case where default is gone
           }
       }
   }

@@ -38,6 +38,8 @@ extension Defaults.Keys {
 
   // Group shortcuts - maps group paths to shortcut names
   static let groupShortcuts = Key<[String: String]>("groupShortcuts", default: [:], suite: defaultsSuite)
+  // User-defined names for config files - maps file paths to custom names
+  static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
