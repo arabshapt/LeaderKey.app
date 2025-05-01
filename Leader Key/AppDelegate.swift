@@ -5,367 +5,14 @@ import Settings
 import Sparkle
 import SwiftUI
 import UserNotifications
+import ObjectiveC
 
 let updateLocationIdentifier = "UpdateCheck"
 
-// MARK: - StealthModeManager class implementation
-class StealthModeManager {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    
-    // --- State for Silent Sequence Handling ---
-    private var activeStealthRoot: Group? = nil
-    private var activeStealthGroup: Group? = nil
-    // --- End State ---
+// MARK: - Event Tap Callback
 
-    private var isEnabled = false
-    private weak var appDelegate: AppDelegate? // Use weak reference to avoid retain cycles
-
-    init(appDelegate: AppDelegate) {
-        self.appDelegate = appDelegate
-    }
-
-    func startMonitoring() {
-        guard !isEnabled else { return }
-        print("[StealthModeManager] Attempting to start monitoring...")
-        guard checkAccessibilityPermissions() else {
-            print("[StealthModeManager] Accessibility permissions not granted. Cannot start.")
-            return
-        }
-
-        let eventMask: CGEventMask = UInt64(1 << CGEventType.keyDown.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: stealthModeCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            print("[StealthModeManager] Failed to create event tap")
-            showPermissionsAlert()
-            return
-        }
-
-        eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        isEnabled = true
-        print("[StealthModeManager] Event tap created and enabled. Monitoring started.")
-    }
-
-    func stopMonitoring() {
-        guard isEnabled else { return }
-        print("[StealthModeManager] Stopping monitoring...")
-        resetStealthSequence() // Ensure sequence state is cleared when stopping
-        if let runLoopSource = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-            self.runLoopSource = nil
-        }
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            self.eventTap = nil
-        }
-        isEnabled = false
-        print("[StealthModeManager] Monitoring stopped.")
-    }
-
-    // MARK: - Event Handling
-
-    func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        let type = event.type
-        guard type == .keyDown else { return Unmanaged.passRetained(event) }
-
-        print("[StealthModeManager] handleCGEvent: KeyDown detected.")
-
-        guard let nsEvent = NSEvent(cgEvent: event) else {
-            print("[StealthModeManager] handleCGEvent: Could not create NSEvent from CGEvent.")
-            return Unmanaged.passRetained(event)
-        }
-
-        let keyCode = nsEvent.keyCode
-        let modifiers = nsEvent.modifierFlags
-
-        print("[StealthModeManager] handleCGEvent: Processing keyCode: \(keyCode) Modifiers: \(modifiers.rawValue)")
-        let handled = processKey(keyCode: keyCode, modifiers: modifiers)
-
-        let returnValue = handled ? nil : Unmanaged.passRetained(event)
-        print("[StealthModeManager] handleCGEvent: Event handled by processKey: \(handled). Returning: \(returnValue == nil ? "nil (Consume)" : "event (Pass Through)")")
-        
-        return returnValue
-    }
-
-    private func processKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        // === ALWAYS Check for Escape first ===
-        if keyCode == 53 { // Escape Key Code
-           print("[StealthModeManager] processKey: Escape pressed. Resetting state and potentially hiding.")
-           // Check if the window is visible BEFORE resetting state
-           let shouldHide = self.appDelegate?.controller.window.isVisible ?? false
-           resetStealthSequence() // Clear internal state and userState
-           
-           // If the window was visible, hide it on the main thread
-           if shouldHide {
-               DispatchQueue.main.async {
-                   print("[StealthModeManager] processKey: Hiding window due to Escape press.")
-                   self.appDelegate?.hide()
-               }
-           }
-           return true // Escape was handled, consume the event
-        }
-
-        // === Then, check if we are currently inside a silent sequence ===
-        if activeStealthGroup != nil {
-            return processKeyInSequence(keyCode: keyCode, modifiers: modifiers)
-        }
-
-        // === If NOT inside a sequence AND not Escape, check for activation shortcuts ===
-        return processActivationShortcuts(keyCode: keyCode, modifiers: modifiers)
-    }
-
-    // MARK: - Stealth Mode Key Processing Helpers
-
-    private func processKeyInSequence(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        print("[StealthModeManager] processKeyInSequence: Active stealth sequence. Processing keyCode: \(keyCode)")
-
-        guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
-            print("[StealthModeManager] processKeyInSequence: Could not get key string for sequence input. Aborting sequence.")
-            resetStealthSequence()
-            return false // Event not handled (aborted sequence)
-        }
-        
-        print("[StealthModeManager] processKeyInSequence: Key string for sequence: '\(keyString)'")
-
-        // We already checked for Escape in the main function
-
-        if let currentActiveGroup = activeStealthGroup,
-           let hit = currentActiveGroup.actions.first(where: { $0.item.key == keyString }) {
-            switch hit {
-            case .action(let action):
-                print("[StealthModeManager] processKeyInSequence: Matched action '\(action.displayName)' in sequence. Executing.")
-                guard let controller = appDelegate?.controller else {
-                     print("[StealthModeManager] processKeyInSequence: ERROR - AppDelegate or Controller not found for action execution.")
-                     resetStealthSequence()
-                     return false
-                }
-                // Action execution should implicitly lead to UserState.clear via hide->clear
-                controller.runAction(action)
-                // We still need to ensure hide() is called if not sticky
-                // Let's explicitly hide for now in stealth mode after action
-                appDelegate?.hide()
-                resetStealthSequence()
-                return true // Action was handled
-            case .group(let subgroup):
-                 print("[StealthModeManager] processKeyInSequence: Matched subgroup '\(subgroup.displayName)' in sequence. Navigating.")
-                 activeStealthGroup = subgroup // Internal state update
-                 // *** ADDED: Update shared UserState ***
-                 appDelegate?.controller.userState.navigateToGroup(subgroup)
-                 return true // Navigation was handled
-            }
-        } else {
-            print("[StealthModeManager] processKeyInSequence: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item. Aborting sequence.")
-            // Check if the window is visible BEFORE resetting state
-            let shouldHide = self.appDelegate?.controller.window.isVisible ?? false
-            resetStealthSequence() // Clear internal state and userState
-            
-            // If the window was visible, hide it on the main thread
-            if shouldHide {
-                DispatchQueue.main.async {
-                    print("[StealthModeManager] processKeyInSequence: Hiding window due to invalid key press in sequence.")
-                    self.appDelegate?.hide()
-                }
-            }
-            return true // Consume mistyped key
-        }
-    }
-
-    private func processActivationShortcuts(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        print("[StealthModeManager] processActivationShortcuts: Checking for activation shortcuts for keyCode: \(keyCode)")
-        guard let ad = appDelegate else { return false }
-        
-        let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
-        let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
-        var activationMatched = false // Flag to check if activation happened
-        var initialGroup: Group? = nil // Group to set in UserState
-
-        // Check Group shortcuts FIRST
-        for (groupPath, _) in Defaults[.groupShortcuts] {
-            let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
-            if let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName),
-               matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processActivationShortcuts: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting sequence AND showing window.")
-                guard let targetGroup = ad.config.findGroupByPath(groupPath) else {
-                    print("[StealthModeManager] processActivationShortcuts: ERROR - Could not find group for path '\(groupPath)'")
-                    resetStealthSequence()
-                    return false
-                }
-                
-                // Start internal sequence state
-                activeStealthRoot = ad.config.root
-                activeStealthGroup = targetGroup
-                initialGroup = targetGroup // Set initial group for UserState
-                
-                // Show window and navigate
-                DispatchQueue.main.async {
-                    ad.controller.userState.clear() // Clear first
-                    ad.controller.userState.navigateToGroupPath(targetGroup)
-                    ad.show()
-                }
-                activationMatched = true
-                break // Exit loop once matched
-            }
-        }
-
-        // Check main activation shortcuts only if a group shortcut didn't match
-        if !activationMatched {
-            if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processActivationShortcuts: Matched activateAppSpecific shortcut. Starting sequence AND showing window.")
-                let frontmostApp = NSWorkspace.shared.frontmostApplication
-                let bundleId = frontmostApp?.bundleIdentifier
-                let rootGroup = ad.config.getConfig(for: bundleId) ?? ad.config.root
-                
-                // Start internal sequence state
-                activeStealthRoot = rootGroup
-                activeStealthGroup = rootGroup
-                initialGroup = rootGroup // Set initial group for UserState
-                
-                // Show window using appropriate type
-                DispatchQueue.main.async {
-                    ad.handleActivation(type: .appSpecificWithFallback)
-                }
-                activationMatched = true
-            }
-        }
-
-        if !activationMatched {
-            if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processActivationShortcuts: Matched activateDefaultOnly shortcut. Starting sequence AND showing window.")
-                let rootGroup = ad.config.root
-
-                // Start internal sequence state
-                activeStealthRoot = rootGroup
-                activeStealthGroup = rootGroup
-                initialGroup = rootGroup // Set initial group for UserState
-                
-                // Show window using appropriate type
-                DispatchQueue.main.async {
-                    ad.handleActivation(type: .defaultOnly)
-                }
-                activationMatched = true
-            }
-        }
-
-        // Final check and return
-        if activationMatched {
-            // *** ADDED: Set initial UserState after activation ***
-            if let group = initialGroup {
-                 DispatchQueue.main.async { // Ensure UI updates on main thread
-                    // No need to clear again, done above
-                    ad.controller.userState.navigateToGroup(group)
-                 }
-            }
-             return true // Activation handled
-        } else {
-            // No activation shortcut matched
-            print("[StealthModeManager] processActivationShortcuts: KeyCode \(keyCode) did not match any activation shortcuts.")
-            resetStealthSequence() // Ensure state is clear
-            return false // Event was not handled by StealthModeManager
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func resetStealthSequence() {
-        if activeStealthGroup != nil || activeStealthRoot != nil {
-            print("[StealthModeManager] resetStealthSequence: Resetting state.")
-            activeStealthGroup = nil
-            activeStealthRoot = nil
-            // *** Clear shared UserState only ***
-            DispatchQueue.main.async {
-                 self.appDelegate?.controller.userState.clear()
-            }
-        }
-    }
-
-    private func matchesShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut) -> Bool {
-        let keyCodeMatch = (keyCode == UInt16(shortcut.carbonKeyCode))
-        let modifiersMatch = modifiers.contains(shortcut.modifiers)
-        // Optional: Add detailed logging back if needed for debugging matching issues
-        // print("[StealthModeManager] matchesShortcut: Checking keyCode \(keyCode) vs \(shortcut.carbonKeyCode). Match: \(keyCodeMatch)")
-        // print("[StealthModeManager] matchesShortcut: Checking mods \(modifiers.rawValue) vs \(shortcut.modifiers.rawValue). Match: \(modifiersMatch)")
-        return keyCodeMatch && modifiersMatch
-    }
-
-    private func keyStringForEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
-        if Defaults[.forceEnglishKeyboardLayout] {
-            if let mapped = englishKeymap[keyCode] {
-                return modifiers.contains(.shift) ? mapped.uppercased() : mapped
-            }
-        }
-
-        switch keyCode {
-            case 36: return "\u{21B5}" // Enter
-            case 48: return "\t"     // Tab
-            case 49: return " "      // Space
-            case 51: return "\u{0008}" // Backspace (currently unused in sequence)
-            case 53: return "\u{001B}" // Escape
-            case 126: return "↑"
-            case 125: return "↓"
-            case 123: return "←"
-            case 124: return "→"
-            default: // Attempt fallback for printable chars
-                guard let tempEvent = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return nil }
-                // Ensure flags cast is correct
-                tempEvent.flags = CGEventFlags(rawValue: UInt64(modifiers.rawValue)) 
-                var length = 0
-                var chars = [UniChar](repeating: 0, count: 4) // Allow slightly longer buffer
-                tempEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
-                return length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
-        }
-    }
-    
-    // MARK: - Permissions Helpers (Keep Existing)
-     private func checkAccessibilityPermissions() -> Bool {
-        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
-        let options = [checkOptPrompt: true]
-        let accessibilityEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        
-        if !accessibilityEnabled {
-            showPermissionsAlert()
-        }
-        
-        return accessibilityEnabled
-    }
-    
-    private func showPermissionsAlert() {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Accessibility Permissions Required"
-            alert.informativeText = "Leader Key needs accessibility permissions to use stealth mode. Please enable it in System Preferences > Security & Privacy > Privacy > Accessibility."
-            alert.addButton(withTitle: "Open System Preferences")
-            alert.addButton(withTitle: "Cancel")
-            
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                    NSWorkspace.shared.open(url)
-                } else {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/PreferencePanes/Security.prefPane"))
-                }
-            }
-            
-            Defaults[.useStealthMode] = false
-        }
-    }
-
-    // NOTE: activateGroupWithPath is likely no longer needed within StealthModeManager
-    // as groups are activated via processKey starting a sequence. Consider removing.
-    // private func activateGroupWithPath(_ groupPath: String) { ... }
-
-} // End of StealthModeManager class
-
-// This is the callback function required by CGEvent.tapCreate
-private func stealthModeCallback(
+// This needs to be a top-level function or static method to be used as a C callback.
+private func eventTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
@@ -375,187 +22,84 @@ private func stealthModeCallback(
         return Unmanaged.passRetained(event)
     }
     
-    // Cast the reference to StealthModeManager and call the handler
-    let manager = Unmanaged<StealthModeManager>.fromOpaque(userInfo).takeUnretainedValue()
-    return manager.handleCGEvent(event)
+    // Cast the reference to AppDelegate and call the handler
+    let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+    return appDelegate.handleCGEvent(event)
 }
+
+// MARK: - Key Code Constants (Example)
+
+// Define key codes for easier reference
+struct KeyCodes {
+    static let keyK: UInt16 = 40
+    static let escape: UInt16 = 53
+    // Add other key codes as needed
+}
+
+// MARK: - Associated Object Helpers
+
+// Helper functions for associated objects (needed for storing properties in extensions)
+// Moved *before* the extensions that use them.
+private func getAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer) -> T? {
+    return objc_getAssociatedObject(object, key) as? T
+}
+
+private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ value: T?) {
+    objc_setAssociatedObject(object, key, value, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+}
+
+// MARK: - StealthModeManager class implementation
+// class StealthModeManager {
+// ... entire class definition commented out or deleted ...
+// } // End of StealthModeManager class
+
+// This is the callback function required by CGEvent.tapCreate
+// private func stealthModeCallback(
+// ... function definition commented out or deleted ...
+// ) -> Unmanaged<CGEvent>? {
+// ... function body commented out or deleted ...
+// }
 
 // Supporting types for Shortcuts settings
-fileprivate struct GroupViewModel: Identifiable {
-    let id: UUID
-    let name: String
-    let key: String
-    let path: String
-}
+// fileprivate struct GroupViewModel: Identifiable {
+// ... struct definition commented out or deleted ...
+// }
 
-fileprivate struct GroupShortcutRow: View {
-    @Default(.groupShortcuts) var groupShortcuts
-    let group: GroupViewModel
-    
+// fileprivate struct GroupShortcutRow: View {
+// ... struct definition commented out or deleted ...
+// }
+
+// fileprivate struct GroupShortcutsView: View {
+// ... struct definition commented out or deleted ...
+// }
+
+// MARK: - Settings Panes
+
+// Define the view for the Shortcuts pane
+fileprivate struct KeyboardShortcutsView: View {
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(group.name)
-                    .fontWeight(.medium)
-                
-                Text("Key: \(group.key)")
+        Settings.Container(contentWidth: 450.0) {
+            Settings.Section(title: "Global Activation Shortcuts") {
+                Form {
+                    KeyboardShortcuts.Recorder("Activate (App-Specific):", name: .activateAppSpecific)
+                    KeyboardShortcuts.Recorder("Activate (Default Only):", name: .activateDefaultOnly)
+                }
+                Text("These shortcuts activate Leader Key globally.\nApp-Specific tries to load the config for the frontmost app.\nDefault Only always loads the default config.")
                     .font(.caption)
                     .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            KeyboardShortcuts.Recorder(
-                for: KeyboardShortcuts.Name.forGroup(group.path),
-                onChange: { shortcut in
-                    // When the shortcut changes, update our mapping
-                    updateShortcutMapping(shortcut: shortcut != nil)
-                }
-            )
-            .frame(width: 160)
-        }
-        .padding(.vertical, 4)
-        .onAppear {
-            // When a recorder appears, make sure its path exists in the mapping
-            updateShortcutMapping(shortcut: KeyboardShortcuts.getShortcut(for: .forGroup(group.path)) != nil)
-        }
-    }
-    
-    private func updateShortcutMapping(shortcut: Bool) {
-        var updatedShortcuts = groupShortcuts
-        
-        if shortcut {
-            // Add or update the mapping
-            updatedShortcuts[group.path] = group.path
-        } else {
-            // Remove the mapping if shortcut was cleared
-            updatedShortcuts.removeValue(forKey: group.path)
-        }
-        
-        groupShortcuts = updatedShortcuts
-    }
-}
-
-fileprivate struct GroupShortcutsView: View {
-    @EnvironmentObject private var config: UserConfig
-    @Default(.groupShortcuts) var groupShortcuts
-    @State private var selectedGroup: Group?
-    @State private var searchText = ""
-    
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("Configure global shortcuts for specific groups")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 5)
-            
-            Divider()
-            
-            searchField
-            
-            List {
-                ForEach(filteredGroups, id: \.id) { group in
-                    GroupShortcutRow(group: group)
-                }
-            }
-            .frame(height: 300)
-            .border(Color.primary.opacity(0.2), width: 1)
-        }
-        .padding()
-    }
-    
-    private var searchField: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
-            
-            TextField("Search groups", text: $searchText)
-                .textFieldStyle(PlainTextFieldStyle())
-        }
-        .padding(7)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(8)
-        .padding(.bottom, 10)
-    }
-    
-    private var filteredGroups: [GroupViewModel] {
-        getAllGroups().filter { group in
-            searchText.isEmpty || 
-            group.name.localizedCaseInsensitiveContains(searchText) ||
-            group.key.localizedCaseInsensitiveContains(searchText)
-        }
-    }
-    
-    private func getAllGroups() -> [GroupViewModel] {
-        var result: [GroupViewModel] = []
-        
-        // Add root group
-        let rootPath = config.getGroupPath(for: config.root)
-        result.append(GroupViewModel(
-            id: UUID(),
-            name: config.root.displayName,
-            key: config.root.key ?? "",
-            path: rootPath
-        ))
-        
-        // Recursively add all subgroups
-        findGroups(in: config.root, result: &result)
-        
-        return result
-    }
-    
-    private func findGroups(in group: Group, result: inout [GroupViewModel]) {
-        for item in group.actions {
-            if case .group(let subgroup) = item {
-                let path = config.getGroupPath(for: subgroup)
-                result.append(GroupViewModel(
-                    id: UUID(),
-                    name: subgroup.displayName,
-                    key: subgroup.key ?? "",
-                    path: path
-                ))
-                findGroups(in: subgroup, result: &result)
+                    .padding(.top, 4)
             }
         }
     }
-}
-
-// Local container for Shortcuts settings
-fileprivate struct KeyboardShortcutsView: View {
-  @EnvironmentObject private var config: UserConfig
-  
-  var body: some View {
-    Settings.Container(contentWidth: 800.0) {
-      Settings.Section(title: "Global Shortcuts") {
-        Form {
-            KeyboardShortcuts.Recorder("Activate (App-Specific):", name: .activateAppSpecific)
-            KeyboardShortcuts.Recorder("Activate (Default Only):", name: .activateDefaultOnly)
-        }
-        Text("App-Specific tries to use the config for the active app (e.g., app.com.app.bundle.json), falls back to app.default.json, then config.json. Default Only always uses config.json.")
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .padding(.top, 4)
-      }
-      
-      Settings.Section(title: "For Groups", verticalAlignment: .top) {
-        GroupShortcutsView()
-      }
-    }
-  }
 }
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate,
-  SPUStandardUserDriverDelegate,
-  UNUserNotificationCenterDelegate
-{
+class AppDelegate: NSObject, NSApplicationDelegate {
+    // --- Properties ---
   var controller: Controller!
-
   let statusItem = StatusItem()
   let config = UserConfig()
   var fileMonitor: FileMonitor!
-  var stealthMode: StealthModeManager?
-
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
 
@@ -569,7 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate,
       Settings.Pane(
         identifier: .shortcuts, title: "Shortcuts",
         toolbarIcon: NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboard Shortcuts")!,
-        contentView: { KeyboardShortcutsView().environmentObject(self.config) }
+        contentView: { KeyboardShortcutsView() }
       ),
       Settings.Pane(
         identifier: .advanced, title: "Advanced",
@@ -580,20 +124,16 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     style: .segmentedControl
   )
 
+    // --- Lifecycle Methods ---
   func applicationDidFinishLaunching(_: Notification) {
     guard
       ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1"
     else { return }
-    guard !isRunningTests() else { return }
+        guard !isRunningTests() else { return } // isRunningTests() is in private extension
 
-    UNUserNotificationCenter.current().delegate = self
-    UNUserNotificationCenter.current().requestAuthorization(options: [
-      .alert, .badge, .sound,
-    ]) {
-      granted, error in
-      if let error = error {
-        print("Error requesting notification permission: \(error)")
-      }
+        UNUserNotificationCenter.current().delegate = self // Conformance is in extension
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, error in
+        if let error = error { print("Error requesting notification permission: \(error)") }
     }
 
     NSApp.mainMenu = MainMenu()
@@ -602,282 +142,390 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     state = UserState(userConfig: config)
     controller = Controller(userState: state, userConfig: config)
     
-    // Initialize stealth mode manager
-    stealthMode = StealthModeManager(appDelegate: self)
-
-    Task {
-      for await _ in Defaults.updates(.configDir) {
-        self.fileMonitor?.stopMonitoring()
-
-        self.fileMonitor = FileMonitor(
-          fileURL: config.url,
-          callback: {
-            self.config.reloadConfig()
-          })
-        self.fileMonitor.startMonitoring()
-      }
-    }
-
-    statusItem.handlePreferences = {
-      self.settingsWindowController.show()
-      NSApp.activate(ignoringOtherApps: true)
-    }
-    statusItem.handleReloadConfig = {
-      self.config.reloadConfig()
-    }
-    statusItem.handleRevealConfig = {
-      NSWorkspace.shared.activateFileViewerSelecting([self.config.url])
-    }
-    statusItem.handleCheckForUpdates = {
-      self.updaterController.checkForUpdates(nil)
-    }
-
-    Task {
-      for await value in Defaults.updates(.showMenuBarIcon) {
-        if value {
-          self.statusItem.enable()
-        } else {
-          self.statusItem.disable()
-        }
-      }
-    }
-
-    // Register new shortcuts
-    KeyboardShortcuts.onKeyUp(for: .activateDefaultOnly) { [weak self] in
-      guard !Defaults[.useStealthMode] else {
-        print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for activateDefaultOnly")
-        return
-      }
-      print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for activateDefaultOnly")
-      self?.handleActivation(type: .defaultOnly)
-    }
-
-    KeyboardShortcuts.onKeyUp(for: .activateAppSpecific) { [weak self] in
-      guard !Defaults[.useStealthMode] else {
-        print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for activateAppSpecific")
-        return
-      }
-       print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for activateAppSpecific")
-      self?.handleActivation(type: .appSpecificWithFallback)
-    }
-
-    registerGroupShortcuts()
-    
-    Task {
-      for await _ in Defaults.updates(.groupShortcuts) {
-        self.registerGroupShortcuts()
-      }
-    }
-    
-    // Configure stealth mode observer
-    Task {
-      for await value in Defaults.updates(.useStealthMode) {
-        print("[AppDelegate] Stealth mode setting changed via Defaults: \(value)")
-        if value {
-          print("[AppDelegate] Enabling stealth mode monitoring.")
-          self.stealthMode?.startMonitoring()
-        } else {
-          print("[AppDelegate] Disabling stealth mode monitoring.")
-          self.stealthMode?.stopMonitoring()
-        }
-      }
-    }
-    
-    // Start stealth mode if enabled by default
-    if Defaults[.useStealthMode] {
-      print("[AppDelegate] Stealth mode is enabled on launch. Starting monitoring.")
-      stealthMode?.startMonitoring()
-    } else {
-       print("[AppDelegate] Stealth mode is disabled on launch.")
-    }
+        setupFileMonitor()      // Defined in private extension
+        setupStatusItem()       // Defined in private extension
+        startEventTapMonitoring() // Defined in Event Tap Handling extension
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+        stopEventTapMonitoring() // Defined in Event Tap Handling extension
     config.saveCurrentlyEditingConfig()
   }
 
+    // --- Actions & Window Handling ---
   @IBAction
-  func settingsMenuItemActionHandler(_: NSMenuItem) {
-    settingsWindowController.show()
-    NSApp.activate(ignoringOtherApps: true)
-  }
+  func settingsMenuItemActionHandler(_: NSMenuItem) { settingsWindowController.show(); NSApp.activate(ignoringOtherApps: true) }
 
-  func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
-    controller.show(type: type, completion: completion)
-  }
+    func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) { controller.show(type: type, completion: completion) }
 
-  func hide() {
-    controller.hide()
-  }
+    func hide() { controller.hide() }
 
-  // Helper function to handle activation logic for both shortcuts
+    // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
-    if controller.window.isKeyWindow {
-      switch Defaults[.reactivateBehavior] {
-      case .hide:
-        hide()
-      case .reset:
-        controller.userState.clear()
-        // When resetting, ensure we show with the correct config type again
-        show(type: type)
-      case .nothing:
-        return
-      }
-    } else if controller.window.isVisible {
-      // Should never happen as the window will self-hide when not key
-      controller.window.makeKeyAndOrderFront(nil)
-    } else {
-      show(type: type)
-    }
-  }
-
-  // MARK: - Sparkle Gentle Reminders
-
-  var supportsGentleScheduledUpdateReminders: Bool {
-    return true
-  }
-
-  func standardUserDriverWillHandleShowingUpdate(
-    _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem,
-    state: SPUUserUpdateState
-  ) {
-    NSApp.setActivationPolicy(.regular)
-
-    if !state.userInitiated {
-      NSApp.dockTile.badgeLabel = "1"
-
-      let content = UNMutableNotificationContent()
-      content.title = "Leader Key Update Available"
-      content.body = "Version \(update.displayVersionString) is now available"
-
-      let request = UNNotificationRequest(
-        identifier: updateLocationIdentifier, content: content,
-        trigger: nil)
-      UNUserNotificationCenter.current().add(request)
-    }
-  }
-
-  func standardUserDriverDidReceiveUserAttention(
-    forUpdate update: SUAppcastItem
-  ) {
-    NSApp.dockTile.badgeLabel = ""
-
-    UNUserNotificationCenter.current().removeDeliveredNotifications(
-      withIdentifiers: [
-        updateLocationIdentifier
-      ])
-  }
-
-  func standardUserDriverWillFinishUpdateSession() {
-    NSApp.setActivationPolicy(.accessory)
-  }
-
-  // MARK: - UNUserNotificationCenter Delegate
-
-  func userNotificationCenter(
-    _ center: UNUserNotificationCenter,
-    didReceive response: UNNotificationResponse,
-    withCompletionHandler completionHandler: @escaping () -> Void
-  ) {
-    if response.notification.request.identifier
-      == updateLocationIdentifier
-      && response.actionIdentifier == UNNotificationDefaultActionIdentifier
-    {
-      updaterController.checkForUpdates(nil)
-    }
-    completionHandler()
-  }
-
-  func isRunningTests() -> Bool {
-    let environment = ProcessInfo.processInfo.environment
-    guard environment["XCTestSessionIdentifier"] != nil else { return false }
-    return true
-  }
-
-  // MARK: - URL Scheme Handling
-
-  func application(_ application: NSApplication, open urls: [URL]) {
-    for url in urls {
-      handleURL(url)
-    }
-  }
-
-  private func handleURL(_ url: URL) {
-    guard url.scheme == "leaderkey" else { return }
-
-    show()
-
-    if url.host == "navigate",
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      let queryItems = components.queryItems,
-      let keysParam = queryItems.first(where: { $0.name == "keys" })?.value
-    {
-      let keys = keysParam.split(separator: ",").map(String.init)
-      processKeys(keys)
-    }
-  }
-
-  private func processKeys(_ keys: [String]) {
-    guard !keys.isEmpty else { return }
-
-    controller.handleKey(keys[0])
-
-    if keys.count > 1 {
-      let remainingKeys = Array(keys.dropFirst())
-
-      var delayMs = 100
-      for key in remainingKeys {
-        delay(delayMs) { [weak self] in
-          self?.controller.handleKey(key)
+      if controller.window.isKeyWindow {
+          switch Defaults[.reactivateBehavior] {
+          case .hide:
+              hide()
+                resetSequenceState() // Use method from Event Tap extension
+          case .reset:
+              controller.userState.clear()
+              show(type: type)
+                startSequence(activationType: type) // Use method from Event Tap extension
+          case .nothing:
+                if currentSequenceGroup == nil { startSequence(activationType: type) } 
+              return
+          }
+      } else if controller.window.isVisible {
+          controller.window.makeKeyAndOrderFront(nil)
+            if currentSequenceGroup == nil { startSequence(activationType: type) } 
+      } else {
+          show(type: type)
+          startSequence(activationType: type)
         }
-        delayMs += 100
-      }
-    }
-  }
-
-  // MARK: - Group Shortcuts
-
-  private func registerGroupShortcuts() {
-    // Clear existing group shortcuts
-    for (groupPath, _) in Defaults[.groupShortcuts] {
-      let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
-      KeyboardShortcuts.disable(shortcutName)
     }
     
-    // Register new ones
-    for (groupPath, _) in Defaults[.groupShortcuts] {
-      let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
-      KeyboardShortcuts.onKeyUp(for: shortcutName) { [weak self] in
-        guard !Defaults[.useStealthMode] else {
-            print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for group: \(groupPath)")
+    // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods, 
+    // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers 
+    // (setupFileMonitor, setupStatusItem, isRunningTests) should be defined ONLY in extensions below.
+    // Ensure there are NO duplicate definitions within this main class body.
+}
+
+// MARK: - Private Helpers
+private extension AppDelegate {
+    // ... (setupFileMonitor, setupStatusItem, isRunningTests implementations) ...
+    func setupFileMonitor() {
+        Task {
+            for await _ in Defaults.updates(.configDir) {
+                self.fileMonitor?.stopMonitoring()
+                self.fileMonitor = FileMonitor(fileURL: config.url) { self.config.reloadConfig() }
+                self.fileMonitor.startMonitoring()
+            }
+        }
+    }
+
+    func setupStatusItem() {
+        statusItem.handlePreferences = { self.settingsWindowController.show(); NSApp.activate(ignoringOtherApps: true) }
+        statusItem.handleReloadConfig = { self.config.reloadConfig() }
+        statusItem.handleRevealConfig = { NSWorkspace.shared.activateFileViewerSelecting([self.config.url]) }
+        statusItem.handleCheckForUpdates = { self.updaterController.checkForUpdates(nil) }
+        Task { 
+            for await value in Defaults.updates(.showMenuBarIcon) {
+                DispatchQueue.main.async {
+                    if value {
+                        self.statusItem.enable()
+                    } else {
+                        self.statusItem.disable()
+                    }
+                }
+            }
+        }
+    }
+
+    func isRunningTests() -> Bool {
+        return ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+    }
+}
+
+// MARK: - Sparkle Updates Delegate (SPUStandardUserDriverDelegate)
+extension AppDelegate: SPUStandardUserDriverDelegate {
+    // ... (Delegate method implementations) ...
+    var supportsGentleScheduledUpdateReminders: Bool { return true }
+
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        NSApp.setActivationPolicy(.regular)
+        if !state.userInitiated {
+            NSApp.dockTile.badgeLabel = "1"
+            let content = UNMutableNotificationContent()
+            content.title = "Leader Key Update Available"
+            content.body = "Version \(update.displayVersionString) is now available"
+            let request = UNNotificationRequest(identifier: updateLocationIdentifier, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        NSApp.dockTile.badgeLabel = ""
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [updateLocationIdentifier])
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        NSApp.setActivationPolicy(.accessory)
+    }
+}
+
+// MARK: - User Notifications Delegate (UNUserNotificationCenterDelegate)
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    // ... (Delegate method implementation) ...
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.notification.request.identifier == updateLocationIdentifier && response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            updaterController.checkForUpdates(nil)
+        }
+        completionHandler()
+    }
+}
+
+// MARK: - URL Scheme Handling
+extension AppDelegate {
+    // ... (URL handling method implementations) ...
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { handleURL(url) }
+    }
+
+    private func handleURL(_ url: URL) {
+        guard url.scheme == "leaderkey" else { return }
+        show()
+        if url.host == "navigate",
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let queryItems = components.queryItems,
+           let keysParam = queryItems.first(where: { $0.name == "keys" })?.value
+        {
+            let keys = keysParam.split(separator: ",").map(String.init)
+            processKeys(keys)
+        }
+    }
+
+    private func processKeys(_ keys: [String]) {
+        guard !keys.isEmpty else { return }
+        controller.handleKey(keys[0])
+        if keys.count > 1 {
+            let remainingKeys = Array(keys.dropFirst())
+            var delayMs = 100
+            for key in remainingKeys {
+                delay(delayMs) { [weak self] in self?.controller.handleKey(key) }
+                delayMs += 100
+            }
+        }
+    }
+}
+
+// MARK: - Event Tap Handling
+extension AppDelegate {
+    
+    // --- Event Tap Properties (Using Associated Objects) ---
+    private var eventTap: CFMachPort? {
+        get { getAssociatedObject(self, &AssociatedKeys.eventTap) }
+        set { setAssociatedObject(self, &AssociatedKeys.eventTap, newValue) }
+    }
+    private var runLoopSource: CFRunLoopSource? {
+        get { getAssociatedObject(self, &AssociatedKeys.runLoopSource) }
+        set { setAssociatedObject(self, &AssociatedKeys.runLoopSource, newValue) }
+    }
+    private var isMonitoring: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isMonitoring) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isMonitoring, newValue) }
+    }
+    private var activeRootGroup: Group? {
+        get { getAssociatedObject(self, &AssociatedKeys.activeRootGroup) }
+        set { setAssociatedObject(self, &AssociatedKeys.activeRootGroup, newValue) }
+    }
+    private var currentSequenceGroup: Group? {
+        get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
+        set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
+    }
+    private struct AssociatedKeys {
+        static var eventTap = "eventTap"
+        static var runLoopSource = "runLoopSource"
+        static var isMonitoring = "isMonitoring"
+        static var activeRootGroup = "activeRootGroup"
+        static var currentSequenceGroup = "currentSequenceGroup"
+    }
+
+    // --- Event Tap Logic Methods ---
+    func startEventTapMonitoring() {
+        // ... (implementation as before) ...
+        guard !isMonitoring else { return }
+        print("[AppDelegate] Attempting to start event tap monitoring...")
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap, 
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: eventTapCallback, 
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            print("[AppDelegate] Failed to create event tap. Permissions?")
+            showPermissionsAlert()
             return
         }
-        print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for group: \(groupPath)")
-        // Original logic when not in stealth mode
-        guard let self = self else { return }
-        
-        // Open LeaderKey and navigate to the specific group
-        if let group = self.config.findGroupByPath(groupPath) {
-          if self.controller.window.isKeyWindow {
-            // If already open, just navigate to the group
-            self.controller.userState.clear()
-            self.controller.userState.navigateToGroupPath(group)
-          } else {
-            // Navigate to the group before showing the window
-            self.controller.userState.clear()
-            self.controller.userState.navigateToGroupPath(group)
-            // Then show the window
-            self.show()
-          }
-        } else {
-          self.show()
-        }
-      }
+        self.eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        self.runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        self.isMonitoring = true
+        print("[AppDelegate] Event tap enabled.")
     }
-  }
 
-  // Add public method for activation that can be called from StealthModeManager
-  func activateWithType(_ type: Controller.ActivationType) {
-    handleActivation(type: type)
-  }
+    func stopEventTapMonitoring() {
+        // ... (implementation as before) ...
+        guard isMonitoring else { return }
+        print("[AppDelegate] Stopping event tap.")
+        resetSequenceState()
+        if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes); self.runLoopSource = nil }
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false); self.eventTap = nil }
+        self.isMonitoring = false
+        print("[AppDelegate] Monitoring stopped.")
+    }
+
+    func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        // ... (implementation as before) ...
+        guard event.type == .keyDown else { return Unmanaged.passRetained(event) }
+        guard let nsEvent = NSEvent(cgEvent: event) else { return Unmanaged.passRetained(event) }
+        let handled = processKeyEvent(keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+        return handled ? nil : Unmanaged.passRetained(event)
+    }
+
+    private func processKeyEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        // ... (implementation as before) ...
+        if keyCode == KeyCodes.escape {
+            let shouldHide = self.controller.window.isVisible
+            resetSequenceState()
+            if shouldHide { DispatchQueue.main.async { self.hide() } }
+            return true
+        }
+        if currentSequenceGroup != nil { return processKeyInSequence(keyCode: keyCode, modifiers: modifiers) }
+        return checkActivationShortcuts(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    private func processKeyInSequence(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        // ... (implementation as before) ...
+        guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
+            let shouldHide = self.controller.window.isVisible; resetSequenceState()
+            if shouldHide { DispatchQueue.main.async { self.hide() } }; return true
+        }
+        if let currentGroup = currentSequenceGroup, let hit = currentGroup.actions.first(where: { $0.item.key == keyString }) {
+            switch hit {
+            case .action(let action): controller.runAction(action); if !isInStickyMode(modifiers) { hide() }; resetSequenceState(); return true
+            case .group(let subgroup): currentSequenceGroup = subgroup; controller.userState.navigateToGroup(subgroup); return true
+            }
+        } else {
+            let shouldHide = self.controller.window.isVisible; resetSequenceState()
+            if shouldHide { DispatchQueue.main.async { self.hide() } }; return true
+        }
+    }
+
+    private func checkActivationShortcuts(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        print("[AppDelegate] checkActivationShortcuts: keyCode: \(keyCode)")
+
+        let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
+        let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
+        
+        var activationType: Controller.ActivationType? = nil
+
+        // Check App-Specific Shortcut
+        if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] checkActivationShortcuts: Matched App-Specific shortcut.")
+            activationType = .appSpecificWithFallback
+        }
+        // Check Default Only Shortcut
+        else if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] checkActivationShortcuts: Matched Default Only shortcut.")
+            activationType = .defaultOnly
+        }
+
+        if let type = activationType {
+            handleActivation(type: type) // Show/hide/reset window
+            return true // Activation shortcut was handled
+        } else {
+            print("[AppDelegate] checkActivationShortcuts: No match.")
+            return false // Event was not an activation shortcut
+        }
+    }
+
+    private func matchesShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        // Compare the key code
+        guard keyCode == shortcut.carbonKeyCode else { return false }
+        
+        // Compare the modifiers - ensuring ONLY the required modifiers are present
+        // (NSEvent.ModifierFlags includes flags for key state like Caps Lock, which we usually want to ignore)
+        let requiredModifiers = shortcut.modifiers
+        let relevantFlags: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
+        let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
+        
+        return incomingRelevantModifiers == requiredModifiers
+    }
+
+    private func startSequence(activationType: Controller.ActivationType) {
+        print("[AppDelegate] startSequence: type: \(activationType)")
+        let rootGroup: Group
+        switch activationType {
+        case .defaultOnly:
+            rootGroup = config.root
+        case .appSpecificWithFallback:
+            let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            rootGroup = config.getConfig(for: bundleId)
+        }
+        self.activeRootGroup = rootGroup
+        self.currentSequenceGroup = rootGroup
+        if self.controller.window.isVisible {
+            DispatchQueue.main.async {
+                self.controller.userState.navigateToGroup(rootGroup)
+            }
+        }
+    }
+
+    private func resetSequenceState() {
+        // ... (implementation as before) ...
+        if currentSequenceGroup != nil || activeRootGroup != nil {
+            self.currentSequenceGroup = nil; self.activeRootGroup = nil
+            DispatchQueue.main.async { self.controller.userState.clear() }
+        }
+    }
+
+    private func isInStickyMode(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        let config = Defaults[.modifierKeyConfiguration]
+        // Expand switch statement to fix line length
+        switch config {
+        case .controlGroupOptionSticky:
+            return modifierFlags.contains(.option)
+        case .optionGroupControlSticky:
+            return modifierFlags.contains(.control)
+        }
+    }
+
+    private func keyStringForEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
+        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] { return modifiers.contains(.shift) ? mapped.uppercased() : mapped }
+        switch keyCode {
+            case 36: return "\u{21B5}"; case 48: return "\t"; case 49: return " "; case 51: return "\u{0008}"; case KeyCodes.escape: return "\u{001B}"
+            case 126: return "↑"; case 125: return "↓"; case 123: return "←"; case 124: return "→"
+            default:
+                guard let tempEvent = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return nil }
+                tempEvent.flags = CGEventFlags(rawValue: UInt64(modifiers.rawValue))
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                tempEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
+                return length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
+        }
+    }
+
+    // --- Permissions Helpers ---
+    private func checkAccessibilityPermissions() -> Bool {
+        // ... (implementation as before) ...
+        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
+        let options = [checkOptPrompt: false]; let enabled = AXIsProcessTrustedWithOptions(options as CFDictionary); return enabled
+    }
+    
+    private func showPermissionsAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Accessibility Permissions May Be Required"
+            // Final final attempt at formatting
+            let line1 = "To activate Leader Key while another application is active, "
+            let line2 = "macOS requires Accessibility permissions.\n\n"
+            let line3 = "Consider enabling it in: "
+            let line4 = "System Settings > Privacy & Security > Accessibility."
+            alert.informativeText = line1 + line2 + line3 + line4
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                let backupPath = "/System/Library/PreferencePanes/Security.prefPane"
+                if let url = URL(string: urlString) { NSWorkspace.shared.open(url) }
+                else { NSWorkspace.shared.open(URL(fileURLWithPath: backupPath)) }
+            }
+        }
+    }
 }
+
+// NOTE: Associated object helpers are now defined globally above AppDelegate.

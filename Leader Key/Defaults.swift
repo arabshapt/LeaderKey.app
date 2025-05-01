@@ -36,10 +36,6 @@ extension Defaults.Keys {
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
     
-  // Stealth mode toggle
-  static let useStealthMode = Key<Bool>(
-    "useStealthMode", default: false, suite: defaultsSuite)
-
   // Group shortcuts - maps group paths to shortcut names
   static let groupShortcuts = Key<[String: String]>("groupShortcuts", default: [:], suite: defaultsSuite)
   // User-defined names for config files - maps file paths to custom names
@@ -87,7 +83,7 @@ extension KeyboardShortcuts.Name {
   )
 
   // Helper for group-specific shortcuts
-  static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
-    KeyboardShortcuts.Name("group_\(path)")
-  }
+  // static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
+  //   KeyboardShortcuts.Name("group_\(path)")
+  // }
 }

@@ -7,7 +7,6 @@ struct AdvancedPane: View {
   @Default(.forceEnglishKeyboardLayout) var forceEnglishKeyboardLayout
   @Default(.modifierKeyConfiguration) var modifierKeyConfiguration
   @Default(.reactivateBehavior) var reactivateBehavior
-  @Default(.useStealthMode) var useStealthMode
 
   var body: some View {
     Settings.Container(contentWidth: 450.0) {
@@ -57,45 +56,6 @@ struct AdvancedPane: View {
           .help(
             "What to do when the activation key is pressed while the window is already visible."
           )
-        }
-      }
-      
-      Settings.Section(
-        title: "Stealth Mode",
-        description: "Configure stealth mode behavior."
-      ) {
-        Form {
-          Toggle(isOn: $useStealthMode) {
-            Text("Enable stealth mode")
-              .frame(minWidth: 150, alignment: .leading)
-          }
-          .padding(.trailing, 100)
-          .help(
-            "When enabled, Leader Key will use a non-blocking event tap to monitor keypresses without interfering with other applications."
-          )
-          
-          VStack(alignment: .leading, spacing: 8) {
-            Text("What is Stealth Mode?")
-              .fontWeight(.medium)
-            
-            Text("Stealth Mode monitors keypresses without consuming them, allowing your shortcuts to work even when other apps have keyboard focus. This means:")
-              .fixedSize(horizontal: false, vertical: true)
-            
-            Text("• Your shortcuts won't interfere with other apps")
-              .fixedSize(horizontal: false, vertical: true)
-            Text("• Leader Key can recognize your shortcuts without taking focus")
-              .fixedSize(horizontal: false, vertical: true)
-            Text("• All shortcuts continue to work exactly as configured")
-              .fixedSize(horizontal: false, vertical: true)
-            
-            Text("Note: Stealth mode requires Accessibility permissions. You may need to add Leader Key to System Settings > Privacy & Security > Accessibility.")
-              .font(.caption)
-              .foregroundColor(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-              .padding(.top, 8)
-          }
-          .padding(.top, 8)
-          .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
     }
