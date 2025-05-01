@@ -155,32 +155,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
-      if controller.window.isKeyWindow {
+      if controller.window.isVisible { // Check visibility first
           switch Defaults[.reactivateBehavior] {
           case .hide:
+              // If behavior is hide, just hide and reset immediately when visible.
               hide()
-                resetSequenceState() // Use method from Event Tap extension
+              resetSequenceState()
+              return // Stop processing here
           case .reset:
+              // If window wasn't key, make it key first.
+              if !controller.window.isKeyWindow {
+                  print("[AppDelegate] handleActivation (Reset): Window visible but not key. Activating.")
+                  NSApp.activate(ignoringOtherApps: true)
+                  controller.window.makeKeyAndOrderFront(nil)
+              }
+              // Clear state, reset sequence, start new sequence.
               controller.userState.clear()
-              show(type: type)
-                startSequence(activationType: type) // Use method from Event Tap extension
+              resetSequenceState() // Clear just in case
+              startSequence(activationType: type)
           case .nothing:
-                if currentSequenceGroup == nil { startSequence(activationType: type) } 
-              return
+              // If window wasn't key, make it key first.
+              if !controller.window.isKeyWindow {
+                  print("[AppDelegate] handleActivation (Nothing): Window visible but not key. Activating.")
+                  NSApp.activate(ignoringOtherApps: true)
+                  controller.window.makeKeyAndOrderFront(nil)
+              }
+              // Only start a sequence if one isn't already active.
+              if currentSequenceGroup == nil { startSequence(activationType: type) }
           }
-      } else if controller.window.isVisible {
-          // Window is visible but not key: Activate app THEN make key
-          print("[AppDelegate] handleActivation: Window visible but not key. Activating app.")
-          NSApp.activate(ignoringOtherApps: true)
-          controller.window.makeKeyAndOrderFront(nil)
-          // Start sequence only if it wasn't already active
-            if currentSequenceGroup == nil { startSequence(activationType: type) } 
       } else {
           // Window wasn't visible, show it AND start the sequence
           show(type: type)
           startSequence(activationType: type)
-        }
-    }
+      }
+  }
     
     // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods, 
     // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers 
@@ -375,22 +383,53 @@ extension AppDelegate {
     }
 
     private func processKeyEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        // ... (implementation as before) ...
+        // 1. Check for activation shortcuts FIRST
+        let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
+        let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
+        var matchedActivationType: Controller.ActivationType? = nil
+
+        // Check App-Specific Shortcut
+        if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] processKeyEvent: Matched App-Specific shortcut.")
+            matchedActivationType = .appSpecificWithFallback
+        }
+        // Check Default Only Shortcut
+        else if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] processKeyEvent: Matched Default Only shortcut.")
+            matchedActivationType = .defaultOnly
+        }
+
+        // 2. If an activation shortcut was pressed, handle it
+        if let type = matchedActivationType {
+            handleActivation(type: type) // This handles show/hide/reset logic
+            return true // Consume the activation shortcut press
+        }
+
+        // 3. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let shouldHide = self.controller.window.isVisible
             resetSequenceState()
             if shouldHide { DispatchQueue.main.async { self.hide() } }
-            return true
+            return true // Consume the Escape press
         }
-        if currentSequenceGroup != nil { return processKeyInSequence(keyCode: keyCode, modifiers: modifiers) }
-        return checkActivationShortcuts(keyCode: keyCode, modifiers: modifiers)
+
+        // 4. If NOT activation or Escape, check if we are in a sequence
+        if currentSequenceGroup != nil {
+            // processKeyInSequence now only shakes on error or processes valid keys,
+            // always returning true to consume the event within the sequence.
+            return processKeyInSequence(keyCode: keyCode, modifiers: modifiers)
+        }
+
+        // 5. If NOT activation, Escape, or in a sequence, let the event pass through
+        print("[AppDelegate] processKeyEvent: No activation, Escape, or active sequence. Passing event.")
+        return false
     }
 
     private func processKeyInSequence(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        // ... (implementation as before) ...
         guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
-            let shouldHide = self.controller.window.isVisible; resetSequenceState()
-            if shouldHide { DispatchQueue.main.async { self.hide() } }; return true
+            // Invalid keyString mapping - just shake
+            DispatchQueue.main.async { self.controller.window.shake() }
+            return true // Event handled (by shaking)
         }
         if let currentGroup = currentSequenceGroup, let hit = currentGroup.actions.first(where: { $0.item.key == keyString }) {
             switch hit {
@@ -398,50 +437,10 @@ extension AppDelegate {
             case .group(let subgroup): currentSequenceGroup = subgroup; controller.userState.navigateToGroup(subgroup); return true
             }
         } else {
-            let shouldHide = self.controller.window.isVisible; resetSequenceState()
-            if shouldHide { DispatchQueue.main.async { self.hide() } }; return true
+            // Key not found in the current group - just shake
+            DispatchQueue.main.async { self.controller.window.shake() }
+            return true // Event handled (by shaking)
         }
-    }
-
-    private func checkActivationShortcuts(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        print("[AppDelegate] checkActivationShortcuts: keyCode: \(keyCode)")
-
-        let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
-        let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
-        
-        var activationType: Controller.ActivationType? = nil
-
-        // Check App-Specific Shortcut
-        if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[AppDelegate] checkActivationShortcuts: Matched App-Specific shortcut.")
-            activationType = .appSpecificWithFallback
-        }
-        // Check Default Only Shortcut
-        else if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[AppDelegate] checkActivationShortcuts: Matched Default Only shortcut.")
-            activationType = .defaultOnly
-        }
-
-        if let type = activationType {
-            handleActivation(type: type) // Show/hide/reset window
-            return true // Activation shortcut was handled
-        } else {
-            print("[AppDelegate] checkActivationShortcuts: No match.")
-            return false // Event was not an activation shortcut
-        }
-    }
-
-    private func matchesShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut) -> Bool {
-        // Compare the key code
-        guard keyCode == shortcut.carbonKeyCode else { return false }
-        
-        // Compare the modifiers - ensuring ONLY the required modifiers are present
-        // (NSEvent.ModifierFlags includes flags for key state like Caps Lock, which we usually want to ignore)
-        let requiredModifiers = shortcut.modifiers
-        let relevantFlags: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
-        let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
-        
-        return incomingRelevantModifiers == requiredModifiers
     }
 
     private func startSequence(activationType: Controller.ActivationType) {
@@ -533,6 +532,20 @@ extension AppDelegate {
                 else { NSWorkspace.shared.open(URL(fileURLWithPath: backupPath)) }
             }
         }
+    }
+
+    // Add the missing helper function back
+    private func matchesShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        // Compare the key code
+        guard keyCode == shortcut.carbonKeyCode else { return false }
+
+        // Compare the modifiers - ensuring ONLY the required modifiers are present
+        // (NSEvent.ModifierFlags includes flags for key state like Caps Lock, which we usually want to ignore)
+        let requiredModifiers = shortcut.modifiers
+        let relevantFlags: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
+        let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
+
+        return incomingRelevantModifiers == requiredModifiers
     }
 }
 
