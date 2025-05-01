@@ -286,7 +286,7 @@ class Controller {
     }
   }
 
-  private func runGroup(_ group: Group) {
+  func runGroup(_ group: Group) {
     for groupOrAction in group.actions {
       switch groupOrAction {
       case .group(let group):
@@ -297,7 +297,7 @@ class Controller {
     }
   }
 
-  private func runAction(_ action: Action) {
+  func runAction(_ action: Action) {
     switch action.type {
     case .application:
       NSWorkspace.shared.openApplication(

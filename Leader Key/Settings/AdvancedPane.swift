@@ -137,6 +137,7 @@ struct AdvancedPane: View {
         Defaults.Toggle("Show Leader Key in menubar", key: .showMenuBarIcon)
         Defaults.Toggle(
           "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
+        Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
       }
     }
   }

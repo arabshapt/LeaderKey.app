@@ -8,6 +8,322 @@ import UserNotifications
 
 let updateLocationIdentifier = "UpdateCheck"
 
+// MARK: - StealthModeManager class implementation
+class StealthModeManager {
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    
+    // --- State for Silent Sequence Handling ---
+    private var activeStealthRoot: Group? = nil
+    private var activeStealthGroup: Group? = nil
+    private var lastKeyTime: Date = Date() // Tracks time since last key press *in sequence* or activation
+    private var sequenceTimeoutInterval: TimeInterval = 1.0 // Timeout for the sequence
+    // --- End State ---
+
+    private var isEnabled = false
+    private weak var appDelegate: AppDelegate? // Use weak reference to avoid retain cycles
+
+    init(appDelegate: AppDelegate) {
+        self.appDelegate = appDelegate
+    }
+
+    func startMonitoring() {
+        guard !isEnabled else { return }
+        print("[StealthModeManager] Attempting to start monitoring...")
+        guard checkAccessibilityPermissions() else {
+            print("[StealthModeManager] Accessibility permissions not granted. Cannot start.")
+            return
+        }
+
+        let eventMask: CGEventMask = UInt64(1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: stealthModeCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            print("[StealthModeManager] Failed to create event tap")
+            showPermissionsAlert()
+            return
+        }
+
+        eventTap = tap
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        isEnabled = true
+        print("[StealthModeManager] Event tap created and enabled. Monitoring started.")
+    }
+
+    func stopMonitoring() {
+        guard isEnabled else { return }
+        print("[StealthModeManager] Stopping monitoring...")
+        resetStealthSequence() // Ensure sequence state is cleared when stopping
+        if let runLoopSource = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            self.runLoopSource = nil
+        }
+        if let eventTap = eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            self.eventTap = nil
+        }
+        isEnabled = false
+        print("[StealthModeManager] Monitoring stopped.")
+    }
+
+    // MARK: - Event Handling
+
+    func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let type = event.type
+        guard type == .keyDown else { return Unmanaged.passRetained(event) }
+
+        print("[StealthModeManager] handleCGEvent: KeyDown detected.")
+
+        // Check for timeout *only if* a sequence is active
+        let now = Date()
+        if activeStealthGroup != nil { // Check if sequence active
+            if now.timeIntervalSince(lastKeyTime) > sequenceTimeoutInterval {
+                print("[StealthModeManager] handleCGEvent: Sequence timed out.")
+                resetStealthSequence() // Reset state on timeout
+                // Allow this key press to be processed below as a potential *new* sequence starter
+            }
+        }
+
+        guard let nsEvent = NSEvent(cgEvent: event) else {
+            print("[StealthModeManager] handleCGEvent: Could not create NSEvent from CGEvent.")
+            return Unmanaged.passRetained(event)
+        }
+
+        let keyCode = nsEvent.keyCode
+        let modifiers = nsEvent.modifierFlags
+
+        print("[StealthModeManager] handleCGEvent: Processing keyCode: \(keyCode) Modifiers: \(modifiers.rawValue)")
+        processKey(keyCode: keyCode, modifiers: modifiers) // Pass keyCode and modifiers
+
+        return Unmanaged.passRetained(event)
+    }
+
+    private func processKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+
+        // === Are we currently inside a silent sequence? ===
+        if activeStealthGroup != nil {
+            print("[StealthModeManager] processKey: Active stealth sequence. Processing keyCode: \(keyCode)")
+            lastKeyTime = Date() // Keep sequence alive
+
+            // Convert keyCode to String key for matching within the group
+            guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
+                print("[StealthModeManager] processKey: Could not get key string for sequence input. Aborting sequence.")
+                resetStealthSequence()
+                return
+            }
+
+            print("[StealthModeManager] processKey: Key string for sequence: '\(keyString)'")
+
+            // Handle special keys within sequence
+            if keyCode == 53 { // Escape Key Code
+                print("[StealthModeManager] processKey: Escape pressed. Cancelling stealth sequence.")
+                resetStealthSequence()
+                return
+            }
+            // TODO: Add Backspace (keyCode 51) handling to navigate up?
+            // if keyCode == 51 { ... navigateToParentGroup() ... return }
+
+            // Find matching action or group within the current activeStealthGroup
+            if let currentActiveGroup = activeStealthGroup,
+               let hit = currentActiveGroup.actions.first(where: { $0.item.key == keyString }) {
+
+                switch hit {
+                case .action(let action):
+                    print("[StealthModeManager] processKey: Matched action '\(action.displayName)' in sequence. Executing.")
+                    guard let controller = appDelegate?.controller else {
+                         print("[StealthModeManager] processKey: ERROR - AppDelegate or Controller not found for action execution.")
+                         resetStealthSequence()
+                         return
+                    }
+                    controller.runAction(action) // Call internal runAction
+                    resetStealthSequence() // Sequence ends after action execution
+                    return
+                case .group(let subgroup):
+                    print("[StealthModeManager] processKey: Matched subgroup '\(subgroup.displayName)' in sequence. Navigating.")
+                    activeStealthGroup = subgroup // Navigate deeper
+                    // Sequence continues
+                    return
+                }
+            } else {
+                // No match found within the active group
+                print("[StealthModeManager] processKey: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item in the active stealth group. Aborting sequence.")
+                resetStealthSequence()
+                // Don't return here, let the key be processed below as a potential new activation
+                // (This allows typing Esc to cancel, then immediately typing an activation shortcut)
+            }
+        }
+
+        // === If NOT inside a sequence (or if key didn't match in sequence), check for activation shortcuts ===
+
+        print("[StealthModeManager] processKey: Checking for activation shortcuts for keyCode: \(keyCode)")
+        guard let ad = appDelegate else { // Ensure appDelegate exists
+            print("[StealthModeManager] processKey: ERROR - AppDelegate is nil, cannot check shortcuts.")
+            return
+        }
+        
+        let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
+        let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
+
+        // --- Check Activation Shortcuts ---
+
+        // Check Group shortcuts FIRST (most specific)
+        for (groupPath, _) in Defaults[.groupShortcuts] {
+            let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
+            if let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName),
+               matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+                print("[StealthModeManager] processKey: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting silent sequence.")
+                guard let targetGroup = ad.config.findGroupByPath(groupPath) else {
+                    print("[StealthModeManager] processKey: ERROR - Could not find group for path '\(groupPath)'")
+                    resetStealthSequence()
+                    return
+                }
+                // Root is the default config's root, active group is the target
+                activeStealthRoot = ad.config.root
+                activeStealthGroup = targetGroup
+                lastKeyTime = Date() // Start the sequence timer
+                return // Activation successful
+            }
+        }
+
+        // Check main activation shortcuts
+        if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[StealthModeManager] processKey: Matched activateAppSpecific shortcut. Starting silent sequence.")
+            let frontmostApp = NSWorkspace.shared.frontmostApplication
+            let bundleId = frontmostApp?.bundleIdentifier
+            let rootGroup = ad.config.getConfig(for: bundleId) ?? ad.config.root
+            
+            activeStealthRoot = rootGroup
+            activeStealthGroup = rootGroup
+            lastKeyTime = Date() // Start the sequence timer
+            return // Activation successful
+        }
+
+        if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[StealthModeManager] processKey: Matched activateDefaultOnly shortcut. Starting silent sequence.")
+            let rootGroup = ad.config.root
+            
+            activeStealthRoot = rootGroup
+            activeStealthGroup = rootGroup
+            lastKeyTime = Date() // Start the sequence timer
+            return // Activation successful
+        }
+
+        // No activation shortcut matched this time
+        print("[StealthModeManager] processKey: KeyCode \(keyCode) did not match any activation shortcuts.")
+        // No need to reset state here, as it should already be nil if we reached this point
+    }
+
+    // MARK: - Helpers
+
+    private func resetStealthSequence() {
+        // Check if state actually needs resetting to avoid redundant logs
+        if activeStealthGroup != nil || activeStealthRoot != nil {
+            print("[StealthModeManager] resetStealthSequence: Resetting state.")
+            activeStealthGroup = nil
+            activeStealthRoot = nil
+        }
+    }
+
+    private func matchesShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut) -> Bool {
+        let keyCodeMatch = (keyCode == UInt16(shortcut.carbonKeyCode))
+        let modifiersMatch = modifiers.contains(shortcut.modifiers)
+        // Optional: Add detailed logging back if needed for debugging matching issues
+        // print("[StealthModeManager] matchesShortcut: Checking keyCode \(keyCode) vs \(shortcut.carbonKeyCode). Match: \(keyCodeMatch)")
+        // print("[StealthModeManager] matchesShortcut: Checking mods \(modifiers.rawValue) vs \(shortcut.modifiers.rawValue). Match: \(modifiersMatch)")
+        return keyCodeMatch && modifiersMatch
+    }
+
+    private func keyStringForEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
+        if Defaults[.forceEnglishKeyboardLayout] {
+            if let mapped = englishKeymap[keyCode] {
+                return modifiers.contains(.shift) ? mapped.uppercased() : mapped
+            }
+        }
+
+        switch keyCode {
+            case 36: return "\u{21B5}" // Enter
+            case 48: return "\t"     // Tab
+            case 49: return " "      // Space
+            case 51: return "\u{0008}" // Backspace (currently unused in sequence)
+            case 53: return "\u{001B}" // Escape
+            case 126: return "↑"
+            case 125: return "↓"
+            case 123: return "←"
+            case 124: return "→"
+            default: // Attempt fallback for printable chars
+                guard let tempEvent = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return nil }
+                // Ensure flags cast is correct
+                tempEvent.flags = CGEventFlags(rawValue: UInt64(modifiers.rawValue)) 
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4) // Allow slightly longer buffer
+                tempEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
+                return length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
+        }
+    }
+    
+    // MARK: - Permissions Helpers (Keep Existing)
+     private func checkAccessibilityPermissions() -> Bool {
+        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
+        let options = [checkOptPrompt: true]
+        let accessibilityEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if !accessibilityEnabled {
+            showPermissionsAlert()
+        }
+        
+        return accessibilityEnabled
+    }
+    
+    private func showPermissionsAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Accessibility Permissions Required"
+            alert.informativeText = "Leader Key needs accessibility permissions to use stealth mode. Please enable it in System Preferences > Security & Privacy > Privacy > Accessibility."
+            alert.addButton(withTitle: "Open System Preferences")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/PreferencePanes/Security.prefPane"))
+                }
+            }
+            
+            Defaults[.useStealthMode] = false
+        }
+    }
+
+    // NOTE: activateGroupWithPath is likely no longer needed within StealthModeManager
+    // as groups are activated via processKey starting a sequence. Consider removing.
+    // private func activateGroupWithPath(_ groupPath: String) { ... }
+
+} // End of StealthModeManager class
+
+// This is the callback function required by CGEvent.tapCreate
+private func stealthModeCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    userInfo: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let userInfo = userInfo else {
+        return Unmanaged.passRetained(event)
+    }
+    
+    // Cast the reference to StealthModeManager and call the handler
+    let manager = Unmanaged<StealthModeManager>.fromOpaque(userInfo).takeUnretainedValue()
+    return manager.handleCGEvent(event)
+}
+
 // Supporting types for Shortcuts settings
 fileprivate struct GroupViewModel: Identifiable {
     let id: UUID
@@ -182,6 +498,7 @@ class AppDelegate: NSObject, NSApplicationDelegate,
   let statusItem = StatusItem()
   let config = UserConfig()
   var fileMonitor: FileMonitor!
+  var stealthMode: StealthModeManager?
 
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
@@ -228,6 +545,9 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     config.ensureAndLoad()
     state = UserState(userConfig: config)
     controller = Controller(userState: state, userConfig: config)
+    
+    // Initialize stealth mode manager
+    stealthMode = StealthModeManager(appDelegate: self)
 
     Task {
       for await _ in Defaults.updates(.configDir) {
@@ -268,10 +588,20 @@ class AppDelegate: NSObject, NSApplicationDelegate,
 
     // Register new shortcuts
     KeyboardShortcuts.onKeyUp(for: .activateDefaultOnly) { [weak self] in
+      guard !Defaults[.useStealthMode] else {
+        print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for activateDefaultOnly")
+        return
+      }
+      print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for activateDefaultOnly")
       self?.handleActivation(type: .defaultOnly)
     }
 
     KeyboardShortcuts.onKeyUp(for: .activateAppSpecific) { [weak self] in
+      guard !Defaults[.useStealthMode] else {
+        print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for activateAppSpecific")
+        return
+      }
+       print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for activateAppSpecific")
       self?.handleActivation(type: .appSpecificWithFallback)
     }
 
@@ -281,6 +611,28 @@ class AppDelegate: NSObject, NSApplicationDelegate,
       for await _ in Defaults.updates(.groupShortcuts) {
         self.registerGroupShortcuts()
       }
+    }
+    
+    // Configure stealth mode observer
+    Task {
+      for await value in Defaults.updates(.useStealthMode) {
+        print("[AppDelegate] Stealth mode setting changed via Defaults: \(value)")
+        if value {
+          print("[AppDelegate] Enabling stealth mode monitoring.")
+          self.stealthMode?.startMonitoring()
+        } else {
+          print("[AppDelegate] Disabling stealth mode monitoring.")
+          self.stealthMode?.stopMonitoring()
+        }
+      }
+    }
+    
+    // Start stealth mode if enabled by default
+    if Defaults[.useStealthMode] {
+      print("[AppDelegate] Stealth mode is enabled on launch. Starting monitoring.")
+      stealthMode?.startMonitoring()
+    } else {
+       print("[AppDelegate] Stealth mode is disabled on launch.")
     }
   }
 
@@ -440,6 +792,12 @@ class AppDelegate: NSObject, NSApplicationDelegate,
     for (groupPath, _) in Defaults[.groupShortcuts] {
       let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
       KeyboardShortcuts.onKeyUp(for: shortcutName) { [weak self] in
+        guard !Defaults[.useStealthMode] else {
+            print("[AppDelegate] StealthMode ON: Ignoring standard KeyboardShortcuts handler for group: \(groupPath)")
+            return
+        }
+        print("[AppDelegate] StealthMode OFF: Handling standard KeyboardShortcuts handler for group: \(groupPath)")
+        // Original logic when not in stealth mode
         guard let self = self else { return }
         
         // Open LeaderKey and navigate to the specific group
@@ -460,5 +818,10 @@ class AppDelegate: NSObject, NSApplicationDelegate,
         }
       }
     }
+  }
+
+  // Add public method for activation that can be called from StealthModeManager
+  func activateWithType(_ type: Controller.ActivationType) {
+    handleActivation(type: type)
   }
 }

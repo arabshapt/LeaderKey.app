@@ -35,6 +35,10 @@ extension Defaults.Keys {
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
+    
+  // Stealth mode toggle
+  static let useStealthMode = Key<Bool>(
+    "useStealthMode", default: false, suite: defaultsSuite)
 
   // Group shortcuts - maps group paths to shortcut names
   static let groupShortcuts = Key<[String: String]>("groupShortcuts", default: [:], suite: defaultsSuite)
