@@ -97,58 +97,80 @@ class StealthModeManager {
     }
 
     private func processKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-
-        // === Are we currently inside a silent sequence? ===
-        if activeStealthGroup != nil {
-            print("[StealthModeManager] processKey: Active stealth sequence. Processing keyCode: \(keyCode)")
-
-            guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
-                print("[StealthModeManager] processKey: Could not get key string for sequence input. Aborting sequence.")
-                resetStealthSequence()
-                return false // Event not handled (aborted sequence)
-            }
-            
-            print("[StealthModeManager] processKey: Key string for sequence: '\(keyString)'")
-
-            if keyCode == 53 { // Escape Key Code
-               print("[StealthModeManager] processKey: Escape pressed. Cancelling stealth sequence.")
-               resetStealthSequence() // This will now also clear UserState
-               return true // Escape was handled
-            }
-
-            if let currentActiveGroup = activeStealthGroup,
-               let hit = currentActiveGroup.actions.first(where: { $0.item.key == keyString }) {
-                switch hit {
-                case .action(let action):
-                    print("[StealthModeManager] processKey: Matched action '\(action.displayName)' in sequence. Executing.")
-                    guard let controller = appDelegate?.controller else {
-                         print("[StealthModeManager] processKey: ERROR - AppDelegate or Controller not found for action execution.")
-                         resetStealthSequence()
-                         return false
-                    }
-                    // Action execution should implicitly lead to UserState.clear via hide->clear
-                    controller.runAction(action)
-                    // We still need to ensure hide() is called if not sticky
-                    // Let's explicitly hide for now in stealth mode after action
-                    appDelegate?.hide()
-                    resetStealthSequence()
-                    return true // Action was handled
-                case .group(let subgroup):
-                     print("[StealthModeManager] processKey: Matched subgroup '\(subgroup.displayName)' in sequence. Navigating.")
-                     activeStealthGroup = subgroup // Internal state update
-                     // *** ADDED: Update shared UserState ***
-                     appDelegate?.controller.userState.navigateToGroup(subgroup)
-                     return true // Navigation was handled
-                }
-            } else {
-                print("[StealthModeManager] processKey: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item. Aborting sequence.")
-                resetStealthSequence() // This will now also clear UserState
-                return true // Consume mistyped key
-            }
+        // === ALWAYS Check for Escape first ===
+        if keyCode == 53 { // Escape Key Code
+           print("[StealthModeManager] processKey: Escape pressed. Resetting state and potentially hiding.")
+           // Check if the window is visible BEFORE resetting state
+           let shouldHide = self.appDelegate?.controller.window.isVisible ?? false
+           resetStealthSequence() // Clear internal state and userState
+           
+           // If the window was visible, hide it on the main thread
+           if shouldHide {
+               DispatchQueue.main.async {
+                   print("[StealthModeManager] processKey: Hiding window due to Escape press.")
+                   self.appDelegate?.hide()
+               }
+           }
+           return true // Escape was handled, consume the event
         }
 
-        // === If NOT inside a sequence, check for activation shortcuts ===
-        print("[StealthModeManager] processKey: Checking for activation shortcuts for keyCode: \(keyCode)")
+        // === Then, check if we are currently inside a silent sequence ===
+        if activeStealthGroup != nil {
+            return processKeyInSequence(keyCode: keyCode, modifiers: modifiers)
+        }
+
+        // === If NOT inside a sequence AND not Escape, check for activation shortcuts ===
+        return processActivationShortcuts(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    // MARK: - Stealth Mode Key Processing Helpers
+
+    private func processKeyInSequence(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        print("[StealthModeManager] processKeyInSequence: Active stealth sequence. Processing keyCode: \(keyCode)")
+
+        guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
+            print("[StealthModeManager] processKeyInSequence: Could not get key string for sequence input. Aborting sequence.")
+            resetStealthSequence()
+            return false // Event not handled (aborted sequence)
+        }
+        
+        print("[StealthModeManager] processKeyInSequence: Key string for sequence: '\(keyString)'")
+
+        // We already checked for Escape in the main function
+
+        if let currentActiveGroup = activeStealthGroup,
+           let hit = currentActiveGroup.actions.first(where: { $0.item.key == keyString }) {
+            switch hit {
+            case .action(let action):
+                print("[StealthModeManager] processKeyInSequence: Matched action '\(action.displayName)' in sequence. Executing.")
+                guard let controller = appDelegate?.controller else {
+                     print("[StealthModeManager] processKeyInSequence: ERROR - AppDelegate or Controller not found for action execution.")
+                     resetStealthSequence()
+                     return false
+                }
+                // Action execution should implicitly lead to UserState.clear via hide->clear
+                controller.runAction(action)
+                // We still need to ensure hide() is called if not sticky
+                // Let's explicitly hide for now in stealth mode after action
+                appDelegate?.hide()
+                resetStealthSequence()
+                return true // Action was handled
+            case .group(let subgroup):
+                 print("[StealthModeManager] processKeyInSequence: Matched subgroup '\(subgroup.displayName)' in sequence. Navigating.")
+                 activeStealthGroup = subgroup // Internal state update
+                 // *** ADDED: Update shared UserState ***
+                 appDelegate?.controller.userState.navigateToGroup(subgroup)
+                 return true // Navigation was handled
+            }
+        } else {
+            print("[StealthModeManager] processKeyInSequence: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item. Aborting sequence.")
+            resetStealthSequence() // This will now also clear UserState
+            return true // Consume mistyped key
+        }
+    }
+
+    private func processActivationShortcuts(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        print("[StealthModeManager] processActivationShortcuts: Checking for activation shortcuts for keyCode: \(keyCode)")
         guard let ad = appDelegate else { return false }
         
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
@@ -161,9 +183,9 @@ class StealthModeManager {
             let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
             if let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName),
                matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processKey: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting sequence AND showing window.")
+                print("[StealthModeManager] processActivationShortcuts: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting sequence AND showing window.")
                 guard let targetGroup = ad.config.findGroupByPath(groupPath) else {
-                    print("[StealthModeManager] processKey: ERROR - Could not find group for path '\(groupPath)'")
+                    print("[StealthModeManager] processActivationShortcuts: ERROR - Could not find group for path '\(groupPath)'")
                     resetStealthSequence()
                     return false
                 }
@@ -187,7 +209,7 @@ class StealthModeManager {
         // Check main activation shortcuts only if a group shortcut didn't match
         if !activationMatched {
             if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processKey: Matched activateAppSpecific shortcut. Starting sequence AND showing window.")
+                print("[StealthModeManager] processActivationShortcuts: Matched activateAppSpecific shortcut. Starting sequence AND showing window.")
                 let frontmostApp = NSWorkspace.shared.frontmostApplication
                 let bundleId = frontmostApp?.bundleIdentifier
                 let rootGroup = ad.config.getConfig(for: bundleId) ?? ad.config.root
@@ -199,8 +221,7 @@ class StealthModeManager {
                 
                 // Show window using appropriate type
                 DispatchQueue.main.async {
-                    ad.controller.userState.clear() // Clear first
-                    ad.show(type: .appSpecificWithFallback)
+                    ad.handleActivation(type: .appSpecificWithFallback)
                 }
                 activationMatched = true
             }
@@ -208,7 +229,7 @@ class StealthModeManager {
 
         if !activationMatched {
             if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processKey: Matched activateDefaultOnly shortcut. Starting sequence AND showing window.")
+                print("[StealthModeManager] processActivationShortcuts: Matched activateDefaultOnly shortcut. Starting sequence AND showing window.")
                 let rootGroup = ad.config.root
 
                 // Start internal sequence state
@@ -218,8 +239,7 @@ class StealthModeManager {
                 
                 // Show window using appropriate type
                 DispatchQueue.main.async {
-                    ad.controller.userState.clear() // Clear first
-                    ad.show(type: .defaultOnly)
+                    ad.handleActivation(type: .defaultOnly)
                 }
                 activationMatched = true
             }
@@ -237,7 +257,7 @@ class StealthModeManager {
              return true // Activation handled
         } else {
             // No activation shortcut matched
-            print("[StealthModeManager] processKey: KeyCode \(keyCode) did not match any activation shortcuts.")
+            print("[StealthModeManager] processActivationShortcuts: KeyCode \(keyCode) did not match any activation shortcuts.")
             resetStealthSequence() // Ensure state is clear
             return false // Event was not handled by StealthModeManager
         }
@@ -250,7 +270,7 @@ class StealthModeManager {
             print("[StealthModeManager] resetStealthSequence: Resetting state.")
             activeStealthGroup = nil
             activeStealthRoot = nil
-            // *** ADDED: Clear shared UserState ***
+            // *** Clear shared UserState only ***
             DispatchQueue.main.async {
                  self.appDelegate?.controller.userState.clear()
             }
@@ -681,7 +701,7 @@ class AppDelegate: NSObject, NSApplicationDelegate,
   }
 
   // Helper function to handle activation logic for both shortcuts
-  private func handleActivation(type: Controller.ActivationType) {
+  func handleActivation(type: Controller.ActivationType) {
     if controller.window.isKeyWindow {
       switch Defaults[.reactivateBehavior] {
       case .hide:

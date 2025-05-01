@@ -143,7 +143,8 @@ class Controller {
         self.positionCheatsheetWindow()
       }
     case KeyHelpers.escape.rawValue:
-      window.resignKey()
+      hide()
+      return
     default:
       guard let char = charForEvent(event) else { return }
       handleKey(char, withModifiers: event.modifierFlags)
