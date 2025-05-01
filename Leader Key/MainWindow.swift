@@ -20,23 +20,23 @@ class PanelWindow: NSPanel {
 
 class MainWindow: PanelWindow, NSWindowDelegate {
   override var acceptsFirstResponder: Bool { return true }
-  override var canBecomeKey: Bool { return true }
-  override var canBecomeMain: Bool { return true }
+  override var canBecomeKey: Bool { return false }
+  override var canBecomeMain: Bool { return false }
 
   var hasCheatsheet: Bool { return true }
   var controller: Controller
 
   required init(controller: Controller) {
-    // Here to provide general interface
-    // Themes should call super.init(controller:, contentRect:) to get a frame as well
     self.controller = controller
     super.init(contentRect: NSRect())
+    self.level = .statusBar
   }
 
   init(controller: Controller, contentRect: NSRect) {
     self.controller = controller
     super.init(contentRect: contentRect)
     delegate = self
+    self.level = .statusBar
   }
 
   func windowDidResignKey(_ notification: Notification) {

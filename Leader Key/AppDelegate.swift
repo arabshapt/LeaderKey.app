@@ -16,8 +16,6 @@ class StealthModeManager {
     // --- State for Silent Sequence Handling ---
     private var activeStealthRoot: Group? = nil
     private var activeStealthGroup: Group? = nil
-    private var lastKeyTime: Date = Date() // Tracks time since last key press *in sequence* or activation
-    private var sequenceTimeoutInterval: TimeInterval = 1.0 // Timeout for the sequence
     // --- End State ---
 
     private var isEnabled = false
@@ -81,15 +79,6 @@ class StealthModeManager {
 
         print("[StealthModeManager] handleCGEvent: KeyDown detected.")
 
-        // Check for timeout *only if* a sequence is active
-        let now = Date()
-        if activeStealthGroup != nil { // Check if sequence active
-            if now.timeIntervalSince(lastKeyTime) > sequenceTimeoutInterval {
-                print("[StealthModeManager] handleCGEvent: Sequence timed out.")
-                resetStealthSequence() // Reset state on timeout
-            }
-        }
-
         guard let nsEvent = NSEvent(cgEvent: event) else {
             print("[StealthModeManager] handleCGEvent: Could not create NSEvent from CGEvent.")
             return Unmanaged.passRetained(event)
@@ -101,7 +90,6 @@ class StealthModeManager {
         print("[StealthModeManager] handleCGEvent: Processing keyCode: \(keyCode) Modifiers: \(modifiers.rawValue)")
         let handled = processKey(keyCode: keyCode, modifiers: modifiers)
 
-        // Log the outcome
         let returnValue = handled ? nil : Unmanaged.passRetained(event)
         print("[StealthModeManager] handleCGEvent: Event handled by processKey: \(handled). Returning: \(returnValue == nil ? "nil (Consume)" : "event (Pass Through)")")
         
@@ -113,7 +101,6 @@ class StealthModeManager {
         // === Are we currently inside a silent sequence? ===
         if activeStealthGroup != nil {
             print("[StealthModeManager] processKey: Active stealth sequence. Processing keyCode: \(keyCode)")
-            lastKeyTime = Date() // Keep sequence alive
 
             guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
                 print("[StealthModeManager] processKey: Could not get key string for sequence input. Aborting sequence.")
@@ -125,7 +112,7 @@ class StealthModeManager {
 
             if keyCode == 53 { // Escape Key Code
                print("[StealthModeManager] processKey: Escape pressed. Cancelling stealth sequence.")
-               resetStealthSequence()
+               resetStealthSequence() // This will now also clear UserState
                return true // Escape was handled
             }
 
@@ -139,23 +126,24 @@ class StealthModeManager {
                          resetStealthSequence()
                          return false
                     }
+                    // Action execution should implicitly lead to UserState.clear via hide->clear
                     controller.runAction(action)
+                    // We still need to ensure hide() is called if not sticky
+                    // Let's explicitly hide for now in stealth mode after action
+                    appDelegate?.hide()
                     resetStealthSequence()
                     return true // Action was handled
                 case .group(let subgroup):
                      print("[StealthModeManager] processKey: Matched subgroup '\(subgroup.displayName)' in sequence. Navigating.")
-                     activeStealthGroup = subgroup
+                     activeStealthGroup = subgroup // Internal state update
+                     // *** ADDED: Update shared UserState ***
+                     appDelegate?.controller.userState.navigateToGroup(subgroup)
                      return true // Navigation was handled
                 }
             } else {
                 print("[StealthModeManager] processKey: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item. Aborting sequence.")
-                resetStealthSequence()
-                // Event was *not* handled as part of the sequence, but we don't want it passed through either.
-                // Let it fall through to the activation check, but it likely won't match.
-                // If we returned true here, a mistyped key would be consumed silently.
-                // Returning false allows it to potentially trigger another app's shortcut if not an activation key.
-                // Let's return true to consume mistyped keys within a sequence.
-                return true 
+                resetStealthSequence() // This will now also clear UserState
+                return true // Consume mistyped key
             }
         }
 
@@ -165,61 +153,107 @@ class StealthModeManager {
         
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
         let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
+        var activationMatched = false // Flag to check if activation happened
+        var initialGroup: Group? = nil // Group to set in UserState
 
         // Check Group shortcuts FIRST
         for (groupPath, _) in Defaults[.groupShortcuts] {
             let shortcutName = KeyboardShortcuts.Name.forGroup(groupPath)
             if let shortcut = KeyboardShortcuts.getShortcut(for: shortcutName),
                matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-                print("[StealthModeManager] processKey: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting silent sequence.")
+                print("[StealthModeManager] processKey: Matched GLOBAL GROUP shortcut for path '\(groupPath)'. Starting sequence AND showing window.")
                 guard let targetGroup = ad.config.findGroupByPath(groupPath) else {
                     print("[StealthModeManager] processKey: ERROR - Could not find group for path '\(groupPath)'")
                     resetStealthSequence()
                     return false
                 }
+                
+                // Start internal sequence state
                 activeStealthRoot = ad.config.root
                 activeStealthGroup = targetGroup
-                lastKeyTime = Date()
-                return true // Activation handled
+                initialGroup = targetGroup // Set initial group for UserState
+                
+                // Show window and navigate
+                DispatchQueue.main.async {
+                    ad.controller.userState.clear() // Clear first
+                    ad.controller.userState.navigateToGroupPath(targetGroup)
+                    ad.show()
+                }
+                activationMatched = true
+                break // Exit loop once matched
             }
         }
 
-        // Check main activation shortcuts
-        if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[StealthModeManager] processKey: Matched activateAppSpecific shortcut. Starting silent sequence.")
-            let frontmostApp = NSWorkspace.shared.frontmostApplication
-            let bundleId = frontmostApp?.bundleIdentifier
-            let rootGroup = ad.config.getConfig(for: bundleId) ?? ad.config.root
-            activeStealthRoot = rootGroup
-            activeStealthGroup = rootGroup
-            lastKeyTime = Date()
-            return true // Activation handled
+        // Check main activation shortcuts only if a group shortcut didn't match
+        if !activationMatched {
+            if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+                print("[StealthModeManager] processKey: Matched activateAppSpecific shortcut. Starting sequence AND showing window.")
+                let frontmostApp = NSWorkspace.shared.frontmostApplication
+                let bundleId = frontmostApp?.bundleIdentifier
+                let rootGroup = ad.config.getConfig(for: bundleId) ?? ad.config.root
+                
+                // Start internal sequence state
+                activeStealthRoot = rootGroup
+                activeStealthGroup = rootGroup
+                initialGroup = rootGroup // Set initial group for UserState
+                
+                // Show window using appropriate type
+                DispatchQueue.main.async {
+                    ad.controller.userState.clear() // Clear first
+                    ad.show(type: .appSpecificWithFallback)
+                }
+                activationMatched = true
+            }
         }
 
-        if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[StealthModeManager] processKey: Matched activateDefaultOnly shortcut. Starting silent sequence.")
-            let rootGroup = ad.config.root
-            activeStealthRoot = rootGroup
-            activeStealthGroup = rootGroup
-            lastKeyTime = Date()
-            return true // Activation handled
+        if !activationMatched {
+            if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+                print("[StealthModeManager] processKey: Matched activateDefaultOnly shortcut. Starting sequence AND showing window.")
+                let rootGroup = ad.config.root
+
+                // Start internal sequence state
+                activeStealthRoot = rootGroup
+                activeStealthGroup = rootGroup
+                initialGroup = rootGroup // Set initial group for UserState
+                
+                // Show window using appropriate type
+                DispatchQueue.main.async {
+                    ad.controller.userState.clear() // Clear first
+                    ad.show(type: .defaultOnly)
+                }
+                activationMatched = true
+            }
         }
 
-        // No activation shortcut matched
-        print("[StealthModeManager] processKey: KeyCode \(keyCode) did not match any activation shortcuts.")
-        // Ensure state is reset if no activation occurred (should be redundant but safe)
-        resetStealthSequence()
-        return false // Event was not handled by StealthModeManager
+        // Final check and return
+        if activationMatched {
+            // *** ADDED: Set initial UserState after activation ***
+            if let group = initialGroup {
+                 DispatchQueue.main.async { // Ensure UI updates on main thread
+                    // No need to clear again, done above
+                    ad.controller.userState.navigateToGroup(group)
+                 }
+            }
+             return true // Activation handled
+        } else {
+            // No activation shortcut matched
+            print("[StealthModeManager] processKey: KeyCode \(keyCode) did not match any activation shortcuts.")
+            resetStealthSequence() // Ensure state is clear
+            return false // Event was not handled by StealthModeManager
+        }
     }
 
     // MARK: - Helpers
 
     private func resetStealthSequence() {
-        // Check if state actually needs resetting to avoid redundant logs
         if activeStealthGroup != nil || activeStealthRoot != nil {
             print("[StealthModeManager] resetStealthSequence: Resetting state.")
             activeStealthGroup = nil
             activeStealthRoot = nil
+            // *** ADDED: Clear shared UserState ***
+            DispatchQueue.main.async {
+                 self.appDelegate?.controller.userState.clear()
+            }
         }
     }
 
