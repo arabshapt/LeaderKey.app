@@ -176,9 +176,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               return
           }
       } else if controller.window.isVisible {
+          // Window is visible but not key: Activate app THEN make key
+          print("[AppDelegate] handleActivation: Window visible but not key. Activating app.")
+          NSApp.activate(ignoringOtherApps: true)
           controller.window.makeKeyAndOrderFront(nil)
+          // Start sequence only if it wasn't already active
             if currentSequenceGroup == nil { startSequence(activationType: type) } 
       } else {
+          // Window wasn't visible, show it AND start the sequence
           show(type: type)
           startSequence(activationType: type)
         }
