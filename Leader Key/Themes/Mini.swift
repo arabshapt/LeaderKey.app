@@ -74,7 +74,7 @@ enum Mini {
   }
 }
 
-struct Invisible_MainView_Previews: PreviewProvider {
+struct MiniMainViewPreviews: PreviewProvider {
   static var previews: some View {
     VStack {
       MysteryBox.MainView().environmentObject(

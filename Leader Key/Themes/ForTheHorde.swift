@@ -137,7 +137,7 @@ enum ForTheHorde {
   }
 }
 
-struct Legacy_MainView_Previews: PreviewProvider {
+struct ForTheHordeMainViewPreviews: PreviewProvider {
   static var previews: some View {
     ForTheHorde.MainView()
       .environmentObject(UserState(userConfig: UserConfig()))

@@ -48,31 +48,6 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
     objc_setAssociatedObject(object, key, value, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 }
 
-// MARK: - StealthModeManager class implementation
-// class StealthModeManager {
-// ... entire class definition commented out or deleted ...
-// } // End of StealthModeManager class
-
-// This is the callback function required by CGEvent.tapCreate
-// private func stealthModeCallback(
-// ... function definition commented out or deleted ...
-// ) -> Unmanaged<CGEvent>? {
-// ... function body commented out or deleted ...
-// }
-
-// Supporting types for Shortcuts settings
-// fileprivate struct GroupViewModel: Identifiable {
-// ... struct definition commented out or deleted ...
-// }
-
-// fileprivate struct GroupShortcutRow: View {
-// ... struct definition commented out or deleted ...
-// }
-
-// fileprivate struct GroupShortcutsView: View {
-// ... struct definition commented out or deleted ...
-// }
-
 // MARK: - Settings Panes
 
 // Define the view for the Shortcuts pane
@@ -147,6 +122,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startEventTapMonitoring() // Defined in Event Tap Handling extension
   }
 
+  func applicationDidBecomeActive(_ notification: Notification) {
+    // Attempt to start monitoring if it failed previously (e.g., due to permissions)
+    if !isMonitoring {
+      print("[AppDelegate] applicationDidBecomeActive: Not monitoring, attempting to start...")
+      startEventTapMonitoring()
+    } else {
+      print("[AppDelegate] applicationDidBecomeActive: Already monitoring.")
+    }
+  }
+
   func applicationWillTerminate(_ notification: Notification) {
         stopEventTapMonitoring() // Defined in Event Tap Handling extension
     config.saveCurrentlyEditingConfig()
@@ -154,7 +139,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // --- Actions & Window Handling ---
   @IBAction
-  func settingsMenuItemActionHandler(_: NSMenuItem) { settingsWindowController.show(); NSApp.activate(ignoringOtherApps: true) }
+  func settingsMenuItemActionHandler(_: NSMenuItem) { 
+      // Configure window properties before showing
+      if let window = settingsWindowController.window {
+          window.styleMask.insert(.resizable)
+          window.minSize = NSSize(width: 450, height: 650) // Set minimum size
+      }
+      settingsWindowController.show()
+      NSApp.activate(ignoringOtherApps: true) 
+  }
 
     func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) { controller.show(type: type, completion: completion) }
 
@@ -453,16 +446,26 @@ extension AppDelegate {
 
     private func startSequence(activationType: Controller.ActivationType) {
         print("[AppDelegate] startSequence: type: \(activationType)")
-        let rootGroup: Group
-        switch activationType {
-        case .defaultOnly:
-            rootGroup = config.root
-        case .appSpecificWithFallback:
-            let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-            rootGroup = config.getConfig(for: bundleId)
+        
+        // Get the root group determined by the show() method via the controller's state
+        guard let rootGroup = controller.userState.activeRoot else {
+            print("[AppDelegate] Error: startSequence called but controller.userState.activeRoot is nil. Falling back to default config.")
+            // Fallback logic, though this indicates a potential issue elsewhere
+            self.activeRootGroup = config.root
+            self.currentSequenceGroup = config.root
+            if self.controller.window.isVisible {
+                DispatchQueue.main.async {
+                    self.controller.userState.navigateToGroup(self.config.root)
+                }
+            }
+            return
         }
+
+        // Set the sequence state using the already loaded active root
         self.activeRootGroup = rootGroup
         self.currentSequenceGroup = rootGroup
+        
+        // Update UI if window is already visible
         if self.controller.window.isVisible {
             DispatchQueue.main.async {
                 self.controller.userState.navigateToGroup(rootGroup)

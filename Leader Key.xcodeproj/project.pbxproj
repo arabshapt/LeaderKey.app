@@ -10,6 +10,14 @@
 		115AA5BF2DA521C600C17E18 /* ActionIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115AA5BE2DA521C200C17E18 /* ActionIcon.swift */; };
 		115AA5C22DA546D500C17E18 /* SymbolPicker in Frameworks */ = {isa = PBXBuildFile; productRef = 115AA5C12DA546D500C17E18 /* SymbolPicker */; };
 		130196C62D73B3DE0093148B /* Breadcrumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130196C52D73B3DC0093148B /* Breadcrumbs.swift */; };
+		2636138C2DC4202A0078036F /* UserConfig+ErrorHandling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613862DC4202A0078036F /* UserConfig+ErrorHandling.swift */; };
+		2636138D2DC4202A0078036F /* UserConfig+FileManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613872DC4202A0078036F /* UserConfig+FileManagement.swift */; };
+		2636138E2DC4202A0078036F /* UserConfig+Validation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2636138B2DC4202A0078036F /* UserConfig+Validation.swift */; };
+		2636138F2DC4202A0078036F /* UserConfig+Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613842DC4202A0078036F /* UserConfig+Discovery.swift */; };
+		263613902DC4202A0078036F /* UserConfig+EditingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613852DC4202A0078036F /* UserConfig+EditingState.swift */; };
+		263613912DC4202A0078036F /* UserConfig+GroupPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613882DC4202A0078036F /* UserConfig+GroupPath.swift */; };
+		263613922DC4202A0078036F /* UserConfig+LoadingDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 263613892DC4202A0078036F /* UserConfig+LoadingDecoding.swift */; };
+		263613932DC4202A0078036F /* UserConfig+Saving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2636138A2DC4202A0078036F /* UserConfig+Saving.swift */; };
 		423632132D676F5200878D92 /* FileMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632122D676F5200878D92 /* FileMonitor.swift */; };
 		423632222D68CA6500878D92 /* MysteryBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632212D68CA6500878D92 /* MysteryBox.swift */; };
 		423632262D68CDBB00878D92 /* Mini.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632252D68CDBB00878D92 /* Mini.swift */; };
@@ -66,6 +74,14 @@
 /* Begin PBXFileReference section */
 		115AA5BE2DA521C200C17E18 /* ActionIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionIcon.swift; sourceTree = "<group>"; };
 		130196C52D73B3DC0093148B /* Breadcrumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Breadcrumbs.swift; sourceTree = "<group>"; };
+		263613842DC4202A0078036F /* UserConfig+Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+Discovery.swift"; sourceTree = "<group>"; };
+		263613852DC4202A0078036F /* UserConfig+EditingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+EditingState.swift"; sourceTree = "<group>"; };
+		263613862DC4202A0078036F /* UserConfig+ErrorHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+ErrorHandling.swift"; sourceTree = "<group>"; };
+		263613872DC4202A0078036F /* UserConfig+FileManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+FileManagement.swift"; sourceTree = "<group>"; };
+		263613882DC4202A0078036F /* UserConfig+GroupPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+GroupPath.swift"; sourceTree = "<group>"; };
+		263613892DC4202A0078036F /* UserConfig+LoadingDecoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+LoadingDecoding.swift"; sourceTree = "<group>"; };
+		2636138A2DC4202A0078036F /* UserConfig+Saving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+Saving.swift"; sourceTree = "<group>"; };
+		2636138B2DC4202A0078036F /* UserConfig+Validation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserConfig+Validation.swift"; sourceTree = "<group>"; };
 		423632122D676F5200878D92 /* FileMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMonitor.swift; sourceTree = "<group>"; };
 		423632142D678F4400878D92 /* TestPlan.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = TestPlan.xctestplan; sourceTree = "<group>"; };
 		423632212D68CA6500878D92 /* MysteryBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MysteryBox.swift; sourceTree = "<group>"; };
@@ -187,6 +203,14 @@
 				42DFCD712D5B7D46002EA111 /* Events.swift */,
 				42F4CDD02D48C51F00D0DD76 /* Extensions.swift */,
 				423632122D676F5200878D92 /* FileMonitor.swift */,
+				263613842DC4202A0078036F /* UserConfig+Discovery.swift */,
+				263613852DC4202A0078036F /* UserConfig+EditingState.swift */,
+				263613862DC4202A0078036F /* UserConfig+ErrorHandling.swift */,
+				263613872DC4202A0078036F /* UserConfig+FileManagement.swift */,
+				263613882DC4202A0078036F /* UserConfig+GroupPath.swift */,
+				263613892DC4202A0078036F /* UserConfig+LoadingDecoding.swift */,
+				2636138A2DC4202A0078036F /* UserConfig+Saving.swift */,
+				2636138B2DC4202A0078036F /* UserConfig+Validation.swift */,
 				42F4CDC82D458FF700D0DD76 /* MainMenu.swift */,
 				427C18532BD6E59300955B98 /* NSWindow+Animations.swift */,
 				427C182C2BD31F9500955B98 /* Settings.swift */,
@@ -410,6 +434,14 @@
 				42F4CDCF2D46E2B300D0DD76 /* Cheatsheet.swift in Sources */,
 				42DFCD722D5B7D48002EA111 /* Events.swift in Sources */,
 				423632132D676F5200878D92 /* FileMonitor.swift in Sources */,
+				2636138C2DC4202A0078036F /* UserConfig+ErrorHandling.swift in Sources */,
+				2636138D2DC4202A0078036F /* UserConfig+FileManagement.swift in Sources */,
+				2636138E2DC4202A0078036F /* UserConfig+Validation.swift in Sources */,
+				2636138F2DC4202A0078036F /* UserConfig+Discovery.swift in Sources */,
+				263613902DC4202A0078036F /* UserConfig+EditingState.swift in Sources */,
+				263613912DC4202A0078036F /* UserConfig+GroupPath.swift in Sources */,
+				263613922DC4202A0078036F /* UserConfig+LoadingDecoding.swift in Sources */,
+				263613932DC4202A0078036F /* UserConfig+Saving.swift in Sources */,
 				427C182D2BD31F9500955B98 /* Settings.swift in Sources */,
 				426E625B2D2E6A98009FD2F2 /* CommandRunner.swift in Sources */,
 				427C18382BD3262100955B98 /* VisualEffectBackground.swift in Sources */,
