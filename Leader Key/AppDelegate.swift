@@ -164,7 +164,17 @@ class StealthModeManager {
             }
         } else {
             print("[StealthModeManager] processKeyInSequence: Key '\(keyString)' (keyCode: \(keyCode)) did not match any item. Aborting sequence.")
-            resetStealthSequence() // This will now also clear UserState
+            // Check if the window is visible BEFORE resetting state
+            let shouldHide = self.appDelegate?.controller.window.isVisible ?? false
+            resetStealthSequence() // Clear internal state and userState
+            
+            // If the window was visible, hide it on the main thread
+            if shouldHide {
+                DispatchQueue.main.async {
+                    print("[StealthModeManager] processKeyInSequence: Hiding window due to invalid key press in sequence.")
+                    self.appDelegate?.hide()
+                }
+            }
             return true // Consume mistyped key
         }
     }
