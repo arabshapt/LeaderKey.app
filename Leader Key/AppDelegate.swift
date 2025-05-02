@@ -103,39 +103,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // --- Lifecycle Methods ---
   func applicationDidFinishLaunching(_: Notification) {
+    // Don't run main app logic during previews or tests
     guard
       ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1"
-    else { return }
-        guard !isRunningTests() else { return } // isRunningTests() is in private extension
+    else {
+        print("[AppDelegate] Detected Xcode Preview environment. Skipping full launch.")
+        return
+    }
+    guard !isRunningTests() else {
+        print("[AppDelegate] Detected XCTest environment. Skipping full launch.")
+        return
+    } // isRunningTests() is in private extension
 
-        UNUserNotificationCenter.current().delegate = self // Conformance is in extension
-    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, error in
-        if let error = error { print("Error requesting notification permission: \(error)") }
+    print("[AppDelegate] applicationDidFinishLaunching: Starting up...")
+
+    // Setup Notifications
+    UNUserNotificationCenter.current().delegate = self // Conformance is in extension
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+        if let error = error { print("[AppDelegate] Error requesting notification permission: \(error)") }
+        print("[AppDelegate] Notification permission granted: \(granted)")
     }
 
+    // Setup Main Menu
     NSApp.mainMenu = MainMenu()
 
-    config.ensureAndLoad()
+    // Load configuration and initialize state
+    print("[AppDelegate] Initializing UserConfig and UserState...")
+    config.ensureAndLoad() // Ensures config dir/file exists and loads default config
     state = UserState(userConfig: config)
     controller = Controller(userState: state, userConfig: config)
-    
-        setupFileMonitor()      // Defined in private extension
-        setupStatusItem()       // Defined in private extension
-        startEventTapMonitoring() // Defined in Event Tap Handling extension
+    print("[AppDelegate] UserConfig and UserState initialized.")
 
-        // Add a delayed check to retry starting the event tap if it failed initially
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { // Wait 1 second
-            if !self.isMonitoring {
-                print("[AppDelegate] Delayed check: Still not monitoring. Retrying startEventTapMonitoring()...")
-                self.startEventTapMonitoring()
-            }
+    // Setup background services and UI elements
+    setupFileMonitor()      // Defined in private extension
+    setupStatusItem()       // Defined in private extension
+
+    // Attempt to start the global event tap immediately
+    print("[AppDelegate] Attempting initial startEventTapMonitoring()...")
+    startEventTapMonitoring() // Defined in Event Tap Handling extension
+
+    // Add a delayed check to retry starting the event tap if it failed initially.
+    // This helps if Accessibility permissions were granted just before launch
+    // and the system needs a moment to register them.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { // Wait 1 second
+        if !self.isMonitoring {
+            print("[AppDelegate] Delayed check: Still not monitoring. Retrying startEventTapMonitoring()...")
+            self.startEventTapMonitoring()
+        } else {
+            print("[AppDelegate] Delayed check: Monitoring was already active.")
         }
+    }
+    print("[AppDelegate] applicationDidFinishLaunching completed.")
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
-    // Attempt to start monitoring if it failed previously (e.g., due to permissions)
+    // This is called when the app becomes active, e.g., by clicking its Dock icon,
+    // using Cmd+Tab, or opening the Settings window.
+    print("[AppDelegate] applicationDidBecomeActive triggered.")
+
+    // Attempt to start monitoring if it failed previously (e.g., due to permissions not granted).
+    // This provides another chance if the user grants permissions while the app is running
+    // and then brings the app to the front.
     if !isMonitoring {
-      print("[AppDelegate] applicationDidBecomeActive: Not monitoring, attempting to start...")
+      print("[AppDelegate] applicationDidBecomeActive: Not monitoring, attempting to start startEventTapMonitoring()...")
       startEventTapMonitoring()
     } else {
       print("[AppDelegate] applicationDidBecomeActive: Already monitoring.")
@@ -143,63 +173,91 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
-        stopEventTapMonitoring() // Defined in Event Tap Handling extension
-    config.saveCurrentlyEditingConfig()
+    print("[AppDelegate] applicationWillTerminate: Stopping event tap and saving config...")
+    stopEventTapMonitoring() // Defined in Event Tap Handling extension
+    config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
+    print("[AppDelegate] applicationWillTerminate completed.")
   }
 
     // --- Actions & Window Handling ---
   @IBAction
-  func settingsMenuItemActionHandler(_: NSMenuItem) { 
+  func settingsMenuItemActionHandler(_: NSMenuItem) {
+      print("[AppDelegate] settingsMenuItemActionHandler called.")
       // Configure window properties before showing
       if let window = settingsWindowController.window {
           window.styleMask.insert(NSWindow.StyleMask.resizable)
           window.minSize = NSSize(width: 450, height: 650) // Set minimum size
       }
       settingsWindowController.show()
-      NSApp.activate(ignoringOtherApps: true) 
+      NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
+      print("[AppDelegate] Settings window shown.")
   }
 
-    func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) { controller.show(type: type, completion: completion) }
+    // Convenience method to show the main Leader Key window
+    func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
+        print("[AppDelegate] show(type: \(type)) called.")
+        controller.show(type: type, completion: completion)
+    }
 
-    func hide() { 
+    // Convenience method to hide the main Leader Key window
+    func hide() {
       print("[AppDelegate] hide() called.") // Log entry into hide()
-      controller.hide() 
+      controller.hide()
     }
 
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
-      if controller.window.isVisible { // Check visibility first
-          switch Defaults[.reactivateBehavior] {
+      print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
+      // This function decides what to do when an activation shortcut is pressed.
+
+      if controller.window.isVisible { // Check if the Leader Key window is already visible
+          print("[AppDelegate] handleActivation: Window is already visible.")
+          switch Defaults[.reactivateBehavior] { // Check user preference for reactivation
           case .hide:
-              // If behavior is hide, just hide and reset immediately when visible.
+              // Preference: Hide the window if activated again while visible.
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence.")
               hide()
-              resetSequenceState()
+              resetSequenceState() // Reset any ongoing sequence
               return // Stop processing here
+
           case .reset:
-              // If window wasn't key, make it key first.
+              // Preference: Reset the sequence if activated again while visible.
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
+              // If window wasn't key (e.g., user clicked elsewhere), make it key first.
               if !controller.window.isKeyWindow {
                   print("[AppDelegate] handleActivation (Reset): Window visible but not key. Activating.")
                   NSApp.activate(ignoringOtherApps: true)
                   controller.window.makeKeyAndOrderFront(nil)
               }
-              // Clear state, reset sequence, start new sequence.
+              // Clear existing state, reset sequence variables, and start a new sequence based on the activation type.
               controller.userState.clear()
-              resetSequenceState() // Clear just in case
+              resetSequenceState() // Reset sequence state in AppDelegate
+              print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
               startSequence(activationType: type)
+
           case .nothing:
+              // Preference: Do nothing if activated again while visible, unless window lost focus.
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
               // If window wasn't key, make it key first.
               if !controller.window.isKeyWindow {
                   print("[AppDelegate] handleActivation (Nothing): Window visible but not key. Activating.")
                   NSApp.activate(ignoringOtherApps: true)
                   controller.window.makeKeyAndOrderFront(nil)
               }
-              // Only start a sequence if one isn't already active.
-              if currentSequenceGroup == nil { startSequence(activationType: type) }
+              // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
+              // This prevents restarting if the user just presses the shortcut again mid-sequence.
+              if currentSequenceGroup == nil {
+                  print("[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
+                  startSequence(activationType: type)
+              } else {
+                   print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
+              }
           }
       } else {
-          // Window wasn't visible, show it AND start the sequence
-          show(type: type)
-          startSequence(activationType: type)
+          // Window wasn't visible, so show it AND start the sequence.
+          print("[AppDelegate] handleActivation: Window not visible. Showing window and starting sequence.")
+          show(type: type) // Show the window (Controller loads the appropriate config)
+          startSequence(activationType: type) // Start the key sequence based on the loaded config
       }
   }
     
@@ -211,25 +269,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Private Helpers
 private extension AppDelegate {
-    // ... (setupFileMonitor, setupStatusItem, isRunningTests implementations) ...
+    // ... (setupFileMonitor, setupStatusItem, isRunningTests implementations - logs added within methods) ...
     func setupFileMonitor() {
+        print("[AppDelegate] setupFileMonitor: Setting up config directory watcher.")
         Task {
-            for await _ in Defaults.updates(.configDir) {
-                self.fileMonitor?.stopMonitoring()
-                self.fileMonitor = FileMonitor(fileURL: config.url) { self.config.reloadConfig() }
+            // Observe changes to the config directory path stored in Defaults
+            for await newDir in Defaults.updates(.configDir) {
+                print("[AppDelegate] Config directory changed to: \(newDir). Restarting file monitor.")
+                self.fileMonitor?.stopMonitoring() // Stop previous monitor if any
+                self.fileMonitor = FileMonitor(fileURL: config.url) { // Create new monitor for the current config URL
+                    print("[AppDelegate] FileMonitor detected change in config file. Reloading...")
+                    self.config.reloadConfig()
+                }
                 self.fileMonitor.startMonitoring()
+                 print("[AppDelegate] FileMonitor started for: \(config.url.path)")
             }
         }
     }
 
     func setupStatusItem() {
-        statusItem.handlePreferences = { self.settingsWindowController.show(); NSApp.activate(ignoringOtherApps: true) }
-        statusItem.handleReloadConfig = { self.config.reloadConfig() }
-        statusItem.handleRevealConfig = { NSWorkspace.shared.activateFileViewerSelecting([self.config.url]) }
-        statusItem.handleCheckForUpdates = { self.updaterController.checkForUpdates(nil) }
-        Task { 
+        print("[AppDelegate] setupStatusItem: Configuring status bar menu item.")
+        // Assign actions to the status item menu options
+        statusItem.handlePreferences = {
+            print("[StatusItem] Preferences clicked.")
+            self.settingsWindowController.show()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        statusItem.handleReloadConfig = {
+             print("[StatusItem] Reload Config clicked.")
+            self.config.reloadConfig()
+        }
+        statusItem.handleRevealConfig = {
+            print("[StatusItem] Reveal Config clicked.")
+            NSWorkspace.shared.activateFileViewerSelecting([self.config.url])
+        }
+        statusItem.handleCheckForUpdates = {
+            print("[StatusItem] Check for Updates clicked.")
+            self.updaterController.checkForUpdates(nil)
+        }
+        // Observe changes to the preference for showing the menu bar icon
+        Task {
             for await value in Defaults.updates(.showMenuBarIcon) {
                 DispatchQueue.main.async {
+                    print("[AppDelegate] Show Menu Bar Icon setting changed to: \(value). Updating status item visibility.")
                     if value {
                         self.statusItem.enable()
                     } else {
@@ -240,8 +322,11 @@ private extension AppDelegate {
         }
     }
 
+    // Helper to check if running within Xcode's testing environment
     func isRunningTests() -> Bool {
-        return ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+        let isTesting = ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+        if isTesting { print("[AppDelegate] isRunningTests detected.") }
+        return isTesting
     }
 }
 
@@ -285,33 +370,53 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
 // MARK: - URL Scheme Handling
 extension AppDelegate {
-    // ... (URL handling method implementations) ...
+    // Handles opening the app via leaderkey:// URLs
     func application(_ application: NSApplication, open urls: [URL]) {
+         print("[AppDelegate] application:open:urls: Received URL(s): \(urls.map { $0.absoluteString })")
         for url in urls { handleURL(url) }
     }
 
     private func handleURL(_ url: URL) {
-        guard url.scheme == "leaderkey" else { return }
+        print("[AppDelegate] handleURL: Processing URL: \(url.absoluteString)")
+        guard url.scheme == "leaderkey" else {
+             print("[AppDelegate] handleURL: Ignoring URL with incorrect scheme.")
+             return
+        }
+        // Always show the window when opened via URL scheme
         show()
-        if url.host == "navigate",
+        if url.host == "navigate", // Expecting leaderkey://navigate?keys=a,b,c
            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            let queryItems = components.queryItems,
            let keysParam = queryItems.first(where: { $0.name == "keys" })?.value
         {
             let keys = keysParam.split(separator: ",").map(String.init)
-            processKeys(keys)
+             print("[AppDelegate] handleURL: Navigating with keys: \(keys)")
+            processKeys(keys) // Process the sequence provided in the URL
+        } else {
+             print("[AppDelegate] handleURL: URL host is not 'navigate' or keys parameter is missing.")
         }
     }
 
+    // Processes a sequence of keys provided, typically from a URL scheme
     private func processKeys(_ keys: [String]) {
-        guard !keys.isEmpty else { return }
+        guard !keys.isEmpty else {
+             print("[AppDelegate] processKeys: No keys to process.")
+             return
+        }
+        // Handle the first key immediately
+        print("[AppDelegate] processKeys: Handling key '\(keys[0])'")
         controller.handleKey(keys[0])
+        // Handle subsequent keys with a slight delay between each to simulate typing
         if keys.count > 1 {
             let remainingKeys = Array(keys.dropFirst())
-            var delayMs = 100
+            var delayMs = 100 // Initial delay for the second key
             for key in remainingKeys {
-                delay(delayMs) { [weak self] in self?.controller.handleKey(key) }
-                delayMs += 100
+                print("[AppDelegate] processKeys: Scheduling key '\(key)' with delay \(delayMs)ms.")
+                delay(delayMs) { [weak self] in
+                    print("[AppDelegate] processKeys: Handling delayed key '\(key)'")
+                    self?.controller.handleKey(key)
+                }
+                delayMs += 100 // Increase delay for subsequent keys
             }
         }
     }
@@ -356,65 +461,92 @@ extension AppDelegate {
 
     // --- Event Tap Logic Methods ---
     func startEventTapMonitoring() {
-        guard !isMonitoring else { return } // Already monitoring
-        print("[AppDelegate] Attempting to start event tap monitoring...")
+        // Ensure we don't start multiple taps
+        guard !isMonitoring else {
+            print("[AppDelegate] startEventTapMonitoring: Already monitoring. Aborting.")
+            return
+        }
+        print("[AppDelegate] startEventTapMonitoring: Attempting to start...")
 
-        // Attempt to create the event tap
-        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        // Create the event tap. This requires Accessibility permissions.
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue) // Listen only for key down events
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, 
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: eventTapCallback, 
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            tap: .cgSessionEventTap, // Listen to all processes in the current session
+            place: .headInsertEventTap, // Insert tap before other taps
+            options: .defaultTap, // Default behavior
+            eventsOfInterest: eventMask, // Mask for key down events
+            callback: eventTapCallback, // C function callback defined globally
+            userInfo: Unmanaged.passUnretained(self).toOpaque() // Pass reference to self
         ) else {
-            print("[AppDelegate] Failed to create event tap. Permissions likely missing.")
-            // Check permissions status *after* failure, without prompting user here
+            // Failure usually means Accessibility permissions are missing or denied.
+            print("[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing.")
+            // Check permissions status *after* failure, only prompt if we haven't recently.
             if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
-                print("[AppDelegate] Permissions check failed and alert not shown recently. Showing alert.")
+                print("[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert.")
                 showPermissionsAlert()
-                self.didShowPermissionsAlertRecently = true
-                // Reset the flag after a delay to allow re-prompting later if needed
+                self.didShowPermissionsAlertRecently = true // Flag to avoid spamming alerts
+                // Reset the flag after a short delay to allow re-prompting later if needed
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                     print("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
                     self.didShowPermissionsAlertRecently = false
                 }
             } else {
-                print("[AppDelegate] Permissions check passed OR alert shown recently. Not showing alert now.")
+                print("[AppDelegate] startEventTapMonitoring: Accessibility check passed OR alert shown recently. Not showing permissions alert now.")
             }
             return // Stop, as tap creation failed
         }
-        
+
         // Tap creation successful, proceed with setup
-        print("[AppDelegate] Event tap created successfully.")
+        print("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
         self.eventTap = tap
+        // Create a run loop source from the tap and add it to the current run loop
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         self.runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        // Enable the tap
         CGEvent.tapEnable(tap: tap, enable: true)
-        self.isMonitoring = true
-        self.didShowPermissionsAlertRecently = false // Reset flag as monitoring is now active
-        print("[AppDelegate] Event tap enabled and monitoring started.")
+        self.isMonitoring = true // Set monitoring state
+        self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
+        print("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
     }
 
     func stopEventTapMonitoring() {
-        // ... (implementation as before) ...
-        guard isMonitoring else { return }
-        print("[AppDelegate] Stopping event tap.")
-        resetSequenceState()
-        if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes); self.runLoopSource = nil }
-        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false); self.eventTap = nil }
-        self.isMonitoring = false
-        print("[AppDelegate] Monitoring stopped.")
+        guard isMonitoring else {
+             print("[AppDelegate] stopEventTapMonitoring: Not currently monitoring. Aborting.")
+             return
+        }
+        print("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
+        resetSequenceState() // Ensure sequence state is cleared
+        // Remove run loop source and invalidate the tap
+        if let source = runLoopSource {
+             print("[AppDelegate] stopEventTapMonitoring: Removing run loop source.")
+             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+             self.runLoopSource = nil
+        }
+        if let tap = eventTap {
+             print("[AppDelegate] stopEventTapMonitoring: Disabling and releasing tap.")
+             CGEvent.tapEnable(tap: tap, enable: false) // Disable first
+             self.eventTap = nil // Release reference
+        }
+        self.isMonitoring = false // Update state
+        print("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
 
+    // This is the entry point called by the C callback `eventTapCallback`
     func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // ... (implementation as before) ...
+        // Ignore events other than key down
         guard event.type == .keyDown else { return Unmanaged.passRetained(event) }
-        guard let nsEvent = NSEvent(cgEvent: event) else { return Unmanaged.passRetained(event) }
-        // Pass the original CGEvent along
+        // Try to convert CGEvent to NSEvent to easily access key code and modifiers
+        guard let nsEvent = NSEvent(cgEvent: event) else {
+             print("[AppDelegate] handleCGEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
+             return Unmanaged.passRetained(event)
+        }
+        // Process the key event using our main logic function
+         print("[AppDelegate] handleCGEvent: Received keyDown, keyCode: \(nsEvent.keyCode), mods: \(nsEvent.modifierFlags). Processing...")
         let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+
+        // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
+         print("[AppDelegate] handleCGEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
         return handled ? nil : Unmanaged.passRetained(event)
     }
 
@@ -470,46 +602,81 @@ extension AppDelegate {
             }
         }
 
-        // 4. If NOT activation or Escape, check if we are in a sequence
+        // 4. If NOT activation, Escape, or Cmd+, check if we are in a sequence
         if currentSequenceGroup != nil {
+            print("[AppDelegate] processKeyEvent: Active sequence detected. Processing key within sequence...")
             // processKeyInSequence now only shakes on error or processes valid keys,
             // always returning true to consume the event within the sequence.
             return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
         }
 
-        // 5. If NOT activation, Escape, or in a sequence, let the event pass through
-        print("[AppDelegate] processKeyEvent: No activation, Escape, or active sequence. Passing event.")
+        // 5. If NOT activation, Escape, Cmd+, or in a sequence, let the event pass through
+        print("[AppDelegate] processKeyEvent: No activation shortcut, Escape, Cmd+, or active sequence matched. Passing event through.")
         return false
     }
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        print("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), modifiers: \(modifiers)")
+        // Get the single character string representation for the key event
         guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
-            // Invalid keyString mapping - just shake
+            // If we can't map the key event to a string (should be rare), shake the window.
+            print("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
             DispatchQueue.main.async { self.controller.window.shake() }
             return true // Event handled (by shaking)
         }
+
+        print("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
+
+        // Check if the keyString matches an action or group within the currently active group
         if let currentGroup = currentSequenceGroup, let hit = currentGroup.actions.first(where: { $0.item.key == keyString }) {
+            print("[AppDelegate] processKeyInSequence: Found match for '\(keyString)' in group '\(currentGroup.displayName).'")
             switch hit {
-            case .action(let action): controller.runAction(action); if !isInStickyMode(modifiers) { hide() }; resetSequenceState(); return true
-            case .group(let subgroup): currentSequenceGroup = subgroup; controller.userState.navigateToGroup(subgroup); return true
+            case .action(let action):
+                print("[AppDelegate] processKeyInSequence: Matched ACTION: '\(action.displayName)' (\(action.value)).")
+                // Run the action
+                controller.runAction(action)
+                // Check for Sticky Mode (keep window open after action)
+                if !isInStickyMode(modifiers) {
+                     print("[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence.")
+                     hide()
+                     resetSequenceState()
+                } else {
+                    print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Resetting sequence, keeping window open.")
+                    resetSequenceState() // Reset sequence state but keep window open
+                }
+                return true // Event handled
+            case .group(let subgroup):
+                print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                // Navigate into the subgroup
+                currentSequenceGroup = subgroup // Update sequence state
+                controller.userState.navigateToGroup(subgroup) // Update UI state
+                return true // Event handled
             }
         } else {
-            // Key not found in the current group - just shake
+            // Key not found in the current group - shake the window to indicate error
+            let groupName = currentSequenceGroup?.displayName ?? "(nil)"
+            print("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName).'")
             DispatchQueue.main.async { self.controller.window.shake() }
             return true // Event handled (by shaking)
         }
     }
 
+    // This function is called when an activation shortcut is pressed or via URL scheme.
+    // It sets up the initial state for a new key sequence based on the loaded config.
     private func startSequence(activationType: Controller.ActivationType) {
-        print("[AppDelegate] startSequence: type: \(activationType)")
-        
-        // Get the root group determined by the show() method via the controller's state
+        print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
+
+        // Get the root group determined by the show() method via the controller's UserState
+        // UserState.activeRoot should have been set by Controller.show() just before this.
         guard let rootGroup = controller.userState.activeRoot else {
-            print("[AppDelegate] Error: startSequence called but controller.userState.activeRoot is nil. Falling back to default config.")
+            // This should ideally not happen if Controller.show() worked correctly.
+            print("[AppDelegate] startSequence: ERROR - controller.userState.activeRoot is nil! Falling back to default config root.")
             // Fallback logic, though this indicates a potential issue elsewhere
-            self.activeRootGroup = config.root
-            self.currentSequenceGroup = config.root
+            self.activeRootGroup = config.root // Store the determined root group locally
+            self.currentSequenceGroup = config.root // Start the sequence at this root
+            // If the window is somehow visible, try to update its UI state.
             if self.controller.window.isVisible {
+                 print("[AppDelegate] startSequence (Fallback): Window visible, navigating UI to default root.")
                 DispatchQueue.main.async {
                     self.controller.userState.navigateToGroup(self.config.root)
                 }
@@ -517,60 +684,100 @@ extension AppDelegate {
             return
         }
 
-        // Set the sequence state using the already loaded active root
+        // Store the root group for the current sequence and set the current level to the root.
+        print("[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'")
         self.activeRootGroup = rootGroup
         self.currentSequenceGroup = rootGroup
-        
-        // Update UI if window is already visible
+
+        // If the window is already visible (e.g., reactivation with .reset), update the UI state.
         if self.controller.window.isVisible {
+             print("[AppDelegate] startSequence: Window is visible, updating UI state for root group.")
             DispatchQueue.main.async {
+                // Ensure UI reflects the start of the sequence at the root group.
                 self.controller.userState.navigateToGroup(rootGroup)
             }
         }
+         print("[AppDelegate] startSequence: Sequence setup complete.")
     }
 
+    // Resets the internal state variables used to track the current key sequence.
     private func resetSequenceState() {
-        // ... (implementation as before) ...
+        // Only perform reset if a sequence is actually active
         if currentSequenceGroup != nil || activeRootGroup != nil {
-            self.currentSequenceGroup = nil; self.activeRootGroup = nil
-            DispatchQueue.main.async { self.controller.userState.clear() }
+            print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
+            self.currentSequenceGroup = nil
+            self.activeRootGroup = nil
+            // Also tell the UserState to clear its navigation path etc. on the main thread
+            DispatchQueue.main.async {
+                 print("[AppDelegate] resetSequenceState: Dispatching UserState.clear() to main thread.")
+                 self.controller.userState.clear()
+            }
+        } else {
+            print("[AppDelegate] resetSequenceState: No active sequence to reset.")
         }
     }
 
+    // Checks if the 'Sticky Mode' modifier key is held down.
     private func isInStickyMode(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
         let config = Defaults[.modifierKeyConfiguration]
-        // Expand switch statement to fix line length
+        let isSticky: Bool
         switch config {
         case .controlGroupOptionSticky:
-            return modifierFlags.contains(.option)
+            isSticky = modifierFlags.contains(.option)
         case .optionGroupControlSticky:
-            return modifierFlags.contains(.control)
+            isSticky = modifierFlags.contains(.control)
         }
+         print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(modifierFlags), IsSticky = \(isSticky)")
+        return isSticky
     }
 
+    // Converts a key event into a single character string suitable for matching against config keys.
+    // Handles forced English layout if enabled.
     private func keyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
-        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] { return modifiers.contains(.shift) ? mapped.uppercased() : mapped }
-        switch keyCode {
-            case 36: return "\u{21B5}"; case 48: return "\t"; case 49: return " "; case 51: return "\u{0008}"; case KeyCodes.escape: return "\u{001B}"
-            case 126: return "↑"; case 125: return "↓"; case 123: return "←"; case 124: return "→"
-            default:
-                guard let tempEvent = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else { return nil }
-                tempEvent.flags = CGEventFlags(rawValue: UInt64(modifiers.rawValue))
-                var length = 0
-                var chars = [UniChar](repeating: 0, count: 4)
-                tempEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
-                return length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
+        // Option 1: Forced English Layout (ignores current system layout)
+        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
+            let result = modifiers.contains(.shift) ? mapped.uppercased() : mapped
+             print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode) -> '\(result)'")
+             return result
         }
+        // Option 2: Use system layout mapping for special keys or standard characters
+        let result: String?
+        switch keyCode {
+            // Map specific key codes to representative strings
+            case 36: result = "\u{21B5}" // Enter
+            case 48: result = "\t" // Tab
+            case 49: result = " " // Space
+            case 51: result = "\u{0008}" // Backspace
+            case KeyCodes.escape: result = "\u{001B}" // Escape
+            case 126: result = "↑" // Up Arrow
+            case 125: result = "↓" // Down Arrow
+            case 123: result = "←" // Left Arrow
+            case 124: result = "→" // Right Arrow
+            default:
+                // For other keys, get the Unicode string respecting current layout and modifiers
+                // We use the original CGEvent for this, as NSEvent might not have the right characters.
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4) // Buffer for characters
+                cgEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
+                result = length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
+        }
+         print("[AppDelegate] keyStringForEvent (System Layout): keyCode \(keyCode), mods \(modifiers) -> '\(result ?? "nil")'")
+        return result
     }
 
     // --- Permissions Helpers ---
+    // Checks if Accessibility permissions are granted *without* prompting the user.
     private func checkAccessibilityPermissions() -> Bool {
-        // ... (implementation as before) ...
         let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
-        let options = [checkOptPrompt: false]; let enabled = AXIsProcessTrustedWithOptions(options as CFDictionary); return enabled
+        let options = [checkOptPrompt: false] // Option to not prompt
+        let enabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
+         print("[AppDelegate] checkAccessibilityPermissions: AXIsProcessTrustedWithOptions returned \(enabled).")
+        return enabled
     }
     
+    // Shows the standard alert explaining why Accessibility is needed and offering to open Settings.
     private func showPermissionsAlert() {
+         print("[AppDelegate] showPermissionsAlert: Displaying Accessibility permissions alert.")
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "Accessibility Permissions May Be Required"
