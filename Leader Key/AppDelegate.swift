@@ -542,7 +542,9 @@ extension AppDelegate {
              return Unmanaged.passRetained(event)
         }
         // Process the key event using our main logic function
-         print("[AppDelegate] handleCGEvent: Received keyDown, keyCode: \(nsEvent.keyCode), mods: \(nsEvent.modifierFlags). Processing...")
+        // Let's get the mapped key string here for better logging
+        let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
+        print("[AppDelegate] handleCGEvent: Received keyDown, keyCode: \(nsEvent.keyCode) ('\(mappedKeyString)'), mods: \(describeModifiers(nsEvent.modifierFlags)). Processing...")
         let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
 
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
@@ -616,7 +618,7 @@ extension AppDelegate {
     }
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        print("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), modifiers: \(modifiers)")
+        print("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))")
         // Get the single character string representation for the key event
         guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
             // If we can't map the key event to a string (should be rare), shake the window.
@@ -727,7 +729,7 @@ extension AppDelegate {
         case .optionGroupControlSticky:
             isSticky = modifierFlags.contains(.control)
         }
-         print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(modifierFlags), IsSticky = \(isSticky)")
+        print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(describeModifiers(modifierFlags)), IsSticky = \(isSticky)")
         return isSticky
     }
 
@@ -737,8 +739,8 @@ extension AppDelegate {
         // Option 1: Forced English Layout (ignores current system layout)
         if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
             let result = modifiers.contains(.shift) ? mapped.uppercased() : mapped
-             print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode) -> '\(result)'")
-             return result
+            print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode) -> '\(result)'")
+            return result
         }
         // Option 2: Use system layout mapping for special keys or standard characters
         let result: String?
@@ -761,8 +763,20 @@ extension AppDelegate {
                 cgEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
                 result = length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
         }
-         print("[AppDelegate] keyStringForEvent (System Layout): keyCode \(keyCode), mods \(modifiers) -> '\(result ?? "nil")'")
+        print("[AppDelegate] keyStringForEvent (System Layout): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")'")
         return result
+    }
+
+    // Helper function to create a readable string for modifier flags
+    private func describeModifiers(_ modifiers: NSEvent.ModifierFlags) -> String {
+        var parts: [String] = []
+        if modifiers.contains(.command) { parts.append("Cmd") }
+        if modifiers.contains(.option) { parts.append("Opt") }
+        if modifiers.contains(.control) { parts.append("Ctrl") }
+        if modifiers.contains(.shift) { parts.append("Shift") }
+        if modifiers.contains(.capsLock) { parts.append("CapsLock") } // Include CapsLock for completeness
+        if parts.isEmpty { return "[None]" }
+        return "[" + parts.joined(separator: "][") + "]"
     }
 
     // --- Permissions Helpers ---
@@ -771,13 +785,13 @@ extension AppDelegate {
         let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
         let options = [checkOptPrompt: false] // Option to not prompt
         let enabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
-         print("[AppDelegate] checkAccessibilityPermissions: AXIsProcessTrustedWithOptions returned \(enabled).")
+        print("[AppDelegate] checkAccessibilityPermissions: AXIsProcessTrustedWithOptions returned \(enabled).")
         return enabled
     }
     
     // Shows the standard alert explaining why Accessibility is needed and offering to open Settings.
     private func showPermissionsAlert() {
-         print("[AppDelegate] showPermissionsAlert: Displaying Accessibility permissions alert.")
+        print("[AppDelegate] showPermissionsAlert: Displaying Accessibility permissions alert.")
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "Accessibility Permissions May Be Required"
