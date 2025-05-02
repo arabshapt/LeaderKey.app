@@ -117,25 +117,6 @@ class Controller {
       scheduleCheatsheet()
     }
 
-    if event.modifierFlags.contains(.command) {
-      switch event.charactersIgnoringModifiers {
-      case ",":
-        NSApp.sendAction(
-          #selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil,
-          from: nil)
-        hide()
-        return
-      case "w":
-        hide()
-        return
-      case "q":
-        NSApp.terminate(nil)
-        return
-      default:
-        break
-      }
-    }
-
     switch event.keyCode {
     case KeyHelpers.backspace.rawValue:
       clear()

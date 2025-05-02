@@ -405,11 +405,12 @@ extension AppDelegate {
         // ... (implementation as before) ...
         guard event.type == .keyDown else { return Unmanaged.passRetained(event) }
         guard let nsEvent = NSEvent(cgEvent: event) else { return Unmanaged.passRetained(event) }
-        let handled = processKeyEvent(keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+        // Pass the original CGEvent along
+        let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
         return handled ? nil : Unmanaged.passRetained(event)
     }
 
-    private func processKeyEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+    private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         // 1. Check for activation shortcuts FIRST
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
         let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
@@ -430,6 +431,16 @@ extension AppDelegate {
         if let type = matchedActivationType {
             handleActivation(type: type) // This handles show/hide/reset logic
             return true // Consume the activation shortcut press
+        }
+
+        // NEW: Check for Cmd+, to open Settings
+        if modifiers.contains(.command), let nsEvent = NSEvent(cgEvent: cgEvent), nsEvent.charactersIgnoringModifiers == "," {
+            print("[AppDelegate] Cmd+, detected via event tap. Opening settings.")
+            NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
+            // Reset sequence state and hide the panel
+            resetSequenceState()
+            DispatchQueue.main.async { self.hide() }
+            return true // Consume the Cmd+, press
         }
 
         // 3. If NOT an activation shortcut, check for Escape
@@ -455,7 +466,7 @@ extension AppDelegate {
         if currentSequenceGroup != nil {
             // processKeyInSequence now only shakes on error or processes valid keys,
             // always returning true to consume the event within the sequence.
-            return processKeyInSequence(keyCode: keyCode, modifiers: modifiers)
+            return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
         }
 
         // 5. If NOT activation, Escape, or in a sequence, let the event pass through
@@ -463,8 +474,8 @@ extension AppDelegate {
         return false
     }
 
-    private func processKeyInSequence(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        guard let keyString = keyStringForEvent(keyCode: keyCode, modifiers: modifiers) else {
+    private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
             // Invalid keyString mapping - just shake
             DispatchQueue.main.async { self.controller.window.shake() }
             return true // Event handled (by shaking)
@@ -529,7 +540,7 @@ extension AppDelegate {
         }
     }
 
-    private func keyStringForEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
+    private func keyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
         if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] { return modifiers.contains(.shift) ? mapped.uppercased() : mapped }
         switch keyCode {
             case 36: return "\u{21B5}"; case 48: return "\t"; case 49: return " "; case 51: return "\u{0008}"; case KeyCodes.escape: return "\u{001B}"
