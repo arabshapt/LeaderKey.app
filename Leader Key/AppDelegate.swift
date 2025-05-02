@@ -122,6 +122,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupFileMonitor()      // Defined in private extension
         setupStatusItem()       // Defined in private extension
         startEventTapMonitoring() // Defined in Event Tap Handling extension
+
+        // Add a delayed check to retry starting the event tap if it failed initially
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { // Wait 1 second
+            if !self.isMonitoring {
+                print("[AppDelegate] Delayed check: Still not monitoring. Retrying startEventTapMonitoring()...")
+                self.startEventTapMonitoring()
+            }
+        }
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
