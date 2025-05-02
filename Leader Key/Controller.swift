@@ -349,15 +349,31 @@ class Controller {
       return
     }
 
-    if scheme == "http" || scheme == "https" {
-      NSWorkspace.shared.open(
-        url,
-        configuration: NSWorkspace.OpenConfiguration())
+    // Determine the configuration based on action.activates or scheme
+    let configurationToUse: NSWorkspace.OpenConfiguration
+    let shouldActivate: Bool
+
+    if let explicitlySetActivates = action.activates {
+      // User explicitly set the value
+      shouldActivate = explicitlySetActivates
+      print("[Controller] openURL: 'activates' explicitly set to \(shouldActivate) for \(action.value)")
     } else {
-      NSWorkspace.shared.open(
-        url,
-        configuration: DontActivateConfiguration.shared.configuration)
+      // Fallback to default behavior based on scheme if activates is nil
+      shouldActivate = (scheme == "http" || scheme == "https")
+      print("[Controller] openURL: 'activates' not set, defaulting based on scheme ('\(scheme)') to \(shouldActivate) for \(action.value)")
     }
+
+    if shouldActivate {
+      configurationToUse = NSWorkspace.OpenConfiguration() // Default config activates
+    } else {
+      configurationToUse = DontActivateConfiguration.shared.configuration // Shared config does not activate
+    }
+
+    // Open the URL with the determined configuration
+    NSWorkspace.shared.open(
+      url,
+      configuration: configurationToUse
+    )
   }
 
   private func showAlert(title: String, message: String) {

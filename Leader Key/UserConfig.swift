@@ -136,6 +136,7 @@ struct Action: Item, Codable, Equatable {
   var label: String?
   var value: String
   var iconPath: String?
+  var activates: Bool?
 
   var displayName: String {
     guard let labelValue = label else { return bestGuessDisplayName }
@@ -193,7 +194,7 @@ enum ActionOrGroup: Codable, Equatable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, iconPath
+    case key, type, value, actions, label, iconPath, activates
   }
 
   init(from decoder: Decoder) throws {
@@ -202,6 +203,7 @@ enum ActionOrGroup: Codable, Equatable {
     let type = try container.decode(Type.self, forKey: .type)
     let label = try container.decodeIfPresent(String.self, forKey: .label)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
+    let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
 
     switch type {
     case .group:
@@ -209,7 +211,7 @@ enum ActionOrGroup: Codable, Equatable {
       self = .group(Group(key: key, label: label, iconPath: iconPath, actions: actions))
     default:
       let value = try container.decode(String.self, forKey: .value)
-      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath))
+      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates))
     }
   }
 
@@ -224,6 +226,7 @@ enum ActionOrGroup: Codable, Equatable {
         try container.encodeIfPresent(action.label, forKey: .label)
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
+      try container.encodeIfPresent(action.activates, forKey: .activates)
     case .group(let group):
       try container.encode(group.key, forKey: .key)
       try container.encode(Type.group, forKey: .type)

@@ -286,6 +286,16 @@ struct ActionRow: View {
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .shortcut:
         TextField("Shortcut (e.g., CSb, Oa)", text: $action.value)
+      case .url:
+        HStack {
+          TextField("URL", text: $action.value)
+          Toggle("Activates", isOn: Binding(
+            get: { action.activates ?? true },
+            set: { action.activates = $0 }
+          ))
+          .toggleStyle(.checkbox)
+          .frame(width: 90)
+        }
       default:
         TextField("Value", text: $action.value)
       }
