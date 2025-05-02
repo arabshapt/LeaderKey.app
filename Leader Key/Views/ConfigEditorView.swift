@@ -241,6 +241,7 @@ struct ActionRow: View {
         Text("URL").tag(Type.url)
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
+        Text("Shortcut").tag(Type.shortcut)
       }
       .frame(width: 110)
       .labelsHidden()
@@ -283,6 +284,8 @@ struct ActionRow: View {
           }
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
+      case .shortcut:
+        TextField("Shortcut (e.g., CSb, Oa)", text: $action.value)
       default:
         TextField("Value", text: $action.value)
       }

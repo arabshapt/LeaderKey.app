@@ -575,16 +575,6 @@ extension AppDelegate {
             return true // Consume the activation shortcut press
         }
 
-        // Check for Cmd+, but ONLY if the Leader Key window is currently visible
-        if self.controller.window.isVisible && modifiers.contains(.command), let nsEvent = NSEvent(cgEvent: cgEvent), nsEvent.charactersIgnoringModifiers == "," {
-            print("[AppDelegate] Cmd+, detected via event tap WHILE WINDOW VISIBLE. Opening settings.")
-            NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
-            // Reset sequence state and hide the panel
-            resetSequenceState()
-            DispatchQueue.main.async { self.hide() }
-            return true // Consume the Cmd+, press
-        }
-
         // 3. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let isWindowVisible = self.controller.window.isVisible

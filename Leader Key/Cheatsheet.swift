@@ -44,7 +44,8 @@ enum Cheatsheet {
         }
         Spacer()
         if showDetails {
-          Text(action.value)
+          let detailText = (action.type == .shortcut) ? "Shortcut: \(action.value)" : action.value
+          Text(detailText)
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .truncationMode(.middle)

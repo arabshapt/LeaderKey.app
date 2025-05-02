@@ -119,6 +119,7 @@ enum Type: String, Codable {
   case url
   case command
   case folder
+  case shortcut
 }
 
 protocol Item {
@@ -153,6 +154,8 @@ struct Action: Item, Codable, Equatable {
       return (value as NSString).lastPathComponent
     case .url:
       return "URL"
+    case .shortcut:
+      return "Shortcut: \(value)"
     default:
       return value
     }
