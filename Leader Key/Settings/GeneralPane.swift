@@ -5,7 +5,7 @@ import Settings
 import SwiftUI
 
 struct GeneralPane: View {
-  private let contentWidth = 450.0
+  private let contentWidth = 900.0
   @EnvironmentObject private var config: UserConfig
   @Default(.configDir) var configDir
   @Default(.theme) var theme

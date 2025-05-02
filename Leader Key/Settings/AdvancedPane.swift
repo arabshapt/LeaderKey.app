@@ -5,7 +5,7 @@ import Settings
 import SwiftUI
 
 struct AdvancedPane: View {
-  private let contentWidth = 640.0
+  private let contentWidth = 900.0
 
   @EnvironmentObject private var config: UserConfig
 

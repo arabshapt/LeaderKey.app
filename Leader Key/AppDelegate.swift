@@ -52,8 +52,10 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 
 // Define the view for the Shortcuts pane
 fileprivate struct KeyboardShortcutsView: View {
+    private let contentWidth = 900.0
+    
     var body: some View {
-        Settings.Container(contentWidth: 450.0) {
+        Settings.Container(contentWidth: contentWidth) {
             Settings.Section(title: "Global Activation Shortcuts") {
                 Form {
                     KeyboardShortcuts.Recorder("Activate (App-Specific):", name: .activateAppSpecific)
@@ -142,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func settingsMenuItemActionHandler(_: NSMenuItem) { 
       // Configure window properties before showing
       if let window = settingsWindowController.window {
-          window.styleMask.insert(.resizable)
+          window.styleMask.insert(NSWindow.StyleMask.resizable)
           window.minSize = NSSize(width: 450, height: 650) // Set minimum size
       }
       settingsWindowController.show()
@@ -151,7 +153,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) { controller.show(type: type, completion: completion) }
 
-    func hide() { controller.hide() }
+    func hide() { 
+      print("[AppDelegate] hide() called.") // Log entry into hide()
+      controller.hide() 
+    }
 
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
@@ -328,19 +333,25 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
         set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
     }
+    private var didShowPermissionsAlertRecently: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
         static var isMonitoring = "isMonitoring"
         static var activeRootGroup = "activeRootGroup"
         static var currentSequenceGroup = "currentSequenceGroup"
+        static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
     }
 
     // --- Event Tap Logic Methods ---
     func startEventTapMonitoring() {
-        // ... (implementation as before) ...
-        guard !isMonitoring else { return }
+        guard !isMonitoring else { return } // Already monitoring
         print("[AppDelegate] Attempting to start event tap monitoring...")
+
+        // Attempt to create the event tap
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap, 
@@ -350,17 +361,33 @@ extension AppDelegate {
             callback: eventTapCallback, 
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("[AppDelegate] Failed to create event tap. Permissions?")
-            showPermissionsAlert()
-            return
+            print("[AppDelegate] Failed to create event tap. Permissions likely missing.")
+            // Check permissions status *after* failure, without prompting user here
+            if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
+                print("[AppDelegate] Permissions check failed and alert not shown recently. Showing alert.")
+                showPermissionsAlert()
+                self.didShowPermissionsAlertRecently = true
+                // Reset the flag after a delay to allow re-prompting later if needed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                    print("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
+                    self.didShowPermissionsAlertRecently = false
+                }
+            } else {
+                print("[AppDelegate] Permissions check passed OR alert shown recently. Not showing alert now.")
+            }
+            return // Stop, as tap creation failed
         }
+        
+        // Tap creation successful, proceed with setup
+        print("[AppDelegate] Event tap created successfully.")
         self.eventTap = tap
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         self.runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         self.isMonitoring = true
-        print("[AppDelegate] Event tap enabled.")
+        self.didShowPermissionsAlertRecently = false // Reset flag as monitoring is now active
+        print("[AppDelegate] Event tap enabled and monitoring started.")
     }
 
     func stopEventTapMonitoring() {
@@ -407,10 +434,21 @@ extension AppDelegate {
 
         // 3. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
-            let shouldHide = self.controller.window.isVisible
-            resetSequenceState()
-            if shouldHide { DispatchQueue.main.async { self.hide() } }
-            return true // Consume the Escape press
+            let isWindowVisible = self.controller.window.isVisible
+            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)") 
+            
+            if isWindowVisible {
+                // Normal case: Window is visible, reset state, hide, and consume event.
+                print("[AppDelegate] Escape: Window is visible. Resetting state and dispatching hide().")
+                resetSequenceState()
+                DispatchQueue.main.async { self.hide() }
+                return true // Consume the Escape press
+            } else {
+                // Inconsistent state: Window is visually present but isVisible is false.
+                // Do NOT reset state, do NOT hide, let the Escape key pass through.
+                print("[AppDelegate] Escape: Window isVisible is false (inconsistent state?). Passing event through.")
+                return false // Pass through the Escape press
+            }
         }
 
         // 4. If NOT activation or Escape, check if we are in a sequence
