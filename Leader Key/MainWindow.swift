@@ -43,7 +43,20 @@ class MainWindow: PanelWindow, NSWindowDelegate {
     // controller.hide() // Remove this line
   }
 
+  // Helper function to create a readable string for modifier flags (duplicated from AppDelegate)
+  private func describeModifiers(_ modifiers: NSEvent.ModifierFlags) -> String {
+      var parts: [String] = []
+      if modifiers.contains(.command) { parts.append("Cmd") }
+      if modifiers.contains(.option) { parts.append("Opt") }
+      if modifiers.contains(.control) { parts.append("Ctrl") }
+      if modifiers.contains(.shift) { parts.append("Shift") }
+      if modifiers.contains(.capsLock) { parts.append("CapsLock") }
+      if parts.isEmpty { return "[None]" }
+      return "[" + parts.joined(separator: "][") + "]"
+  }
+
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    print("[MainWindow] performKeyEquivalent received: mods: \(describeModifiers(event.modifierFlags)), chars: \(event.charactersIgnoringModifiers ?? "nil")")
     if event.modifierFlags.contains(.command) {
       controller.keyDown(with: event)
       return true

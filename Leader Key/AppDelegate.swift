@@ -596,14 +596,28 @@ extension AppDelegate {
 
         // 4. If NOT activation, Escape, or Cmd+, check if we are in a sequence
         if currentSequenceGroup != nil {
-            print("[AppDelegate] processKeyEvent: Active sequence detected. Processing key within sequence...")
-            // processKeyInSequence now only shakes on error or processes valid keys,
-            // always returning true to consume the event within the sequence.
+            // --- SPECIAL CHECK WITHIN ACTIVE SEQUENCE ---
+            // Check for Cmd+, specifically *before* normal sequence processing
+            if modifiers.contains(.command),
+               let nsEvent = NSEvent(cgEvent: cgEvent),
+               nsEvent.charactersIgnoringModifiers == "," 
+            {
+                print("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
+                NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
+                // Reset sequence state and hide the panel
+                resetSequenceState()
+                DispatchQueue.main.async { self.hide() }
+                return true // Consume the Cmd+, press
+            }
+            // --- END SPECIAL CHECK ---
+
+            // If not Cmd+, process the key normally within the sequence
+            print("[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence...")
             return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
         }
 
-        // 5. If NOT activation, Escape, Cmd+, or in a sequence, let the event pass through
-        print("[AppDelegate] processKeyEvent: No activation shortcut, Escape, Cmd+, or active sequence matched. Passing event through.")
+        // 5. If NOT activation, Escape, or in a sequence, let the event pass through
+        print("[AppDelegate] processKeyEvent: No activation shortcut, Escape, or active sequence matched. Passing event through.")
         return false
     }
 
