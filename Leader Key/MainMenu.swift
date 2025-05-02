@@ -13,7 +13,7 @@ class MainMenu: NSMenu {
       .separator(),
       NSMenuItem(
         title: "Preferences...", action: #selector(AppDelegate.settingsMenuItemActionHandler(_:)),
-        keyEquivalent: ","),
+        keyEquivalent: ""),
       .separator(),
       NSMenuItem(
         title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),

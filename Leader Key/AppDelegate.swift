@@ -575,9 +575,9 @@ extension AppDelegate {
             return true // Consume the activation shortcut press
         }
 
-        // NEW: Check for Cmd+, to open Settings
-        if modifiers.contains(.command), let nsEvent = NSEvent(cgEvent: cgEvent), nsEvent.charactersIgnoringModifiers == "," {
-            print("[AppDelegate] Cmd+, detected via event tap. Opening settings.")
+        // Check for Cmd+, but ONLY if the Leader Key window is currently visible
+        if self.controller.window.isVisible && modifiers.contains(.command), let nsEvent = NSEvent(cgEvent: cgEvent), nsEvent.charactersIgnoringModifiers == "," {
+            print("[AppDelegate] Cmd+, detected via event tap WHILE WINDOW VISIBLE. Opening settings.")
             NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
             // Reset sequence state and hide the panel
             resetSequenceState()

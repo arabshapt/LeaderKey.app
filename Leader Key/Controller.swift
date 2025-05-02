@@ -117,6 +117,31 @@ class Controller {
       scheduleCheatsheet()
     }
 
+    // Handle Command key shortcuts when the window is key
+    if event.modifierFlags.contains(.command) {
+      switch event.charactersIgnoringModifiers {
+      case ",":
+        print("[Controller] Cmd+, detected. Opening settings.")
+        NSApp.sendAction(
+          #selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil,
+          from: nil)
+        hide() // Hide the main window when settings open
+        return // Consume the event
+      case "w":
+         print("[Controller] Cmd+w detected. Hiding window.")
+         hide()
+         return // Consume the event
+      case "q":
+         print("[Controller] Cmd+q detected. Terminating app.")
+         NSApp.terminate(nil)
+         return // Consume the event
+      default:
+        print("[Controller] Unhandled Cmd+Key: \(event.charactersIgnoringModifiers ?? "nil")")
+        break // Let other Cmd key combinations pass through if needed
+      }
+    }
+
+    // Handle non-Command key presses for sequence/navigation
     switch event.keyCode {
     case KeyHelpers.backspace.rawValue:
       clear()
