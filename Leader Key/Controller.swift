@@ -492,21 +492,22 @@ class Controller {
           let firstChar = remainingString.first!
           var consumedModifier = false
 
+          // Modifier mapping: C=Cmd, T=Ctrl, O=Opt(Alt), S=Shift, F=Fn
           switch firstChar {
-          case "C":
+          case "C": // Was Command
               modifierFlags.insert(.maskCommand)
               consumedModifier = true
-          case "T":
+          case "T": // Was Control
               modifierFlags.insert(.maskControl)
               consumedModifier = true
-          case "O":
-              modifierFlags.insert(.maskAlternate) // Option/Alt
+          case "O": // Was Option/Alt
+              modifierFlags.insert(.maskAlternate)
               consumedModifier = true
-          case "S":
+          case "S": // Was Shift
               modifierFlags.insert(.maskShift)
               consumedModifier = true
-          case "F":
-              modifierFlags.insert(.maskSecondaryFn) // Fn key
+          case "F": // Was Fn
+              modifierFlags.insert(.maskSecondaryFn)
               consumedModifier = true
           default:
               break // Not a modifier character
