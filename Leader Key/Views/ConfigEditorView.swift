@@ -242,6 +242,7 @@ struct ActionRow: View {
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
         Text("Shortcut").tag(Type.shortcut)
+        Text("Type Text").tag(Type.text)
       }
       .frame(width: 110)
       .labelsHidden()
@@ -296,6 +297,8 @@ struct ActionRow: View {
           .toggleStyle(.checkbox)
           .frame(width: 90)
         }
+      case .text:
+        TextField("Text to type", text: $action.value)
       default:
         TextField("Value", text: $action.value)
       }

@@ -320,6 +320,8 @@ class Controller {
       NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     case .shortcut:
       runKeyboardShortcut(action.value)
+    case .text:
+      typeText(action.value)
     default:
       print("\(action.type) unknown")
     }
@@ -384,6 +386,51 @@ class Controller {
     alert.addButton(withTitle: "OK")
     alert.runModal()
   }
+
+  // --- Text Typing Helper --- START ---
+  private func typeText(_ textToType: String) {
+      print("[Controller] Attempting to type text: '\(textToType)'")
+      guard let source = CGEventSource(stateID: .hidSystemState) else {
+          print("Error: Failed to create CGEventSource for typing.")
+          showAlert(title: "Typing Error", message: "Could not create event source.")
+          return
+      }
+      let tapLocation = CGEventTapLocation.cghidEventTap
+
+      // Loop through each character in the string
+      for character in textToType {
+          // Get the Unicode value(s) for the character
+          guard let utf16Values = character.unicodeScalars.first?.value else {
+              print("Warning: Could not get Unicode value for character '\(character)'. Skipping.")
+              continue
+          }
+
+          // Create KeyDown event
+          guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else { // virtualKey 0 for Unicode
+              print("Error: Failed to create KeyDown CGEvent for character '\(character)'.")
+              continue
+          }
+          var charCode = UniChar(utf16Values)
+          eventDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
+          eventDown.post(tap: tapLocation)
+
+          // Tiny delay (adjust as needed)
+          // usleep(5000) // 5 milliseconds
+
+          // Create KeyUp event
+          guard let eventUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { // virtualKey 0 for Unicode
+              print("Error: Failed to create KeyUp CGEvent for character '\(character)'.")
+              continue
+          }
+          eventUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
+          eventUp.post(tap: tapLocation)
+          
+          // Add a small delay between characters (optional, makes typing feel more natural)
+          // usleep(10000) // 10 milliseconds
+      }
+      print("[Controller] Finished typing text.")
+  }
+  // --- Text Typing Helper --- END ---
 
   // --- Shortcut Execution Helpers --- START ---
 

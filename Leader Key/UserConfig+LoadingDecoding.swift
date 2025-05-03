@@ -80,29 +80,31 @@ extension UserConfig {
     // Helper to decode a config file from a given path
     // isDefaultConfig flag helps manage validation errors and critical error handling
     internal func decodeConfig(from filePath: String, suppressAlerts: Bool = false, isDefaultConfig: Bool) -> Group? {
-        guard fileManager.fileExists(atPath: filePath) else {
-            // Only treat missing default config as potentially critical (handled by caller)
-            if isDefaultConfig {
-                print("Warning: Default config file not found at: \(filePath)")
-            } // Don't show error for missing app-specific file here
+        let configName = (filePath as NSString).lastPathComponent
+        print("[UserConfig] Attempting to decode config: \(configName)")
+        
+        let data: Data
+        do {
+            data = try Data(contentsOf: URL(fileURLWithPath: filePath))
+            print("[UserConfig] Successfully read data from: \(configName)")
+        } catch {
+            // Handle file reading errors (permissions, not found etc.)
+            print("[UserConfig] Error reading file \(configName): \(error.localizedDescription)")
+            // Show critical alert only if it's the essential default config and not suppressed
+            if isDefaultConfig && !suppressAlerts {
+                alertHandler.showAlert(
+                    style: .critical,
+                    message: "Failed to read default config file (config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
+                )
+            }
+            // Don't show alerts for non-critical app-specific files that fail to read
             return nil
         }
 
         do {
-            let configString = try String(contentsOfFile: filePath, encoding: .utf8)
-
-            guard let jsonData = configString.data(using: .utf8) else {
-                throw NSError(
-                    domain: "UserConfig",
-                    code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: "Failed to encode config file as UTF-8: \(filePath)"
-                    ]
-                )
-            }
-
             let decoder = JSONDecoder()
-            let decodedRoot = try decoder.decode(Group.self, from: jsonData)
+            let decodedRoot = try decoder.decode(Group.self, from: data)
+            print("[UserConfig] Successfully decoded JSON for: \(configName)")
 
             // Perform validation regardless, but only show alerts/update main state for default config
             let errors = ConfigValidator.validate(group: decodedRoot)
@@ -110,20 +112,62 @@ extension UserConfig {
                 if isDefaultConfig {
                     // Store errors only if it's the default config being decoded in a context
                     // where we should update the main validationErrors state (e.g., initial load)
-                    // This assignment might be redundant if caller updates validationErrors anyway.
-                    // validationErrors = errors
-                    showValidationAlert() // Show alert only for default config
+                    // self.validationErrors = errors // Caller should set this based on context
+                    print("[UserConfig] Validation issues found in default config (config.json).")
+                    showValidationAlert() // Show general validation alert for default config
                 } else {
                     // Log validation issues for app-specific configs, but don't trigger primary alert/state
-                    print("Validation issues found in app-specific config: \(filePath)")
+                    print("[UserConfig] Validation issues found in app-specific config: \(configName)")
                 }
             }
             return decodedRoot
+        } catch let decodingError as DecodingError {
+            // Handle JSON Decoding errors specifically
+            let errorDesc = formatDecodingError(decodingError, in: configName)
+            print("[UserConfig] Error decoding JSON for \(configName): \(errorDesc)")
+            if isDefaultConfig && !suppressAlerts {
+                 alertHandler.showAlert(
+                    style: .critical,
+                    message: "Error decoding default config file (config.json):\n\(errorDesc)\n\nUsing empty configuration."
+                 )
+            } else if !isDefaultConfig && !suppressAlerts {
+                // Optionally show a less critical alert for app-specific file errors
+                alertHandler.showAlert(
+                    style: .warning,
+                    message: "Error decoding app-specific config file \(configName):\n\(errorDesc)\n\nThis config will be ignored."
+                 )
+            }
+            return nil
         } catch {
-            // Handle critical errors only for the default config.json
-            handleError(error, critical: isDefaultConfig)
-            return nil // Return nil on any decoding error
+            // Handle other potential errors during the process
+            print("[UserConfig] Unexpected error processing config \(configName): \(error.localizedDescription)")
+             if isDefaultConfig && !suppressAlerts {
+                 alertHandler.showAlert(
+                    style: .critical,
+                    message: "Unexpected error processing default config file (config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
+                 )
+             } // Ignore other errors for non-default configs unless alerts enabled
+            return nil
         }
+    }
+
+    // Helper to format DecodingError for user-friendly display
+    private func formatDecodingError(_ error: DecodingError, in fileName: String) -> String {
+        var message = "Invalid JSON structure in \(fileName)."
+        switch error {
+        case .typeMismatch(let type, let context),
+             .valueNotFound(let type, let context):
+            let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+            message += "\nExpected type '\(String(describing: type))' at path: \(path). \(context.debugDescription)"
+        case .keyNotFound(let key, let context):
+            let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+            message += "\nMissing key '\(key.stringValue)' at path: \(path). \(context.debugDescription)"
+        case .dataCorrupted(let context):
+            message += "\nData is corrupted. \(context.debugDescription)"
+        @unknown default:
+            message += "\nAn unknown decoding error occurred."
+        }
+        return message
     }
 
     internal func showValidationAlert() {

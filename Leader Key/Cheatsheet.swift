@@ -44,11 +44,26 @@ enum Cheatsheet {
         }
         Spacer()
         if showDetails {
-          let detailText = (action.type == .shortcut) ? "Shortcut: \(action.value)" : action.value
-          Text(detailText)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
+          // Show detail text based on type
+          switch action.type {
+          case .shortcut:
+            Text("Shortcut: \(action.value)")
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+          case .text:
+            let snippet = action.value.prefix(30)
+            let suffix = action.value.count > 30 ? "..." : ""
+            Text("Types: '\(snippet)\(suffix)'")
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+          default:
+            Text(action.value)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+          }
         }
       }
     }

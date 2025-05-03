@@ -120,6 +120,7 @@ enum Type: String, Codable {
   case command
   case folder
   case shortcut
+  case text
 }
 
 protocol Item {
@@ -157,6 +158,10 @@ struct Action: Item, Codable, Equatable {
       return "URL"
     case .shortcut:
       return "Shortcut: \(value)"
+    case .text:
+      let snippet = value.prefix(20)
+      let suffix = value.count > 20 ? "..." : ""
+      return "Type: '\(snippet)\(suffix)'"
     default:
       return value
     }
