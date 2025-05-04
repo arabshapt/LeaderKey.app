@@ -437,19 +437,38 @@ class Controller {
 
   // --- Shortcut Execution Helpers --- START ---
 
-  private func runKeyboardShortcut(_ shortcutString: String) {
-      print("[Controller] Attempting to run shortcut: '\(shortcutString)'")
-      if let eventData = parseCompactShortcutToCGEventData(shortcutString) {
-          print("[Controller] Parsed shortcut -> KeyCode: \(eventData.keyCode), Flags: \(eventData.flags)")
-          executeShortcut(keyCode: eventData.keyCode, flags: eventData.flags)
-      } else {
-          print("[Controller] Failed to parse shortcut string: '\(shortcutString)'")
-          // Optionally show an alert to the user
-          showAlert(
-              title: "Invalid Shortcut",
-              message: "Could not parse the shortcut string: '\(shortcutString)'\n\nUse format like 'CSb' (Cmd+Shift+b), 'Oa' (Opt+a). Check logs for details."
-          )
+  private func runKeyboardShortcut(_ shortcutSequenceString: String) {
+      print("[Controller] Attempting to run shortcut sequence: '\(shortcutSequenceString)'")
+
+      // Split the sequence string by spaces
+      let individualShortcutStrings = shortcutSequenceString.split(separator: " ").map(String.init)
+      var parsedShortcuts: [(keyCode: CGKeyCode, flags: CGEventFlags)] = []
+
+      // Parse each individual shortcut string
+      for shortcutString in individualShortcutStrings {
+          guard let eventData = parseCompactShortcutToCGEventData(shortcutString) else {
+              print("[Controller] Failed to parse part '\(shortcutString)' of sequence '\(shortcutSequenceString)'")
+              showAlert(
+                  title: "Invalid Shortcut Sequence",
+                  message: "Could not parse part '\(shortcutString)' in sequence: '\(shortcutSequenceString)'\n\nUse format like 'CSb Oa' (Cmd+Shift+b then Opt+a). Check logs for details."
+              )
+              return // Stop processing the sequence if any part fails
+          }
+          parsedShortcuts.append(eventData)
       }
+
+      // Execute the parsed shortcuts sequentially with a delay
+      let delayBetweenShortcutsMicroseconds: useconds_t = 50000 // 50ms delay
+      for (index, shortcutData) in parsedShortcuts.enumerated() {
+          print("[Controller] Executing step \(index + 1)/\(parsedShortcuts.count): KeyCode: \(shortcutData.keyCode), Flags: \(shortcutData.flags)")
+          executeShortcut(keyCode: shortcutData.keyCode, flags: shortcutData.flags)
+
+          // Add delay *after* executing a shortcut, except for the last one
+          if index < parsedShortcuts.count - 1 {
+              usleep(delayBetweenShortcutsMicroseconds)
+          }
+      }
+      print("[Controller] Finished executing shortcut sequence.")
   }
 
   private let karabinerToKeyCodeMap: [String: CGKeyCode] = [
