@@ -68,8 +68,20 @@ class MainWindow: PanelWindow, NSWindowDelegate {
     controller.keyDown(with: event)
   }
 
-  func show(after: (() -> Void)?) {
+  func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+    // Set origin if provided, otherwise center the window
+    if let newOrigin = origin {
+        print("[MainWindow show(at:)] Setting origin to calculated value: \(newOrigin)")
+        self.setFrameOrigin(newOrigin)
+    } else {
+        print("[MainWindow show(at:)] Origin not provided or invalid. Centering window.")
+        self.center() // Fallback to centering
+    }
+
+    // Now make the window key and order it front
     makeKeyAndOrderFront(nil)
+
+    // Call the completion handler
     after?()
   }
 

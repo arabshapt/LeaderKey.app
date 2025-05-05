@@ -15,25 +15,38 @@ enum Breadcrumbs {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
       let screen = NSScreen.main == nil ? NSSize() : NSScreen.main!.frame.size
+
+      let initialX: CGFloat
+      let initialY: CGFloat
+
+      if let explicitOrigin = origin {
+        print("[BreadcrumbsWindow show(at:)] Using provided origin: \(explicitOrigin)")
+        initialX = explicitOrigin.x
+        initialY = explicitOrigin.y
+      } else {
+        print("[BreadcrumbsWindow show(at:)] Origin not provided, using default bottom-left positioning.")
+        initialX = Breadcrumbs.margin
+        initialY = Breadcrumbs.margin
+      }
 
       if controller.userState.navigationPath.isEmpty == true {
         self.setFrame(
           CGRect(
-            x: Breadcrumbs.margin,
-            y: Breadcrumbs.margin,
+            x: initialX,
+            y: initialY,
             width: Breadcrumbs.dimension,
             height: Breadcrumbs.dimension),
-          display: true)
+          display: false)
       } else {
         self.setFrame(
           CGRect(
-            x: Breadcrumbs.margin,
-            y: Breadcrumbs.margin,
+            x: initialX,
+            y: initialY,
             width: 200,
             height: Breadcrumbs.dimension),
-          display: true)
+          display: false)
 
         self.contentAspectRatio = NSSize(width: 0, height: Breadcrumbs.dimension)
         self.contentMinSize = NSSize(width: 80, height: Breadcrumbs.dimension)
@@ -42,6 +55,8 @@ enum Breadcrumbs {
           height: Breadcrumbs.dimension
         )
       }
+
+      self.displayIfNeeded()
 
       makeKeyAndOrderFront(nil)
 

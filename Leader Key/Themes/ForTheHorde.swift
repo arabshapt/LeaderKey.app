@@ -25,31 +25,24 @@ enum ForTheHorde {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
-      center()
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      if let explicitOrigin = origin {
+        print("[ForTheHordeWindow show(at:)] Using provided origin: \(explicitOrigin)")
+        self.setFrameOrigin(explicitOrigin)
+        self.setContentSize(NSSize(width: 400, height: 300))
+      } else {
+        print("[ForTheHordeWindow show(at:)] Origin not provided, centering.")
+        self.center()
+      }
 
-      // Trigger animation by updating the shared state
-      animationState.isShowing = true
-
+      self.displayIfNeeded()
       makeKeyAndOrderFront(nil)
-      alphaValue = 0
-
-      NSAnimationContext.runAnimationGroup(
-        { context in
-          context.duration = ForTheHorde.rotationDuration
-          context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-          animator().alphaValue = 1.0
-        },
-        completionHandler: {
-          after?()
-        })
+      after?()
     }
 
     override func hide(after: (() -> Void)? = nil) {
-      // Reset animation state when hiding
       animationState.isShowing = false
 
-      // Custom fade out animation to match the show animation
       NSAnimationContext.runAnimationGroup(
         { context in
           context.duration = ForTheHorde.rotationDuration
@@ -113,14 +106,12 @@ enum ForTheHorde {
       .scaleEffect(scale)
       .onChange(of: animationState.isShowing) { newValue in
         if newValue {
-          // Animate rotations and scale to 100% when showing
           withAnimation(.easeOut(duration: ForTheHorde.rotationDuration)) {
             bgRotation = 0
             fgRotation = 0
             scale = 1.0
           }
         } else {
-          // Animate rotations the other way and scale down when hiding
           withAnimation(.easeIn(duration: ForTheHorde.rotationDuration)) {
             bgRotation = 15
             fgRotation = -15

@@ -14,14 +14,19 @@ enum MysteryBox {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
-      center()
-
-      makeKeyAndOrderFront(nil)
-
-      fadeInAndUp {
-        after?()
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      if let explicitOrigin = origin {
+        print("[MysteryBoxWindow show(at:)] Using provided origin: \(explicitOrigin)")
+        self.setFrameOrigin(explicitOrigin)
+        self.setContentSize(NSSize(width: 300, height: 200))
+      } else {
+        print("[MysteryBoxWindow show(at:)] Origin not provided, centering.")
+        self.center()
       }
+
+      self.displayIfNeeded()
+      makeKeyAndOrderFront(nil)
+      after?()
     }
 
     override func hide(after: (() -> Void)? = nil) {

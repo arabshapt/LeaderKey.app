@@ -86,9 +86,51 @@ class Controller {
 
     userState.activeRoot = configToLoad // Update UserState with the selected config
 
-    window.show {
-      Events.send(.didActivate)
-      completion?()
+    // --- Start Screen Positioning Logic (Moved back before show) ---
+    var calculatedOrigin: NSPoint? = nil // Store calculated origin
+
+    // Get the current mouse location
+    let mouseLocation = NSEvent.mouseLocation
+
+    // Find the screen containing the mouse cursor, default to main screen if not found
+    let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+
+    if let targetScreen = screen {
+        let screenFrame = targetScreen.visibleFrame // Use visibleFrame to account for menu bar and Dock
+        let windowSize = self.window.frame.size
+
+        // Check if window size is valid before calculating position
+        if windowSize.width > 0 && windowSize.height > 0 {
+            // Calculate the desired origin: Center horizontally, 40% down vertically from the top
+            let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
+            let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * 0.4) - (windowSize.height / 2.0)
+            calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
+
+            // ---- DEBUG LOGGING START ----
+            print("[Controller show] Mouse Location: \(mouseLocation)")
+            print("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
+            print("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
+            print("[Controller show] Window Size: \(windowSize)")
+            print("[Controller show] Calculated Origin: \(calculatedOrigin!)")
+            // ---- DEBUG LOGGING END ----
+
+        } else {
+            // Fallback: Window size is zero.
+            print("[Controller show] Warning: Window size \(windowSize) is invalid. Will center window.")
+            // calculatedOrigin remains nil, will be handled below
+        }
+    } else {
+        // Fallback: Should not happen
+        print("[Controller show] Warning: Could not determine target screen. Will center window.")
+        // calculatedOrigin remains nil, will be handled below
+    }
+    // --- End Screen Positioning Logic ---
+
+    // Show the window, passing the calculated origin (or nil for centering)
+    window.show(at: calculatedOrigin) { // Pass origin to the modified show function
+        // Completion handler remains empty for positioning logic
+        Events.send(.didActivate)
+        completion?()
     }
 
     if !window.hasCheatsheet || userState.isShowingRefreshState {
@@ -344,6 +386,45 @@ class Controller {
   private func clear() {
     userState.clear() // This now also resets activeRoot in UserState
   }
+
+  // --- Repositioning Function --- START ---
+  func repositionWindowNearMouse() {
+      guard let window = self.window else {
+          print("[Controller reposition] Error: Window is nil. Cannot reposition.")
+          return
+      }
+
+      var calculatedOrigin: NSPoint? = nil
+      let mouseLocation = NSEvent.mouseLocation
+      let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+
+      if let targetScreen = screen {
+          let screenFrame = targetScreen.visibleFrame
+          let windowSize = window.frame.size // Use the window instance directly
+
+          if windowSize.width > 0 && windowSize.height > 0 {
+              // Calculate the desired origin: Center horizontally, 40% down vertically from the top
+              let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
+              let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * 0.4) - (windowSize.height / 2.0)
+              calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
+              print("[Controller reposition] Mouse: \(mouseLocation), Screen: \(targetScreen.frame), Visible: \(screenFrame), Window: \(windowSize), Calculated Origin: \(calculatedOrigin!)")
+          } else {
+              print("[Controller reposition] Warning: Window size \(windowSize) is invalid. Skipping reposition calculation.")
+          }
+      } else {
+          print("[Controller reposition] Warning: Could not determine target screen. Skipping reposition calculation.")
+      }
+
+      // Apply the position if calculated, otherwise center
+      if let originToSet = calculatedOrigin {
+          window.setFrameOrigin(originToSet)
+          print("[Controller reposition] Set origin to \(originToSet)")
+      } else {
+          window.center()
+          print("[Controller reposition] Centered window as fallback.")
+      }
+  }
+  // --- Repositioning Function --- END ---
 
   private func openURL(_ action: Action) {
     guard let url = URL(string: action.value) else {

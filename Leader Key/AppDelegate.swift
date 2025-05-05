@@ -186,12 +186,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @IBAction
   func settingsMenuItemActionHandler(_: NSMenuItem) {
       print("[AppDelegate] settingsMenuItemActionHandler called.")
-      // Configure window properties before showing
+
+      // --- Calculate Target Origin for Settings Window --- START
+      var calculatedOrigin: NSPoint? = nil
+      let mouseLocation = NSEvent.mouseLocation
+      let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+
+      if let targetScreen = screen, let window = settingsWindowController.window {
+          let screenFrame = targetScreen.visibleFrame
+          // Ensure minSize is set *before* potentially using it for calculation
+          window.minSize = NSSize(width: 450, height: 650)
+          let windowSize = window.frame.size
+          let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
+          let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
+
+          if effectiveWidth > 0 && effectiveHeight > 0 {
+              let newOriginX = screenFrame.origin.x + (screenFrame.size.width - effectiveWidth) / 2.0
+              let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
+              calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
+
+              print("[AppDelegate settings] Target Screen Visible Frame: \(screenFrame)")
+              print("[AppDelegate settings] Window Size (effective): \(effectiveWidth)x\(effectiveHeight)")
+              print("[AppDelegate settings] Calculated Center Origin: \(calculatedOrigin!)")
+          } else {
+              print("[AppDelegate settings] Warning: Could not determine effective window size. Origin calculation skipped.")
+          }
+      } else {
+          print("[AppDelegate settings] Warning: Could not get target screen or settings window. Origin calculation skipped.")
+      }
+      // --- Calculate Target Origin for Settings Window --- END
+
+      // Configure window properties (resizable)
       if let window = settingsWindowController.window {
           window.styleMask.insert(NSWindow.StyleMask.resizable)
-          window.minSize = NSSize(width: 450, height: 650) // Set minimum size
+          // minSize is set above
       }
+
+      // Show the window controller *first*
       settingsWindowController.show()
+
+      // --- Set Origin *After* Showing --- START
+      if let window = settingsWindowController.window, let originToSet = calculatedOrigin {
+          print("[AppDelegate settings] Attempting to set origin AFTER show(): \(originToSet)")
+          window.setFrameOrigin(originToSet)
+      } else if let window = settingsWindowController.window {
+          // Fallback to centering if origin calculation failed
+          print("[AppDelegate settings] Origin calculation failed. Centering window AFTER show().")
+          window.center()
+      }
+       // --- Set Origin *After* Showing --- END
+
       NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
       print("[AppDelegate] Settings window shown.")
   }
@@ -236,6 +280,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               controller.userState.clear()
               resetSequenceState() // Reset sequence state in AppDelegate
               print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
+              controller.repositionWindowNearMouse()
               startSequence(activationType: type)
 
           case .nothing:

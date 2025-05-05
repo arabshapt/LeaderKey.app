@@ -14,20 +14,19 @@ enum Mini {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
-      let screen = NSScreen.main == nil ? NSSize() : NSScreen.main!.frame.size
-
-      self.setFrame(
-        CGRect(
-          x: screen.width - Mini.size - Mini.margin,
-          y: Mini.margin, width: Mini.size, height: Mini.size),
-        display: true)
-
-      makeKeyAndOrderFront(nil)
-
-      fadeIn {
-        after?()
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      if let explicitOrigin = origin {
+          print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
+          self.setFrameOrigin(explicitOrigin)
+          self.setContentSize(NSSize(width: 250, height: 150))
+      } else {
+          print("[MiniWindow show(at:)] Origin not provided, centering.")
+          self.center()
       }
+
+      self.displayIfNeeded()
+      makeKeyAndOrderFront(nil)
+      after?()
     }
 
     override func hide(after: (() -> Void)? = nil) {
