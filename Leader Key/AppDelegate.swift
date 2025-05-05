@@ -134,7 +134,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     print("[AppDelegate] Initializing UserConfig and UserState...")
     config.ensureAndLoad() // Ensures config dir/file exists and loads default config
     state = UserState(userConfig: config)
-    controller = Controller(userState: state, userConfig: config)
+    controller = Controller(userState: state, userConfig: config, appDelegate: self)
     print("[AppDelegate] UserConfig and UserState initialized.")
 
     // Setup background services and UI elements
@@ -721,7 +721,7 @@ extension AppDelegate {
     }
 
     // Resets the internal state variables used to track the current key sequence.
-    private func resetSequenceState() {
+    func resetSequenceState() {
         // Only perform reset if a sequence is actually active
         if currentSequenceGroup != nil || activeRootGroup != nil {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")

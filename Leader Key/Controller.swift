@@ -22,6 +22,7 @@ enum KeyHelpers: UInt16 {
 class Controller {
   var userState: UserState
   var userConfig: UserConfig
+  weak var appDelegate: AppDelegate? // Add weak reference to AppDelegate
 
   var window: MainWindow!
   var cheatsheetWindow: NSWindow!
@@ -29,9 +30,10 @@ class Controller {
 
   private var cancellables = Set<AnyCancellable>()
 
-  init(userState: UserState, userConfig: UserConfig) {
+  init(userState: UserState, userConfig: UserConfig, appDelegate: AppDelegate) {
     self.userState = userState
     self.userConfig = userConfig
+    self.appDelegate = appDelegate // Store the reference
 
     Task {
       for await value in Defaults.updates(.theme) {
@@ -322,7 +324,12 @@ class Controller {
       let path: String = (action.value as NSString).expandingTildeInPath
       NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     case .shortcut:
-      runKeyboardShortcut(action.value)
+      let success = runKeyboardShortcut(action.value)
+      if !success {
+        // If shortcut failed, we already showed an alert and reset state.
+        // We might still need to hide if not in sticky mode, but the state is handled.
+        print("[Controller] runAction: Detected shortcut failure. State should be reset by runKeyboardShortcut.")
+      }
     case .text:
       typeText(action.value)
     default:
@@ -437,7 +444,7 @@ class Controller {
 
   // --- Shortcut Execution Helpers --- START ---
 
-  private func runKeyboardShortcut(_ shortcutSequenceString: String) {
+  private func runKeyboardShortcut(_ shortcutSequenceString: String) -> Bool {
       print("[Controller] Attempting to run shortcut sequence: '\(shortcutSequenceString)'")
 
       // Split the sequence string by spaces
@@ -452,7 +459,9 @@ class Controller {
                   title: "Invalid Shortcut Sequence",
                   message: "Could not parse part '\(shortcutString)' in sequence: '\(shortcutSequenceString)'\n\nUse format like 'CSb Oa' (Cmd+Shift+b then Opt+a). Check logs for details."
               )
-              return // Stop processing the sequence if any part fails
+              print("[Controller] Shortcut parse failed. Resetting sequence state.")
+              appDelegate?.resetSequenceState() // Call reset on AppDelegate
+              return false // Indicate failure
           }
           parsedShortcuts.append(eventData)
       }
@@ -469,6 +478,7 @@ class Controller {
           }
       }
       print("[Controller] Finished executing shortcut sequence.")
+      return true // Indicate success
   }
 
   private let karabinerToKeyCodeMap: [String: CGKeyCode] = [
