@@ -468,12 +468,18 @@ class Controller {
   }
 
   private func showAlert(title: String, message: String) {
-    let alert = NSAlert()
-    alert.messageText = title
-    alert.informativeText = message
-    alert.alertStyle = .warning
-    alert.addButton(withTitle: "OK")
-    alert.runModal()
+    // Run the alert asynchronously on the main thread
+    DispatchQueue.main.async {
+        print("[Controller showAlert async] Displaying alert: Title='\(title)', Message='\(message)'")
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        // runModal will still block this async block, but not the original event handler
+        let response = alert.runModal() 
+        print("[Controller showAlert async] Alert dismissed with response: \(response == .alertFirstButtonReturn ? "OK" : "Other")")
+    }
   }
 
   // --- Text Typing Helper --- START ---
