@@ -205,8 +205,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
               calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
 
-              print("[AppDelegate settings] Target Screen Visible Frame: \(screenFrame)")
-              print("[AppDelegate settings] Window Size (effective): \(effectiveWidth)x\(effectiveHeight)")
               print("[AppDelegate settings] Calculated Center Origin: \(calculatedOrigin!)")
           } else {
               print("[AppDelegate settings] Warning: Could not determine effective window size. Origin calculation skipped.")

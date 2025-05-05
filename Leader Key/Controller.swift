@@ -107,10 +107,10 @@ class Controller {
             calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
 
             // ---- DEBUG LOGGING START ----
-            print("[Controller show] Mouse Location: \(mouseLocation)")
-            print("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
-            print("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
-            print("[Controller show] Window Size: \(windowSize)")
+            // print("[Controller show] Mouse Location: \(mouseLocation)")
+            // print("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
+            // print("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
+            // print("[Controller show] Window Size: \(windowSize)")
             print("[Controller show] Calculated Origin: \(calculatedOrigin!)")
             // ---- DEBUG LOGGING END ----
 
@@ -407,7 +407,7 @@ class Controller {
               let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
               let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * 0.4) - (windowSize.height / 2.0)
               calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
-              print("[Controller reposition] Mouse: \(mouseLocation), Screen: \(targetScreen.frame), Visible: \(screenFrame), Window: \(windowSize), Calculated Origin: \(calculatedOrigin!)")
+              print("[Controller reposition] Calculated Origin: \(calculatedOrigin!)")
           } else {
               print("[Controller reposition] Warning: Window size \(windowSize) is invalid. Skipping reposition calculation.")
           }
@@ -418,10 +418,8 @@ class Controller {
       // Apply the position if calculated, otherwise center
       if let originToSet = calculatedOrigin {
           window.setFrameOrigin(originToSet)
-          print("[Controller reposition] Set origin to \(originToSet)")
       } else {
           window.center()
-          print("[Controller reposition] Centered window as fallback.")
       }
   }
   // --- Repositioning Function --- END ---
