@@ -5,13 +5,15 @@ import Settings
 import SwiftUI
 
 struct GeneralPane: View {
-  private let contentWidth = 900.0
+  private let contentWidth = 1100.0
   @EnvironmentObject private var config: UserConfig
   @Default(.configDir) var configDir
   @Default(.theme) var theme
   @State private var expandedGroups = Set<[Int]>()
   @State private var showingRenameAlert = false
   @State private var newConfigNameInput = ""
+  @State private var keyToLoad: String? = nil
+  @State private var listSelection: String? = nil
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -29,101 +31,143 @@ struct GeneralPane: View {
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
-      Settings.Section(title: "Configuration File", verticalAlignment: .center) {
-        HStack {
-          Text("Editing:")
-          Picker("Select Config", selection: $config.selectedConfigKeyForEditing) {
-              ForEach(sortedConfigKeys, id: \.self) { key in
-                  Text(key).tag(key)
+      // Wrap the main layout in a Settings.Section, providing an empty title
+      Settings.Section(title: "") {
+          // Main Horizontal Layout
+          HStack(alignment: .top) {
+              // --- Left Sidebar: Config List --- START ---
+              VStack(alignment: .leading) {
+                  Text("Configurations")
+                      .font(.title2)
+                      .padding(.bottom, 5)
+
+                  List(selection: $listSelection) {
+                      ForEach(sortedConfigKeys, id: \.self) { key in
+                          HStack {
+                              Text(key)
+                                  .tag(key) // Needed for List selection binding
+                                  .lineLimit(1)
+                                  .truncationMode(.middle)
+                              Spacer()
+                              // Simple Rename Button - could be improved with context menu later
+                              if key != globalDefaultDisplayName {
+                                  Button {
+                                      // Get current custom name or default name to pre-fill
+                                      if let filePath = config.discoveredConfigFiles[key] {
+                                          newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? key
+                                      } else {
+                                          newConfigNameInput = "" 
+                                      }
+                                      showingRenameAlert = true
+                                  } label: {
+                                      Image(systemName: "pencil.circle")
+                                  }
+                                  .buttonStyle(.plain) // Use plain style for subtle look in list
+                                  .foregroundColor(.secondary)
+                              }
+                          }
+                      }
+                  }
+                  .listStyle(.sidebar) // Use a sidebar style for the list
+                  .frame(minWidth: 180, idealWidth: 200, maxWidth: 250) // Sidebar width
+                  .onChange(of: listSelection) { newSelection in
+                      guard let newKey = newSelection else { return } // Ignore nil selection
+                      print("[GeneralPane onChange(listSelection)] Setting keyToLoad = \(newKey)")
+                      self.keyToLoad = newKey // Update the trigger state for the task
+                      // Also update the config's state, but asynchronously
+                      DispatchQueue.main.async {
+                          // Check if it actually changed to avoid redundant updates
+                          if self.config.selectedConfigKeyForEditing != newKey {
+                               print("[GeneralPane onChange(listSelection) async] Updating config.selectedConfigKeyForEditing = \(newKey)")
+                              self.config.selectedConfigKeyForEditing = newKey
+                          }
+                      }
+                  }
+                  .onAppear {
+                      if listSelection == nil { // Initialize only once
+                           listSelection = config.selectedConfigKeyForEditing
+                           print("[GeneralPane onAppear] Initialized listSelection to \(listSelection ?? "nil")")
+                      }
+                  }
+                  // TODO: Add 'New' / 'Delete' buttons below the list?
+
               }
+              // --- Left Sidebar: Config List --- END ---
+
+              // Divider
+              Divider()
+
+              // --- Right Content Area: Config Editor --- START ---
+              VStack(alignment: .leading) {
+                  // Title (Optional - shows selected config)
+                  Text("Editing: \(config.selectedConfigKeyForEditing)")
+                      .font(.title3)
+                      .padding(.bottom, 5)
+
+                  // The existing config editor section
+                  VStack(alignment: .leading, spacing: 8) {
+                      VStack {
+                          ConfigEditorView(group: $config.currentlyEditingGroup, expandedGroups: $expandedGroups)
+                              .frame(minHeight: 500) // Ensure it has enough height
+                              .focusable(false)
+                      }
+                      .padding(8)
+                      .overlay(
+                          RoundedRectangle(cornerRadius: 12)
+                              .inset(by: 1)
+                              .stroke(Color.primary, lineWidth: 1)
+                              .opacity(0.1)
+                      )
+
+                      HStack {
+                          // Left-aligned buttons
+                          HStack(spacing: 8) {
+                              Button("Save Changes") { config.saveCurrentlyEditingConfig() }
+                              Button("Reload Current File") { config.reloadConfig() }
+                          }
+
+                          Spacer()
+
+                          // Right-aligned buttons
+                          HStack(spacing: 8) {
+                              Button {
+                                 withAnimation(.easeOut(duration: 0.1)) {
+                                     expandAllGroups(in: config.currentlyEditingGroup, parentPath: [])
+                                 }
+                              } label: {
+                                  Image(systemName: "chevron.down")
+                                  Text("Expand all")
+                              }
+
+                              Button {
+                                  withAnimation(.easeOut(duration: 0.1)) {
+                                      expandedGroups.removeAll()
+                                  }
+                              } label: {
+                                  Image(systemName: "chevron.right")
+                                  Text("Collapse all")
+                              }
+                          }
+                      }
+                  }
+                  Spacer() // Pushes content to the top
+              }
+              .frame(maxWidth: .infinity) // Allow right side to expand
+              // --- Right Content Area: Config Editor --- END ---
           }
-          .labelsHidden()
-          .onChange(of: config.selectedConfigKeyForEditing) { newKey in
-              // First clear expanded groups to avoid any stale references
-              expandedGroups.removeAll()
+          .padding(.leading, -10) // Add negative leading padding to shift left
+          .task(id: keyToLoad) {
+              guard let key = keyToLoad else { return }
               
-              // Use DispatchQueue to ensure state is updated before loading the new config
-              DispatchQueue.main.async {
-                  config.loadConfigForEditing(key: newKey)
-              }
+              print("[GeneralPane .task(id: keyToLoad)] Loading config for key: \(key)")
+              self.expandedGroups.removeAll()
+              self.config.loadConfigForEditing(key: key)
+              
+              self.keyToLoad = nil 
           }
+      } // End of Settings.Section wrapping the HStack
 
-          Button("Rename") {
-              // Get current custom name or default name to pre-fill
-              if let filePath = config.discoveredConfigFiles[config.selectedConfigKeyForEditing] {
-                  newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? config.selectedConfigKeyForEditing
-                  // Prevent renaming Global Default placeholder if it somehow lost its custom name
-                  if newConfigNameInput == globalDefaultDisplayName { newConfigNameInput = "" }
-              } else {
-                  newConfigNameInput = "" // Should not happen ideally
-              }
-              showingRenameAlert = true
-          }
-          .disabled(config.selectedConfigKeyForEditing == globalDefaultDisplayName)
-          // TODO: Add buttons for "New App Config" / "Delete App Config"?
-        }
-      }
-
-      Settings.Section(
-        title: "Config Content", bottomDivider: true, verticalAlignment: .top
-      ) {
-        VStack(alignment: .leading, spacing: 8) {
-          VStack {
-            // Use currentlyEditingGroup instead of config.root
-            ConfigEditorView(group: $config.currentlyEditingGroup, expandedGroups: $expandedGroups)
-              .frame(height: 500)
-              // Probably horrible for accessibility but improves performance a ton
-              .focusable(false)
-          }
-          .padding(8)
-          .overlay(
-            RoundedRectangle(cornerRadius: 12)
-              .inset(by: 1)
-              .stroke(Color.primary, lineWidth: 1)
-              .opacity(0.1)
-          )
-
-          HStack {
-            // Left-aligned buttons
-            HStack(spacing: 8) {
-              // Use saveCurrentlyEditingConfig
-              Button("Save Changes") {
-                config.saveCurrentlyEditingConfig()
-              }
-
-              // Use reloadConfig (which reloads the selected one)
-              Button("Reload Current File") {
-                config.reloadConfig() // Reloads the currently selected config
-              }
-            }
-
-            Spacer()
-
-            // Right-aligned buttons (operate on currentlyEditingGroup)
-            HStack(spacing: 8) {
-              Button(action: {
-                withAnimation(.easeOut(duration: 0.1)) {
-                  // Use currentlyEditingGroup
-                  expandAllGroups(in: config.currentlyEditingGroup, parentPath: [])
-                }
-              }) {
-                Image(systemName: "chevron.down")
-                Text("Expand all")
-              }
-
-              Button(action: {
-                withAnimation(.easeOut(duration: 0.1)) {
-                  expandedGroups.removeAll()
-                }
-              }) {
-                Image(systemName: "chevron.right")
-                Text("Collapse all")
-              }
-            }
-          }
-        }
-      }
-
+      // Sections below the main HStack can remain as they were
       Settings.Section(title: "Theme") {
         Picker("Theme", selection: $theme) {
           ForEach(Theme.all, id: \.self) { value in
