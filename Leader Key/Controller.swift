@@ -472,6 +472,17 @@ class Controller {
   }
 
   private let karabinerToKeyCodeMap: [String: CGKeyCode] = [
+      // Modifier Keys
+      "caps_lock": CGKeyCode(kVK_CapsLock),
+      "left_control": CGKeyCode(kVK_Control),
+      "left_shift": CGKeyCode(kVK_Shift),
+      "left_option": CGKeyCode(kVK_Option),
+      "left_command": CGKeyCode(kVK_Command),
+      "right_control": CGKeyCode(kVK_RightControl),
+      "right_shift": CGKeyCode(kVK_RightShift),
+      "right_option": CGKeyCode(kVK_RightOption),
+      "right_command": CGKeyCode(kVK_RightCommand),
+      "fn": CGKeyCode(kVK_Function),
       // Letters
       "a": CGKeyCode(kVK_ANSI_A), "b": CGKeyCode(kVK_ANSI_B), "c": CGKeyCode(kVK_ANSI_C),
       "d": CGKeyCode(kVK_ANSI_D), "e": CGKeyCode(kVK_ANSI_E), "f": CGKeyCode(kVK_ANSI_F),
@@ -545,6 +556,16 @@ class Controller {
       "volume_increment": CGKeyCode(kVK_VolumeUp),
       "volume_decrement": CGKeyCode(kVK_VolumeDown),
       "mute": CGKeyCode(kVK_Mute),
+      // PC Keys (Mapped where possible)
+      "print_screen": CGKeyCode(kVK_F13), // Often mapped to F13
+      "scroll_lock": CGKeyCode(kVK_F14), // Often mapped to F14
+      "pause": CGKeyCode(kVK_F15),       // Often mapped to F15
+      // "power": CGKeyCode(kVK_Power),     // May require special handling
+      // International & Language Keys (Examples)
+      "lang1": CGKeyCode(kVK_JIS_Eisu),  // Assuming Eisuu for Lang1 (e.g., Hangul/English)
+      "lang2": CGKeyCode(kVK_JIS_Kana),  // Assuming Kana for Lang2 (e.g., Hanja)
+      "japanese_eisuu": CGKeyCode(kVK_JIS_Eisu),
+      "japanese_kana": CGKeyCode(kVK_JIS_Kana),
   ]
 
   private func parseCompactShortcutToCGEventData(_ shortcut: String) -> (keyCode: CGKeyCode, flags: CGEventFlags)? {
