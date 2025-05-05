@@ -186,56 +186,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @IBAction
   func settingsMenuItemActionHandler(_: NSMenuItem) {
       print("[AppDelegate] settingsMenuItemActionHandler called.")
+      
+      // Ensure we have the window reference first
+      guard let window = settingsWindowController.window else {
+          print("[AppDelegate settings] Error: Could not get settings window reference.")
+          settingsWindowController.show()
+          NSApp.activate(ignoringOtherApps: true)
+          return
+      }
 
-      // --- Calculate Target Origin for Settings Window --- START
-      var calculatedOrigin: NSPoint? = nil
-      let mouseLocation = NSEvent.mouseLocation
-      let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+      // --- Configure Window Properties First ---
+      window.styleMask.insert(NSWindow.StyleMask.resizable)
+      window.minSize = NSSize(width: 450, height: 650) // Ensure minSize is set
+      
+      // --- Defer Positioning Logic Slightly ---
+      DispatchQueue.main.async { // Add async dispatch
+          print("[AppDelegate settings async] Starting deferred positioning logic...")
+          // --- Calculate Target Origin --- START ---
+          var calculatedOrigin: NSPoint? = nil
+          let mouseLocation = NSEvent.mouseLocation
+          let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
 
-      if let targetScreen = screen, let window = settingsWindowController.window {
-          let screenFrame = targetScreen.visibleFrame
-          // Ensure minSize is set *before* potentially using it for calculation
-          window.minSize = NSSize(width: 450, height: 650)
-          let windowSize = window.frame.size
-          let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
-          let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
+          if let targetScreen = screen {
+              let screenFrame = targetScreen.visibleFrame
+              // Re-check window size within async block, might be updated
+              let windowSize = window.frame.size 
+              let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
+              let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
 
-          if effectiveWidth > 0 && effectiveHeight > 0 {
-              let newOriginX = screenFrame.origin.x + (screenFrame.size.width - effectiveWidth) / 2.0
-              let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
-              calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
-
-              print("[AppDelegate settings] Calculated Center Origin: \(calculatedOrigin!)")
+              if effectiveWidth > 0 && effectiveHeight > 0 {
+                  let newOriginX = screenFrame.origin.x + (screenFrame.size.width - effectiveWidth) / 2.0
+                  let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
+                  calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
+                  print("[AppDelegate settings async] Calculated Center Origin: \(calculatedOrigin!)")
+              } else {
+                  print("[AppDelegate settings async] Warning: Could not determine effective window size (Size: \(windowSize)). Origin calculation skipped.")
+              }
           } else {
-              print("[AppDelegate settings] Warning: Could not determine effective window size. Origin calculation skipped.")
+              print("[AppDelegate settings async] Warning: Could not get target screen. Origin calculation skipped.")
           }
-      } else {
-          print("[AppDelegate settings] Warning: Could not get target screen or settings window. Origin calculation skipped.")
-      }
-      // --- Calculate Target Origin for Settings Window --- END
+          // --- Calculate Target Origin --- END ---
 
-      // Configure window properties (resizable)
-      if let window = settingsWindowController.window {
-          window.styleMask.insert(NSWindow.StyleMask.resizable)
-          // minSize is set above
-      }
+          // --- Set Origin --- START ---
+          if let originToSet = calculatedOrigin {
+              print("[AppDelegate settings async] Setting origin: \(originToSet)")
+              window.setFrameOrigin(originToSet)
+          } else {
+              print("[AppDelegate settings async] Origin calculation failed. Centering window.")
+              window.center()
+          }
+          // --- Set Origin --- END ---
+      } // End async dispatch
 
-      // Show the window controller *first*
+      // Show the window controller immediately (positioning will happen asynchronously)
       settingsWindowController.show()
 
-      // --- Set Origin *After* Showing --- START
-      if let window = settingsWindowController.window, let originToSet = calculatedOrigin {
-          print("[AppDelegate settings] Attempting to set origin AFTER show(): \(originToSet)")
-          window.setFrameOrigin(originToSet)
-      } else if let window = settingsWindowController.window {
-          // Fallback to centering if origin calculation failed
-          print("[AppDelegate settings] Origin calculation failed. Centering window AFTER show().")
-          window.center()
-      }
-       // --- Set Origin *After* Showing --- END
-
       NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
-      print("[AppDelegate] Settings window shown.")
+      print("[AppDelegate] Settings window show() called (positioning deferred).")
   }
 
     // Convenience method to show the main Leader Key window

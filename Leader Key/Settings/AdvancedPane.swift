@@ -139,6 +139,26 @@ struct AdvancedPane: View {
           "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
         // Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
       }
+      
+      // --- Add Reset Section Here --- START ---
+      Settings.Section(title: "Configuration Names") {
+          HStack {
+              Button("Reset Custom Config Names", role: .destructive) {
+                  print("[AdvancedPane] Resetting custom config names.")
+                  Defaults[.configFileCustomNames] = [:]
+                  // We need to tell UserConfig to reload so GeneralPane gets updated.
+                  // Assuming UserConfig is accessible via @EnvironmentObject 'config'.
+                  config.reloadConfig()
+              }
+              Spacer() // Push button to the left
+          }
+          Text("This will remove all custom names you have assigned to your configuration files in the General settings pane. The configurations will revert to their default names (e.g., 'App: com.apple.finder').")
+            .font(.callout)
+            .foregroundColor(.secondary)
+            .padding(.top, 4)
+      }
+      // --- Add Reset Section Here --- END ---
+      
     }
   }
 }

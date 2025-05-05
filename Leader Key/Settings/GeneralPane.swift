@@ -12,6 +12,7 @@ struct GeneralPane: View {
   @State private var expandedGroups = Set<[Int]>()
   @State private var showingRenameAlert = false
   @State private var newConfigNameInput = ""
+  @State private var filePathToRename: String? = nil
   @State private var keyToLoad: String? = nil
   @State private var listSelection: String? = nil
 
@@ -55,10 +56,14 @@ struct GeneralPane: View {
                                       // Get current custom name or default name to pre-fill
                                       if let filePath = config.discoveredConfigFiles[key] {
                                           newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? key
+                                          filePathToRename = filePath
+                                          showingRenameAlert = true
                                       } else {
-                                          newConfigNameInput = "" 
+                                          // Handle case where path isn't found (should not happen here)
+                                          print("Error: Could not find file path for key '\(key)' when preparing rename.")
+                                          filePathToRename = nil
+                                          newConfigNameInput = ""
                                       }
-                                      showingRenameAlert = true
                                   } label: {
                                       Image(systemName: "pencil.circle")
                                   }
@@ -69,7 +74,7 @@ struct GeneralPane: View {
                       }
                   }
                   .listStyle(.sidebar) // Use a sidebar style for the list
-                  .frame(minWidth: 180, idealWidth: 200, maxWidth: 250) // Sidebar width
+                  .frame(minWidth: 180, idealWidth: 200, maxWidth: 220) // Reduced maxWidth
                   .onChange(of: listSelection) { newSelection in
                       guard let newKey = newSelection else { return } // Ignore nil selection
                       print("[GeneralPane onChange(listSelection)] Setting keyToLoad = \(newKey)")
@@ -89,6 +94,7 @@ struct GeneralPane: View {
                            print("[GeneralPane onAppear] Initialized listSelection to \(listSelection ?? "nil")")
                       }
                   }
+                  
                   // TODO: Add 'New' / 'Delete' buttons below the list?
 
               }
@@ -148,6 +154,7 @@ struct GeneralPane: View {
                                   Text("Collapse all")
                               }
                           }
+                          .padding(.trailing) // Add trailing padding here
                       }
                   }
                   Spacer() // Pushes content to the top
@@ -155,9 +162,9 @@ struct GeneralPane: View {
               .frame(maxWidth: .infinity) // Allow right side to expand
               // --- Right Content Area: Config Editor --- END ---
           }
-          .padding(.leading, -10) // Add negative leading padding to shift left
+          .padding(.leading, -40) // Increased negative padding to shift left further
           .task(id: keyToLoad) {
-              guard let key = keyToLoad else { return }
+              guard let key = keyToLoad else { return } // Only run if keyToLoad is set
               
               print("[GeneralPane .task(id: keyToLoad)] Loading config for key: \(key)")
               self.expandedGroups.removeAll()
@@ -183,38 +190,66 @@ struct GeneralPane: View {
     .alert("Rename Configuration", isPresented: $showingRenameAlert, actions: {
         TextField("New Name", text: $newConfigNameInput)
         Button("Save") {
-            // Get the non-optional selected key first
-            let currentKey = config.selectedConfigKeyForEditing 
+            // Use the file path stored when the rename button was clicked
+            guard let path = filePathToRename else {
+                print("Error: filePathToRename is nil during save.")
+                return
+            }
+
             // Now use if let for the dictionary lookup and combine other checks
-            if let filePath = config.discoveredConfigFiles[currentKey],
-               !newConfigNameInput.isEmpty,
+            if !newConfigNameInput.isEmpty,
                newConfigNameInput != globalDefaultDisplayName,
-               newConfigNameInput != defaultAppConfigDisplayName {
-                
+               newConfigNameInput != defaultAppConfigDisplayName 
+            {
                 var currentCustomNames = Defaults[.configFileCustomNames]
                 // Ensure the new name isn't already used (by a custom name or a default name)
-                let existingCustomNamePaths = currentCustomNames.filter { $0.value == newConfigNameInput }.map { $0.key }
-                let existingDefaultNamePaths = config.discoveredConfigFiles.filter { $0.key == newConfigNameInput }.map { $0.value }
+                // Note: Check against other values in currentCustomNames, EXCLUDING the current path itself
+                let existingCustomNamePaths = currentCustomNames.filter { $0.key != path && $0.value == newConfigNameInput }.map { $0.key }
+                let existingDefaultNamePaths = config.discoveredConfigFiles.filter { $0.value != path && $0.key == newConfigNameInput }.map { $0.value }
 
                 if existingCustomNamePaths.isEmpty && existingDefaultNamePaths.isEmpty {
-                    currentCustomNames[filePath] = newConfigNameInput
+                    print("Saving new name '\(newConfigNameInput)' for path '\(path)'")
+                    currentCustomNames[path] = newConfigNameInput
                     Defaults[.configFileCustomNames] = currentCustomNames
-                    // Select the new name and reload to refresh the UI/list
-                    config.selectedConfigKeyForEditing = newConfigNameInput
-                    config.reloadConfig() 
+                    
+                    // Store the new name to select it after reload
+                    let nameToSelect = newConfigNameInput
+                    
+                    // Reload config FIRST to update the list source
+                    config.reloadConfig()
+                    
+                    // Update list selection AFTER reload starts (async)
+                    DispatchQueue.main.async {
+                        print("Setting listSelection to '\(nameToSelect)' after reload.")
+                        listSelection = nameToSelect
+                        // Also update the config's internal selection state if needed, though reload might handle it
+                        // config.selectedConfigKeyForEditing = nameToSelect 
+                    }
                 } else {
-                    // Handle name collision - maybe show another alert?
+                    // Handle name collision
                     print("Error: Name '\(newConfigNameInput)' is already in use.")
-                    // For simplicity, just print error for now.
                 }
             } else {
-                // Handle invalid input (e.g., empty name or trying to use reserved names)
+                // Handle invalid input
                 print("Error: Invalid name '\(newConfigNameInput)'. Cannot be empty or a reserved name.")
             }
         }
         Button("Cancel", role: .cancel) { }
     }, message: {
-        Text("Enter a new name for the configuration '\(config.selectedConfigKeyForEditing)'. Reserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed.")
+        // Construct the message dynamically
+        var messageText = "Enter a new name for the configuration '\(config.selectedConfigKeyForEditing)'."
+        // Fix URL creation for file paths
+        if let path = filePathToRename { // Unwrap path first
+            let url = URL(fileURLWithPath: path) // Create URL directly
+            if !url.lastPathComponent.isEmpty { // Check lastPathComponent
+                messageText += "\n(File: \(url.lastPathComponent))"
+            } else { // Handle case where lastPathComponent might be empty for some reason
+                messageText += "\n(Path: ...\(path.suffix(40)))"
+            }
+        } // Fallback is implicitly handled if path is nil
+        
+        messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
+        return Text(messageText)
     })
   }
 
