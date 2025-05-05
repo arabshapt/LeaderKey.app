@@ -21,22 +21,22 @@ extension UserConfig {
         // Validate the group being saved
         let errors = ConfigValidator.validate(group: sortedGroup)
         if !errors.isEmpty {
-            // We might want a specific alert here, distinct from the default config validation alert
+            // --- MODIFIED: Show error and RETURN if validation fails ---
             let errorCount = errors.count
-            let errorMsg = "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") "
-                         + "in the '\(selectedConfigKeyForEditing)' configuration. "
-                         + "It will still be saved, but some keys may not work as expected."
+            let errorMsg = "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the '\(selectedConfigKeyForEditing)' configuration. \nPlease fix the issues before saving."
+            // TODO: Consider showing the specific errors in the alert message or linking to them.
             alertHandler.showAlert(
                 style: .warning,
                 message: errorMsg
             )
-            // Update main validationErrors state only if we are saving the default config
+            // Update validationErrors state (as before)
             if selectedConfigKeyForEditing == globalDefaultDisplayName {
                 self.validationErrors = errors
             } else {
-                // Maybe store app-specific errors separately if needed?
-                print("Validation issues found in \(selectedConfigKeyForEditing) config, but not setting main validationErrors.")
+                print("Validation issues found in \(selectedConfigKeyForEditing) config, but not saving.")
             }
+            return // PREVENT SAVING if errors exist
+            // --- END MODIFICATION ---
         } else if selectedConfigKeyForEditing == globalDefaultDisplayName {
             // Clear errors if default config is now valid
             self.validationErrors = []
