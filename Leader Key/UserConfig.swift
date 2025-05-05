@@ -131,7 +131,8 @@ protocol Item {
   var iconPath: String? { get set }
 }
 
-struct Action: Item, Codable, Equatable {
+struct Action: Item, Codable, Equatable, Identifiable {
+  let id = UUID()
   var key: String?
   var type: Type
   var label: String?
@@ -168,7 +169,8 @@ struct Action: Item, Codable, Equatable {
   }
 }
 
-struct Group: Item, Codable, Equatable {
+struct Group: Item, Codable, Equatable, Identifiable {
+  let id = UUID()
   var key: String?
   var type: Type = .group
   var label: String?
@@ -187,7 +189,14 @@ struct Group: Item, Codable, Equatable {
   }
 }
 
-enum ActionOrGroup: Codable, Equatable {
+enum ActionOrGroup: Codable, Equatable, Identifiable {
+  var id: UUID {
+    switch self {
+      case .action(let action): return action.id
+      case .group(let group): return group.id
+    }
+  }
+
   case action(Action)
   case group(Group)
 

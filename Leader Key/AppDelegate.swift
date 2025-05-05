@@ -804,35 +804,53 @@ extension AppDelegate {
     // Converts a key event into a single character string suitable for matching against config keys.
     // Handles forced English layout if enabled.
     private func keyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
-        // Option 1: Forced English Layout (ignores current system layout)
+        // --- Option 1: Forced English Layout ---
         if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
+            // Respect Shift key for case
             let result = modifiers.contains(.shift) ? mapped.uppercased() : mapped
-            print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode) -> '\(result)'")
+            print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result)' (Case Sensitive)")
+            return result.isEmpty ? nil : result
+        }
+
+        // --- Option 2: System Layout (Case Sensitive, Ignore Ctrl/Opt Effect) ---
+
+        // Handle specific non-character keys FIRST by keycode
+        switch keyCode {
+            case 36: return "\u{21B5}" // Enter
+            case 48: return "\t"       // Tab
+            case 49: return " "       // Space
+            case 51: return "\u{0008}" // Backspace
+            case KeyCodes.escape: return "\u{001B}" // Escape
+            case 126: return "↑"      // Up Arrow
+            case 125: return "↓"      // Down Arrow
+            case 123: return "←"      // Left Arrow
+            case 124: return "→"      // Right Arrow
+            default: break // Continue for other keys
+        }
+
+        // For remaining keys, determine character based on modifiers
+        let nsEvent = NSEvent(cgEvent: cgEvent) 
+        var result: String? = nil
+
+        // If Control or Option are involved, get the base character *ignoring* those modifiers,
+        // BUT respecting Shift for case sensitivity lookup.
+        if modifiers.contains(.control) || modifiers.contains(.option) {
+             // Get characters ignoring Ctrl/Opt, which might still include Shift effect
+            result = nsEvent?.charactersIgnoringModifiers
+            print("[AppDelegate] keyStringForEvent (System Layout - Ctrl/Opt): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")' (Ignoring Ctrl/Opt effect)")
+        } else {
+            // No Ctrl/Opt involved. Get the character directly, which includes Shift effect.
+            result = nsEvent?.characters
+            print("[AppDelegate] keyStringForEvent (System Layout - Shift/Base): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")' (Respecting Shift)")
+        }
+
+        // Final check: return nil if the resulting string is empty.
+        if result?.isEmpty ?? true {
+            print("[AppDelegate] keyStringForEvent: Result is empty or nil, returning nil.")
+            return nil
+        } else {
             return result
         }
-        // Option 2: Use system layout mapping for special keys or standard characters
-        let result: String?
-        switch keyCode {
-            // Map specific key codes to representative strings
-            case 36: result = "\u{21B5}" // Enter
-            case 48: result = "\t" // Tab
-            case 49: result = " " // Space
-            case 51: result = "\u{0008}" // Backspace
-            case KeyCodes.escape: result = "\u{001B}" // Escape
-            case 126: result = "↑" // Up Arrow
-            case 125: result = "↓" // Down Arrow
-            case 123: result = "←" // Left Arrow
-            case 124: result = "→" // Right Arrow
-            default:
-                // For other keys, get the Unicode string respecting current layout and modifiers
-                // We use the original CGEvent for this, as NSEvent might not have the right characters.
-                var length = 0
-                var chars = [UniChar](repeating: 0, count: 4) // Buffer for characters
-                cgEvent.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
-                result = length > 0 ? String(utf16CodeUnits: chars, count: length) : nil
-        }
-        print("[AppDelegate] keyStringForEvent (System Layout): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")'")
-        return result
     }
 
     // Helper function to create a readable string for modifier flags

@@ -32,25 +32,24 @@ struct GroupContentView: View {
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(group.actions.indices, id: \.self) { index in
-        if index < group.actions.count {
-          let currentPath = parentPath + [index]
-          ActionOrGroupRow(
-            item: binding(for: index),
-            path: currentPath,
-            onDelete: { 
-              if index < group.actions.count {
-                group.actions.remove(at: index) 
-              }
-            },
-            onDuplicate: { 
-              if index < group.actions.count {
-                group.actions.insert(group.actions[index], at: index) 
-              }
-            },
-            expandedGroups: $expandedGroups
-          )
-          .id(index)
+      ForEach($group.actions) { $item in 
+        if let index = group.actions.firstIndex(where: { $0.id == item.id }) {
+            let currentPath = parentPath + [index]
+            ActionOrGroupRow(
+              item: $item,
+              path: currentPath,
+              onDelete: { 
+                group.actions.removeAll { $0.id == item.id }
+              },
+              onDuplicate: { 
+                 if let duplicateIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
+                    group.actions.insert(item, at: duplicateIndex)
+                 }
+              },
+              expandedGroups: $expandedGroups
+            )
+        } else {
+            EmptyView()
         }
       }
 
@@ -69,21 +68,6 @@ struct GroupContentView: View {
       )
       .padding(.top, generalPadding * 0.5)
     }
-  }
-
-  private func binding(for index: Int) -> Binding<ActionOrGroup> {
-    Binding(
-      get: { 
-        guard index < group.actions.count else {
-          return .action(Action(key: "", type: .application, value: ""))
-        }
-        return group.actions[index] 
-      },
-      set: { 
-        guard index < group.actions.count else { return }
-        group.actions[index] = $0 
-      }
-    )
   }
 }
 
@@ -225,15 +209,21 @@ struct ActionRow: View {
   let onDuplicate: () -> Void
   @FocusState private var isKeyFocused: Bool
   @EnvironmentObject var userConfig: UserConfig
+  
+  @State private var keyInputValue: String = ""
+  @State private var valueInputValue: String = ""
+  @State private var labelInputValue: String = ""
 
   var body: some View {
     HStack(spacing: generalPadding) {
       KeyButton(
-        text: Binding(
-          get: { action.key ?? "" },
-          set: { action.key = $0 }
-        ), placeholder: "Key", validationError: validationErrorForKey,
-        onKeyChanged: { userConfig.finishEditingKey() }
+        text: $keyInputValue,
+        placeholder: "Key", 
+        validationError: validationErrorForKey,
+        onKeyChanged: { capturedKey in 
+          keyInputValue = capturedKey
+          userConfig.finishEditingKey()
+        }
       )
 
       Picker("Type", selection: $action.type) {
@@ -286,10 +276,14 @@ struct ActionRow: View {
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .shortcut:
-        TextField("Shortcut (e.g., CSb, Oa)", text: $action.value)
+        TextField("Shortcut (e.g., CSb, Oa)", text: $valueInputValue, onCommit: {
+          action.value = valueInputValue
+        })
       case .url:
         HStack {
-          TextField("URL", text: $action.value)
+          TextField("URL", text: $valueInputValue, onCommit: {
+            action.value = valueInputValue
+          })
           Toggle("Activates", isOn: Binding(
             get: { action.activates ?? true },
             set: { action.activates = $0 }
@@ -298,16 +292,21 @@ struct ActionRow: View {
           .frame(width: 90)
         }
       case .text:
-        TextField("Text to type", text: $action.value)
+        TextField("Text to type", text: $valueInputValue, onCommit: {
+          action.value = valueInputValue
+        })
       default:
-        TextField("Value", text: $action.value)
+        TextField("Value", text: $valueInputValue, onCommit: {
+          action.value = valueInputValue
+        })
       }
 
       Spacer()
 
-      TextField(action.bestGuessDisplayName, text: $action.label ?? "").frame(
-        width: 120
-      )
+      TextField(action.bestGuessDisplayName, text: $labelInputValue, onCommit: {
+        action.label = labelInputValue.isEmpty ? nil : labelInputValue
+      })
+      .frame(width: 120)
       .padding(.trailing, generalPadding)
 
       Button(role: .none, action: onDuplicate) {
@@ -320,6 +319,32 @@ struct ActionRow: View {
       }
       .buttonStyle(.plain)
       .padding(.trailing, generalPadding)
+    }
+    .onAppear {
+      keyInputValue = action.key ?? ""
+      valueInputValue = action.value
+      labelInputValue = action.label ?? ""
+    }
+    .onChange(of: keyInputValue) { newValue in
+        // Update key immediately if it changed
+        // Allow empty string during typing, but save as nil if empty
+        let effectiveNewKey = newValue.isEmpty ? nil : newValue
+        if action.key != effectiveNewKey {
+             action.key = effectiveNewKey
+        }
+    }
+    .onChange(of: valueInputValue) { newValue in
+        // Update value immediately when local state changes
+        if action.value != newValue {
+            action.value = newValue
+        }
+    }
+    .onChange(of: labelInputValue) { newValue in
+        // Update label immediately when local state changes
+        let effectiveNewLabel = newValue.isEmpty ? nil : newValue
+        if action.label != effectiveNewLabel {
+            action.label = effectiveNewLabel
+        }
     }
   }
 
@@ -348,6 +373,9 @@ struct GroupRow: View {
   let onDuplicate: () -> Void
   @EnvironmentObject var userConfig: UserConfig
 
+  @State private var keyInputValue: String = ""
+  @State private var labelInputValue: String = ""
+
   private var isExpanded: Bool {
     expandedGroups.contains(path)
   }
@@ -364,13 +392,13 @@ struct GroupRow: View {
     VStack(spacing: generalPadding) {
       HStack(spacing: generalPadding) {
         KeyButton(
-          text: Binding(
-            get: { group.key ?? "" },
-            set: { group.key = $0 }
-          ),
+          text: $keyInputValue,
           placeholder: "Group Key",
           validationError: validationErrorForKey,
-          onKeyChanged: { userConfig.finishEditingKey() }
+          onKeyChanged: { capturedKey in 
+            keyInputValue = capturedKey
+            userConfig.finishEditingKey()
+          }
         )
 
         IconPickerMenu(
@@ -426,6 +454,27 @@ struct GroupRow: View {
             .padding(.leading, generalPadding)
         }
       }
+    }
+    .onAppear {
+      keyInputValue = group.key ?? ""
+      labelInputValue = group.label ?? ""
+    }
+    .onChange(of: group.key) { newValue in keyInputValue = newValue ?? "" }
+    .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
+    
+    .onChange(of: keyInputValue) { newValue in
+        // Update key immediately if it changed
+        let effectiveNewKey = newValue.isEmpty ? nil : newValue
+        if group.key != effectiveNewKey {
+             group.key = effectiveNewKey
+        }
+    }
+    .onChange(of: labelInputValue) { newValue in
+        // Update label immediately when local state changes
+        let effectiveNewLabel = newValue.isEmpty ? nil : newValue
+        if group.label != effectiveNewLabel {
+            group.label = effectiveNewLabel
+        }
     }
     .padding(.horizontal, 0)
   }
