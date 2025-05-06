@@ -31,25 +31,30 @@ struct GroupContentView: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
+    // Log actions count and items being rendered
+    // let _ = print("[GroupContentView] Rendering group '\(group.displayName)' with \(group.actions.count) actions. Path: \(parentPath)")
     LazyVStack(spacing: generalPadding) {
-      ForEach($group.actions) { $item in 
-        if let index = group.actions.firstIndex(where: { $0.id == item.id }) {
+      ForEach(group.actions.indices, id: \.self) { index in
+        // Log each item being considered for rendering
+        // let _ = print("[GroupContentView ForEach] Index: \(index), Item Key: \(index < group.actions.count ? (group.actions[index].item.key ?? "nil") : "OUT OF BOUNDS")")
+        if index < group.actions.count {
             let currentPath = parentPath + [index]
             ActionOrGroupRow(
-              item: $item,
+              item: $group.actions[index],
               path: currentPath,
               onDelete: { 
-                group.actions.removeAll { $0.id == item.id }
+                if index < group.actions.count {
+                     let idToRemove = group.actions[index].id
+                     group.actions.removeAll { $0.id == idToRemove }
+                }
               },
               onDuplicate: { 
-                 if let duplicateIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
-                    group.actions.insert(item, at: duplicateIndex)
+                 if index < group.actions.count {
+                    group.actions.insert(group.actions[index], at: index)
                  }
               },
               expandedGroups: $expandedGroups
             )
-        } else {
-            EmptyView()
         }
       }
 
@@ -78,6 +83,8 @@ struct ConfigEditorView: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
+    // Log the received group when the view appears or updates
+    // let _ = Self._printChanges()
     ScrollView {
       GroupContentView(
         group: $group, isRoot: isRoot, parentPath: [], expandedGroups: $expandedGroups
@@ -99,6 +106,8 @@ struct ActionOrGroupRow: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
+    // Log which type of row is being rendered
+    // let _ = print("[ActionOrGroupRow] Path: \(path), Rendering item with key '\(item.item.key ?? "nil")' as \(item.item.type == .group ? "GroupRow" : "ActionRow")")
     switch item {
     case .action:
       ActionRow(
@@ -213,18 +222,32 @@ struct ActionRow: View {
   @State private var keyInputValue: String = ""
   @State private var valueInputValue: String = ""
   @State private var labelInputValue: String = ""
+  @State private var isListening: Bool = false
+  @State private var wasPreviouslyListening: Bool = false
 
   var body: some View {
+    // Log action details
+    // let _ = print("[ActionRow] Rendering action. Path: \(path), Key: '\(action.key ?? "nil")', Type: \(action.type), Value: '\(action.value)'")
     HStack(spacing: generalPadding) {
       KeyButton(
         text: $keyInputValue,
         placeholder: "Key", 
         validationError: validationErrorForKey,
-        onKeyChanged: { capturedKey in 
+        path: path,
+        onKeyChanged: { _, capturedKey in
           keyInputValue = capturedKey
-          userConfig.finishEditingKey()
         }
       )
+      .onChange(of: isListening) { isNowListening in
+          if wasPreviouslyListening && !isNowListening {
+              let modelKey = action.key ?? ""
+              if keyInputValue != modelKey {
+                  print("[ActionRow onChange(isListening)] Key changed from '\(modelKey)' to '\(keyInputValue)'. Updating model for path \(path).")
+                  userConfig.updateKey(at: path, newKey: keyInputValue)
+              }
+          }
+          wasPreviouslyListening = isNowListening
+      }
 
       Picker("Type", selection: $action.type) {
         Text("Application").tag(Type.application)
@@ -325,14 +348,6 @@ struct ActionRow: View {
       valueInputValue = action.value
       labelInputValue = action.label ?? ""
     }
-    .onChange(of: keyInputValue) { newValue in
-        // Update key immediately if it changed
-        // Allow empty string during typing, but save as nil if empty
-        let effectiveNewKey = newValue.isEmpty ? nil : newValue
-        if action.key != effectiveNewKey {
-             action.key = effectiveNewKey
-        }
-    }
     .onChange(of: valueInputValue) { newValue in
         // Update value immediately when local state changes
         if action.value != newValue {
@@ -375,6 +390,8 @@ struct GroupRow: View {
 
   @State private var keyInputValue: String = ""
   @State private var labelInputValue: String = ""
+  @State private var isListening: Bool = false
+  @State private var wasPreviouslyListening: Bool = false
 
   private var isExpanded: Bool {
     expandedGroups.contains(path)
@@ -389,17 +406,37 @@ struct GroupRow: View {
   }
 
   var body: some View {
+    // Log group details
+    // let _ = print("[GroupRow] Rendering group. Path: \(path), Key: '\(group.key ?? "nil")', Actions count: \(group.actions.count)")
     VStack(spacing: generalPadding) {
       HStack(spacing: generalPadding) {
+        // --- Add simple debug text --- START
+        /* Text("DBG:[\(path.map(String.init).joined(separator: ","))] Key:\(group.key ?? "?")")
+             .font(.caption)
+             .foregroundColor(.red)
+             .padding(.leading, 5) // Indent slightly based on path depth
+             .opacity(0.7) */
+        // --- Add simple debug text --- END
+        
         KeyButton(
           text: $keyInputValue,
           placeholder: "Group Key",
           validationError: validationErrorForKey,
-          onKeyChanged: { capturedKey in 
+          path: path,
+          onKeyChanged: { _, capturedKey in
             keyInputValue = capturedKey
-            userConfig.finishEditingKey()
           }
         )
+        .onChange(of: isListening) { isNowListening in
+            if wasPreviouslyListening && !isNowListening {
+                let modelKey = group.key ?? ""
+                if keyInputValue != modelKey {
+                    print("[GroupRow onChange(isListening)] Key changed from '\(modelKey)' to '\(keyInputValue)'. Updating model for path \(path).")
+                    userConfig.updateKey(at: path, newKey: keyInputValue)
+                }
+            }
+            wasPreviouslyListening = isNowListening
+        }
 
         IconPickerMenu(
           item: Binding(
@@ -459,16 +496,14 @@ struct GroupRow: View {
       keyInputValue = group.key ?? ""
       labelInputValue = group.label ?? ""
     }
-    .onChange(of: group.key) { newValue in keyInputValue = newValue ?? "" }
-    .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
-    
-    .onChange(of: keyInputValue) { newValue in
-        // Update key immediately if it changed
-        let effectiveNewKey = newValue.isEmpty ? nil : newValue
-        if group.key != effectiveNewKey {
-             group.key = effectiveNewKey
+    .onChange(of: group.key) { newValue in
+        let newKeyValue = newValue ?? ""
+        if keyInputValue != newKeyValue { // Prevent potential loops
+            keyInputValue = newKeyValue
         }
     }
+    .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
+    
     .onChange(of: labelInputValue) { newValue in
         // Update label immediately when local state changes
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue

@@ -83,6 +83,94 @@ class UserConfig: ObservableObject {
   // Placeholder for methods moved to extensions
 }
 
+// MARK: - Key Update Logic (Add this new extension)
+extension UserConfig {
+    // Public method to initiate key update
+    func updateKey(at path: [Int], newKey: String) {
+        print("[UserConfig] Attempting to update key at path \(path) to '\(newKey)'")
+        // Ensure update happens on main thread as it modifies @Published property
+        DispatchQueue.main.async {
+            // Modify the currentlyEditingGroup directly
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                 let effectiveKey = newKey.isEmpty ? nil : newKey // Handle empty string case
+                 
+                 switch item {
+                 case .action(var action): // Use var to make action mutable locally
+                     if action.key != effectiveKey { // Only update if changed
+                         action.key = effectiveKey
+                         item = .action(action) // IMPORTANT: Assign the modified action back to the inout item
+                         print("[UserConfig updateKey Closure] Updated ACTION key at path \(path) to '\(effectiveKey ?? "nil")'")
+                     }
+                 case .group(var subGroup): // Use var to make subGroup mutable locally
+                     if subGroup.key != effectiveKey { // Only update if changed
+                         subGroup.key = effectiveKey
+                         item = .group(subGroup) // IMPORTANT: Assign the modified group back to the inout item
+                         print("[UserConfig updateKey Closure] Updated GROUP key at path \(path) to '\(effectiveKey ?? "nil")'")
+                     }
+                 @unknown default:
+                    print("[UserConfig updateKey Closure] Warning: Unhandled ActionOrGroup case.")
+                 }
+             }
+             // Since we modified the published property directly, SwiftUI's observation
+             // mechanism should pick up the change. No need to reassign the whole group.
+             // self.currentlyEditingGroup = groupToModify // REMOVED THIS LINE
+
+             // Optional: Explicitly notify observers if direct modification doesn't trigger update (unlikely but possible)
+             // self.objectWillChange.send()
+             
+             // print("[UserConfig] Updated key. Current editing group state: \(self.currentlyEditingGroup)") // Optional verbose logging
+             // Optionally trigger validation or other side effects here
+             // self.triggerValidationForEditingConfig() // Example
+        }
+    }
+
+    // Recursive helper function to find and modify an item at a given path
+    private func modifyItem(in group: inout Group, at path: [Int], update: (inout ActionOrGroup) -> Void) {
+        guard !path.isEmpty else {
+            // This case should ideally not be reached if called from updateKey which checks path
+            print("[UserConfig modifyItem] Error: Path is empty, cannot modify item.")
+            return
+        }
+
+        var currentPath = path
+        let index = currentPath.removeFirst() // Get the index for the current level
+
+        guard index >= 0 && index < group.actions.count else {
+            print("[UserConfig modifyItem] Error: Index \(index) out of bounds for group actions (count: \(group.actions.count)) at path \(path).")
+            return
+        }
+
+        if currentPath.isEmpty {
+            // We've reached the target item at 'index', apply the update closure
+            print("[UserConfig modifyItem] Reached target item at index \(index). Applying update.")
+            
+            // --- Apply Update Directly to Nested Value --- START ---
+            // Get a mutable reference to the item
+            var itemToUpdate = group.actions[index]
+            // Pass the mutable reference to the update closure
+            update(&itemToUpdate) 
+            // Assign the potentially modified item back to the array
+            group.actions[index] = itemToUpdate 
+            // --- Apply Update Directly to Nested Value --- END ---
+            
+        } else {
+            // Need to go deeper into a subgroup
+            guard case .group(var subgroup) = group.actions[index] else {
+                print("[UserConfig modifyItem] Error: Path \(path) attempts to traverse through a non-group item at index \(index).")
+                return
+            }
+            // Recursively call modifyItem on the subgroup with the remaining path
+            modifyItem(in: &subgroup, at: currentPath, update: update)
+            // After the recursive call returns, update the original group's actions array
+            // with the potentially modified subgroup
+            group.actions[index] = .group(subgroup)
+        }
+    }
+    
+    // Remove the now unused finishEditingKey method if it exists
+    // func finishEditingKey() { ... }
+}
+
 // MARK: - Config Data Structures (Keep in main file)
 
 let defaultConfig = """

@@ -6,7 +6,8 @@ struct KeyButton: View {
   let placeholder: String
   @State private var isListening = false
   var validationError: ValidationErrorType? = nil
-  var onKeyChanged: ((String) -> Void)? = nil
+  var path: [Int]
+  var onKeyChanged: (([Int], String) -> Void)? = nil
 
   var body: some View {
     Button(action: {
@@ -26,7 +27,7 @@ struct KeyButton: View {
     }
     .buttonStyle(PlainButtonStyle())
     .background(
-      KeyListenerView(isListening: $isListening, onKeyChanged: onKeyChanged)
+      KeyListenerView(isListening: $isListening, path: path, onKeyChanged: onKeyChanged)
     )
   }
 
@@ -53,11 +54,13 @@ struct KeyButton: View {
 
 struct KeyListenerView: NSViewRepresentable {
   @Binding var isListening: Bool
-  var onKeyChanged: ((String) -> Void)?
+  var path: [Int]
+  var onKeyChanged: (([Int], String) -> Void)?
 
   func makeNSView(context: Context) -> NSView {
     let view = KeyListenerNSView()
     view.isListening = $isListening
+    view.path = path
     view.onKeyChanged = onKeyChanged
     return view
   }
@@ -65,6 +68,7 @@ struct KeyListenerView: NSViewRepresentable {
   func updateNSView(_ nsView: NSView, context: Context) {
     if let view = nsView as? KeyListenerNSView {
       view.isListening = $isListening
+      view.path = path
       view.onKeyChanged = onKeyChanged
 
       if isListening {
@@ -77,7 +81,8 @@ struct KeyListenerView: NSViewRepresentable {
 
   class KeyListenerNSView: NSView {
     var isListening: Binding<Bool>?
-    var onKeyChanged: ((String) -> Void)?
+    var path: [Int]?
+    var onKeyChanged: (([Int], String) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -111,11 +116,16 @@ struct KeyListenerView: NSViewRepresentable {
       
       // Only proceed if a key was meaningfully captured
       if let finalKey = capturedKey {
-          print("[KeyListenerNSView] KeyDown captured: '\(finalKey)'. Stopping listening.")
+          print("[KeyListenerNSView] KeyDown captured: '\(finalKey)'. Calling handler and stopping listening.")
+          // Call the handler *synchronously* with the new key and path
+          if let currentPath = self.path {
+             self.onKeyChanged?(currentPath, finalKey)
+          } else {
+              print("[KeyListenerNSView] Error: Path is nil, cannot call onKeyChanged.")
+          }
+          // Stop listening asynchronously
           DispatchQueue.main.async {
             isListeningBinding.wrappedValue = false
-            // Pass the captured key string back
-            self.onKeyChanged?(finalKey) 
           }
       } else {
            // Escape was pressed, just stop listening without calling callback
@@ -124,16 +134,6 @@ struct KeyListenerView: NSViewRepresentable {
                isListeningBinding.wrappedValue = false
            }
       }
-    }
-
-    override func resignFirstResponder() -> Bool {
-      if let isListeningBinding = isListening, isListeningBinding.wrappedValue {
-         print("[KeyListenerNSView] Resign first responder while listening. Stopping listening.")
-         DispatchQueue.main.async {
-            isListeningBinding.wrappedValue = false
-         }
-      }
-      return super.resignFirstResponder()
     }
   }
 }
@@ -152,29 +152,33 @@ struct KeyListenerView: NSViewRepresentable {
         KeyButton(
           text: $text,
           placeholder: "Key",
-          // Update closure to accept the String argument
-          onKeyChanged: { capturedKey in print("Key changed to: \(capturedKey)") } 
+          path: [0],
+          // Update closure to accept the path and String argument
+          onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
           validationError: .duplicateKey,
-          // Update closure to accept the String argument
-          onKeyChanged: { capturedKey in print("Key changed to: \(capturedKey)") } 
+          path: [1],
+          // Update closure to accept the path and String argument
+          onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
           validationError: .emptyKey,
-          // Update closure to accept the String argument
-          onKeyChanged: { capturedKey in print("Key changed to: \(capturedKey)") } 
+          path: [2],
+          // Update closure to accept the path and String argument
+          onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
           validationError: .nonSingleCharacterKey,
-          // Update closure to accept the String argument
-          onKeyChanged: { capturedKey in print("Key changed to: \(capturedKey)") } 
+          path: [3],
+          // Update closure to accept the path and String argument
+          onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         Text("Current value: '\(text)'")
       }
