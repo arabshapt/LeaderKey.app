@@ -10,11 +10,17 @@ struct AddButtons: View {
 
   var body: some View {
     HStack(spacing: generalPadding) {
-      Button(action: onAddAction) {
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Add action' button TAPPED.")
+        onAddAction()
+      }) {
         Image(systemName: "rays")
         Text("Add action")
       }
-      Button(action: onAddGroup) {
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Add group' button TAPPED.")
+        onAddGroup()
+      }) {
         Image(systemName: "folder")
         Text("Add group")
       }
@@ -61,12 +67,14 @@ struct GroupContentView: View {
       AddButtons(
         onAddAction: {
           withAnimation {
+            print("[UI LOG] GroupContentView: Adding new ACTION (key: \"\", type: .application, value: \"\") to group at path \(parentPath)")
             group.actions.append(
               .action(Action(key: "", type: .application, value: "")))
           }
         },
         onAddGroup: {
           withAnimation {
+            print("[UI LOG] GroupContentView: Adding new GROUP (key: \"\", actions: []) to group at path \(parentPath)")
             group.actions.append(.group(Group(key: "", actions: [])))
           }
         }
@@ -234,16 +242,24 @@ struct ActionRow: View {
         placeholder: "Key", 
         validationError: validationErrorForKey,
         path: path,
-        onKeyChanged: { _, capturedKey in
+        onKeyChanged: { keyButtonPath, capturedKey in
+          print("[UI LOG] ActionRow KeyButton.onKeyChanged: Path \(keyButtonPath), Captured key: '\(capturedKey)'. Updating local keyInputValue.")
           keyInputValue = capturedKey
+          print("[UI LOG] ActionRow KeyButton.onKeyChanged: Forcing call to userConfig.updateKey for path \(keyButtonPath) with key '\(capturedKey)'.")
+          userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
         }
       )
       .onChange(of: isListening) { isNowListening in
+          // Split log for ActionRow.onChange(isListening)
+          print("[UI LOG] ActionRow.onChange(isListening): Path \(path), isNowListen: \(isNowListening), wasPrevListen: \(wasPreviouslyListening)")
+          print("[UI LOG] ActionRow.onChange(isListening): Path \(path), keyInVal: '\(keyInputValue)', modelKey: '\(action.key ?? "nil")'.")
           if wasPreviouslyListening && !isNowListening {
               let modelKey = action.key ?? ""
               if keyInputValue != modelKey {
-                  print("[ActionRow onChange(isListening)] Key changed from '\(modelKey)' to '\(keyInputValue)'. Updating model for path \(path).")
+                  print("[UI LOG] ActionRow.onChange(isListening): Key value changed for path \(path) from '\(modelKey)' to '\(keyInputValue)'. Calling userConfig.updateKey.")
                   userConfig.updateKey(at: path, newKey: keyInputValue)
+              } else {
+                  print("[UI LOG] ActionRow.onChange(isListening): Key value NOT changed for path \(path). Current: '\(keyInputValue)'. No call to userConfig.updateKey.")
               }
           }
           wasPreviouslyListening = isNowListening
@@ -344,6 +360,7 @@ struct ActionRow: View {
       .padding(.trailing, generalPadding)
     }
     .onAppear {
+      print("[UI LOG] ActionRow.onAppear: Path \(path), Initial action key: '\(action.key ?? "nil")', value: '\(action.value)', label: '\(action.label ?? "nil")'. Setting local state.")
       keyInputValue = action.key ?? ""
       valueInputValue = action.value
       labelInputValue = action.label ?? ""
@@ -423,16 +440,24 @@ struct GroupRow: View {
           placeholder: "Group Key",
           validationError: validationErrorForKey,
           path: path,
-          onKeyChanged: { _, capturedKey in
+          onKeyChanged: { keyButtonPath, capturedKey in
+            print("[UI LOG] GroupRow KeyButton.onKeyChanged: Path \(keyButtonPath), Captured key: '\(capturedKey)'. Updating local keyInputValue.")
             keyInputValue = capturedKey
+            print("[UI LOG] GroupRow KeyButton.onKeyChanged: Forcing call to userConfig.updateKey for path \(keyButtonPath) with key '\(capturedKey)'.")
+            userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
           }
         )
         .onChange(of: isListening) { isNowListening in
+          // Split log for GroupRow.onChange(isListening)
+          print("[UI LOG] GroupRow.onChange(isListening): Path \(path), isNowListen: \(isNowListening), wasPrevListen: \(wasPreviouslyListening)")
+          print("[UI LOG] GroupRow.onChange(isListening): Path \(path), keyInVal: '\(keyInputValue)', modelKey: '\(group.key ?? "nil")'.")
             if wasPreviouslyListening && !isNowListening {
                 let modelKey = group.key ?? ""
                 if keyInputValue != modelKey {
-                    print("[GroupRow onChange(isListening)] Key changed from '\(modelKey)' to '\(keyInputValue)'. Updating model for path \(path).")
+                    print("[UI LOG] GroupRow.onChange(isListening): Key value changed for path \(path) from '\(modelKey)' to '\(keyInputValue)'. Calling userConfig.updateKey.")
                     userConfig.updateKey(at: path, newKey: keyInputValue)
+                } else {
+                    print("[UI LOG] GroupRow.onChange(isListening): Key value NOT changed for path \(path). Current: '\(keyInputValue)'. No call to userConfig.updateKey.")
                 }
             }
             wasPreviouslyListening = isNowListening
@@ -493,6 +518,7 @@ struct GroupRow: View {
       }
     }
     .onAppear {
+      print("[UI LOG] GroupRow.onAppear: Path \(path), Initial group key: '\(group.key ?? "nil")', label: '\(group.label ?? "nil")'. Setting local state.")
       keyInputValue = group.key ?? ""
       labelInputValue = group.label ?? ""
     }

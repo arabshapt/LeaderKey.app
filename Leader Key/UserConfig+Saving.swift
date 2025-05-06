@@ -7,20 +7,29 @@ extension UserConfig {
 
     // Saves the configuration currently being edited in the Settings window
     func saveCurrentlyEditingConfig() {
+        print("[SAVE LOG] saveCurrentlyEditingConfig: CALLED for config key: \(selectedConfigKeyForEditing)")
+        print("[SAVE LOG] saveCurrentlyEditingConfig: State of currentlyEditingGroup BEFORE sort: \(currentlyEditingGroup)")
+
         guard let filePath = discoveredConfigFiles[selectedConfigKeyForEditing] else {
             let errorDesc = "Could not find file path for selected config key: \(selectedConfigKeyForEditing)"
+            print("[SAVE LOG] saveCurrentlyEditingConfig: ERROR - \(errorDesc)")
             handleError(NSError(domain: "UserConfig", code: 3, userInfo: [NSLocalizedDescriptionKey: errorDesc]), critical: true)
             return
         }
+        print("[SAVE LOG] saveCurrentlyEditingConfig: File path to save to: \(filePath)")
 
         // --- SORTING --- 
-        // Create a sorted version of the group before saving
+        print("[SAVE LOG] saveCurrentlyEditingConfig: About to sort group.")
         let sortedGroup = sortGroupRecursively(group: currentlyEditingGroup)
+        print("[SAVE LOG] saveCurrentlyEditingConfig: State of group AFTER sort (sortedGroup): \(sortedGroup)")
         // -----------------
 
         // Validate the group being saved
+        print("[SAVE LOG] saveCurrentlyEditingConfig: About to validate sortedGroup.")
         let errors = ConfigValidator.validate(group: sortedGroup)
+        print("[SAVE LOG] saveCurrentlyEditingConfig: Validation completed. Number of errors: \(errors.count)")
         if !errors.isEmpty {
+            errors.forEach { print("[SAVE LOG] saveCurrentlyEditingConfig: Validation Error - Path: \($0.path), Msg: \($0.message), Type: \($0.type)") }
             // --- MODIFIED: Show error and RETURN if validation fails ---
             let errorCount = errors.count
             let errorMsg = "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the '\(selectedConfigKeyForEditing)' configuration. \nPlease fix the issues before saving."
@@ -40,6 +49,7 @@ extension UserConfig {
         } else if selectedConfigKeyForEditing == globalDefaultDisplayName {
             // Clear errors if default config is now valid
             self.validationErrors = []
+            print("[SAVE LOG] saveCurrentlyEditingConfig: No validation errors. Proceeding to encode and write.")
         }
 
         do {
@@ -63,6 +73,8 @@ extension UserConfig {
 
     // Recursively sorts actions and groups within a group alphabetically by key
     private func sortGroupRecursively(group: Group) -> Group {
+        // Add a log at the beginning of this recursive sort function if deeper insight is needed
+        // print("[SAVE LOG] sortGroupRecursively: Sorting group with key '\(group.key ?? "nil")', label '\(group.label ?? "no_label")'. \(group.actions.count) actions.")
         var sortedActions: [ActionOrGroup] = []
 
         // Sort actions within the current group
