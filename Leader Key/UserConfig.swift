@@ -191,6 +191,49 @@ extension UserConfig {
     // func finishEditingKey() { ... }
 }
 
+// MARK: - Action Type Update Logic (New Extension)
+extension UserConfig {
+    // Public method to update an action's type and reset its value
+    func updateActionType(at path: [Int], newType: Type) {
+        print("[UserConfig LOG] updateActionType: Path \(path), newType: \(newType)")
+        // Ensure we're modifying the correct structure
+        // print("[UserConfig LOG] updateActionType: BEFORE currentlyEditingGroup: \(self.currentlyEditingGroup)") 
+
+        let updateLogic = { 
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                print("[UserConfig LOG] updateActionType.closure: Modifying item at path \(path)")
+                guard case .action(var action) = item else {
+                    print("[UserConfig LOG] updateActionType.closure: ERROR - Item at path \(path) is not an Action.")
+                    return
+                }
+                
+                if action.type != newType {
+                    let oldType = action.type
+                    let oldValue = action.value
+                    action.type = newType
+                    action.value = "" // Reset value when type changes
+                    item = .action(action)
+                    print("[UserConfig LOG] updateActionType.closure: Updated ACTION at \(path). Type: \(oldType) -> \(newType). Value: '\(oldValue)' -> ''")
+                } else {
+                    print("[UserConfig LOG] updateActionType.closure: ACTION at \(path) already has type \(newType). No change.")
+                }
+            }
+            self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update if needed
+            print("[UserConfig LOG] updateActionType: Finished update logic for path \(path).")
+        }
+
+        // Ensure execution on the main thread
+        if Thread.isMainThread {
+            updateLogic()
+        } else {
+            DispatchQueue.main.async {
+                updateLogic()
+            }
+        }
+        print("[UserConfig LOG] updateActionType: Finished method for path \(path).")
+    }
+}
+
 // MARK: - Config Data Structures (Keep in main file)
 
 let defaultConfig = """

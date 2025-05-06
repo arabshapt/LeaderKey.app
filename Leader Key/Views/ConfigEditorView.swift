@@ -2,6 +2,20 @@ import Defaults
 import SwiftUI
 import SymbolPicker
 
+// Helper function to create a deep duplicate with a new UUID
+func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
+    switch item {
+    case .action(let action):
+        // Create a new Action instance, which will get a new UUID
+        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates))
+    case .group(let group):
+        // Recursively duplicate actions within the group
+        let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
+        // Create a new Group instance, which will get a new UUID
+        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, actions: newActions))
+    }
+}
+
 let generalPadding: CGFloat = 8
 
 struct AddButtons: View {
@@ -40,27 +54,36 @@ struct GroupContentView: View {
     // Log actions count and items being rendered
     // let _ = print("[GroupContentView] Rendering group '\(group.displayName)' with \(group.actions.count) actions. Path: \(parentPath)")
     LazyVStack(spacing: generalPadding) {
-      ForEach(group.actions.indices, id: \.self) { index in
-        // Log each item being considered for rendering
-        // let _ = print("[GroupContentView ForEach] Index: \(index), Item Key: \(index < group.actions.count ? (group.actions[index].item.key ?? "nil") : "OUT OF BOUNDS")")
-        if index < group.actions.count {
+      ForEach($group.actions) { $itemInForEach in // Iterating over bindings to identifiable items
+        // Find the index of the current item to construct the path
+        // This is necessary if ActionOrGroupRow or its children rely on the index-based path.
+        // Ensure this logic correctly handles potential nil if item is not found (should not happen here).
+        if let index = group.actions.firstIndex(where: { $0.id == itemInForEach.id }) {
             let currentPath = parentPath + [index]
             ActionOrGroupRow(
-              item: $group.actions[index],
+              item: $itemInForEach, // Pass the binding directly
               path: currentPath,
-              onDelete: { 
-                if index < group.actions.count {
-                     let idToRemove = group.actions[index].id
-                     group.actions.removeAll { $0.id == idToRemove }
-                }
+              onDelete: {
+                // Remove by ID, which is safer when the array might be reordered
+                group.actions.removeAll { $0.id == itemInForEach.id }
               },
-              onDuplicate: { 
-                 if index < group.actions.count {
-                    group.actions.insert(group.actions[index], at: index)
-                 }
+              onDuplicate: {
+                // Use the new makeTrueDuplicate function
+                if let sourceIndex = group.actions.firstIndex(where: { $0.id == itemInForEach.id }) {
+                    let duplicatedItemWithNewID = makeTrueDuplicate(item: itemInForEach)
+                    // Insert after the current item, or at the same index if preferred.
+                    // Make sure the index is valid.
+                    let insertAtIndex = min(sourceIndex + 1, group.actions.count)
+                    group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
+                }
               },
               expandedGroups: $expandedGroups
             )
+        } else {
+            // Fallback or error logging if an item's index can't be found.
+            // This case should ideally not be reached if itemInForEach is always from group.actions.
+            // Text("Error: Item not found in group.actions for ID \\(itemInForEach.id)")
+            //     .foregroundColor(.red)
         }
       }
 
@@ -232,10 +255,11 @@ struct ActionRow: View {
   @State private var labelInputValue: String = ""
   @State private var isListening: Bool = false
   @State private var wasPreviouslyListening: Bool = false
+  @State private var selectedType: Type = .application // Local state for Picker
 
   var body: some View {
-    // Log action details
-    // let _ = print("[ActionRow] Rendering action. Path: \(path), Key: '\(action.key ?? "nil")', Type: \(action.type), Value: '\(action.value)'")
+    // Log action details + ID for tracking
+    let _ = print("[UI LOG] ActionRow BODY START: Path \(path), ID \(action.id), Key '\(action.key ?? "nil")', Type: \(action.type)")
     HStack(spacing: generalPadding) {
       KeyButton(
         text: $keyInputValue,
@@ -264,8 +288,26 @@ struct ActionRow: View {
           }
           wasPreviouslyListening = isNowListening
       }
+      // Add onChange for the local selectedType state
+      .onChange(of: selectedType) { newTypeValue in
+        // Call the UserConfig method to handle the update
+        // This avoids direct mutation of the binding within this view's update cycle
+        let oldModelType = action.type // Store the type from the model BEFORE the update
+        print("[UI LOG] ActionRow.onChange(selectedType): Path \(path) detected change TO \(newTypeValue). Old model type: \(oldModelType). Calling userConfig.updateActionType.")
+        userConfig.updateActionType(at: path, newType: newTypeValue)
 
-      Picker("Type", selection: $action.type) {
+        // Check if the model's type ACTUALLY changed as a result of the call
+        if action.type != oldModelType {
+            print("[UI LOG] ActionRow.onChange(selectedType): Path \(path). Model type CHANGED from \(oldModelType) to \(action.type). Resetting valueInputValue locally.")
+            valueInputValue = "" // Only reset if the type in the model was actually changed
+        } else {
+            print("[UI LOG] ActionRow.onChange(selectedType): Path \(path). Model type (\(action.type)) did NOT change from old (\(oldModelType)). Not resetting valueInputValue.")
+        }
+      }
+
+      // Log before Picker
+      let _ = print("[UI LOG] ActionRow BODY: Drawing Picker for Path \(path), ID \(action.id), Type: \(selectedType)") // Log selectedType
+      Picker("Type", selection: $selectedType) { // Bind Picker to local state
         Text("Application").tag(Type.application)
         Text("URL").tag(Type.url)
         Text("Command").tag(Type.command)
@@ -286,8 +328,12 @@ struct ActionRow: View {
           }
         ))
 
-      switch action.type {
+      // Log before Switch
+      let _ = print("[UI LOG] ActionRow BODY: Entering Switch for Path \(path), ID \(action.id), Type: \(action.type)") // Log action.type
+      switch action.type { // Switch on the actual model type
       case .application:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .application for Path \(path), ID \(action.id)")
         Button("Choose…") {
           let panel = NSOpenPanel()
           panel.allowedContentTypes = [.applicationBundle, .application]
@@ -302,6 +348,8 @@ struct ActionRow: View {
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .folder:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .folder for Path \(path), ID \(action.id)")
         Button("Choose…") {
           let panel = NSOpenPanel()
           panel.allowsMultipleSelection = false
@@ -315,10 +363,14 @@ struct ActionRow: View {
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .shortcut:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .shortcut for Path \(path), ID \(action.id)")
         TextField("Shortcut (e.g., CSb, Oa)", text: $valueInputValue, onCommit: {
           action.value = valueInputValue
         })
       case .url:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .url for Path \(path), ID \(action.id)")
         HStack {
           TextField("URL", text: $valueInputValue, onCommit: {
             action.value = valueInputValue
@@ -331,10 +383,14 @@ struct ActionRow: View {
           .frame(width: 90)
         }
       case .text:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .text for Path \(path), ID \(action.id)")
         TextField("Text to type", text: $valueInputValue, onCommit: {
           action.value = valueInputValue
         })
       default:
+        // Log inside case (includes .command initially? Check your Type enum)
+        let _ = print("[UI LOG] ActionRow Switch Case: .default/\(String(describing: action.type)) for Path \(path), ID \(action.id)") // Log action.type
         TextField("Value", text: $valueInputValue, onCommit: {
           action.value = valueInputValue
         })
@@ -363,18 +419,30 @@ struct ActionRow: View {
       print("[UI LOG] ActionRow.onAppear: Path \(path), Initial action key: '\(action.key ?? "nil")', value: '\(action.value)', label: '\(action.label ?? "nil")'. Setting local state.")
       keyInputValue = action.key ?? ""
       valueInputValue = action.value
-      labelInputValue = action.label ?? ""
+      // If the label from the model is nil when the view appears,
+      // set the local state to the best guess display name.
+      // The onChange(of: labelInputValue) below will update the model.
+      if action.label == nil {
+        let guessedLabel = action.bestGuessDisplayName
+        labelInputValue = guessedLabel
+        print("[UI LOG] ActionRow.onAppear: Path \(path), Label was nil. Set labelInputValue to guessed name '\(guessedLabel)'.")
+      } else {
+        labelInputValue = action.label ?? ""
+      }
+      // Set initial local state for the Picker type
+      selectedType = action.type 
     }
+    // Re-add onChange listeners to sync local state back to the model
     .onChange(of: valueInputValue) { newValue in
-        // Update value immediately when local state changes
         if action.value != newValue {
+            print("[UI LOG] ActionRow.onChange(valueInputValue): Path \(path) syncing value '\(newValue)' to action.value.")
             action.value = newValue
         }
     }
     .onChange(of: labelInputValue) { newValue in
-        // Update label immediately when local state changes
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue
         if action.label != effectiveNewLabel {
+            print("[UI LOG] ActionRow.onChange(labelInputValue): Path \(path) syncing label '\(effectiveNewLabel ?? "nil")' to action.label.")
             action.label = effectiveNewLabel
         }
     }
@@ -489,7 +557,7 @@ struct GroupRow: View {
 
         Spacer(minLength: 0)
 
-        TextField("Label", text: $group.label ?? "").frame(width: 120)
+        TextField("Label", text: $labelInputValue).frame(width: 120)
           .padding(.trailing, generalPadding)
 
         Button(role: .none, action: onDuplicate) {
@@ -526,6 +594,7 @@ struct GroupRow: View {
         let newKeyValue = newValue ?? ""
         if keyInputValue != newKeyValue { // Prevent potential loops
             keyInputValue = newKeyValue
+            print("[UI LOG] GroupRow.onChange(group.key): Path \(path). Model key changed to '\(newKeyValue)'. Updated keyInputValue.") // Added log
         }
     }
     .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
