@@ -793,7 +793,7 @@ extension AppDelegate {
         let isSticky: Bool
         switch config {
         case .controlGroupOptionSticky:
-            isSticky = modifierFlags.contains(.option)
+            isSticky = modifierFlags.contains(.command)
         case .optionGroupControlSticky:
             isSticky = modifierFlags.contains(.control)
         }
