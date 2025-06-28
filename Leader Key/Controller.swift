@@ -133,6 +133,11 @@ class Controller {
         completion?()
     }
 
+    // Reset window transparency when showing the window
+    DispatchQueue.main.async {
+        self.window.alphaValue = 1.0
+    }
+
     if !window.hasCheatsheet || userState.isShowingRefreshState {
       return
     }
