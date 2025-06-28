@@ -257,6 +257,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       controller.hide()
     }
 
+    // Toggle sticky mode programmatically (for use in actions)
+    func toggleStickyMode() {
+        stickyModeToggled.toggle()
+        print("[AppDelegate] toggleStickyMode: Sticky mode toggled to \(stickyModeToggled)")
+        
+        // Update window transparency immediately if we're in a sequence
+        if currentSequenceGroup != nil {
+            let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
+            DispatchQueue.main.async {
+                self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+            }
+        }
+    }
+
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
       print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
@@ -503,6 +517,10 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
     }
+    private var stickyModeToggled: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.stickyModeToggled) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.stickyModeToggled, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
@@ -510,6 +528,7 @@ extension AppDelegate {
         static var activeRootGroup = "activeRootGroup"
         static var currentSequenceGroup = "currentSequenceGroup"
         static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
+        static var stickyModeToggled = "stickyModeToggled"
     }
 
     // --- Event Tap Logic Methods ---
@@ -828,6 +847,13 @@ extension AppDelegate {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
+            
+            // Reset sticky mode toggle state
+            if stickyModeToggled {
+                print("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
+                self.stickyModeToggled = false
+            }
+            
             // Also tell the UserState to clear its navigation path etc. on the main thread
             DispatchQueue.main.async {
                  print("[AppDelegate] resetSequenceState: Dispatching UserState.clear() to main thread.")
@@ -841,14 +867,17 @@ extension AppDelegate {
     // Checks if the 'Sticky Mode' modifier key is held down.
     private func isInStickyMode(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
         let config = Defaults[.modifierKeyConfiguration]
-        let isSticky: Bool
+        let modifierStickyMode: Bool
         switch config {
         case .controlGroupOptionSticky:
-            isSticky = modifierFlags.contains(.command)
+            modifierStickyMode = modifierFlags.contains(.command)
         case .optionGroupControlSticky:
-            isSticky = modifierFlags.contains(.control)
+            modifierStickyMode = modifierFlags.contains(.control)
         }
-        print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(describeModifiers(modifierFlags)), IsSticky = \(isSticky)")
+        
+        // Sticky mode is active if either the modifier is held OR it's been toggled on
+        let isSticky = modifierStickyMode || stickyModeToggled
+        print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(describeModifiers(modifierFlags)), Toggled = \(stickyModeToggled), IsSticky = \(isSticky)")
         return isSticky
     }
 

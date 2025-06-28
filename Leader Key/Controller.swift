@@ -379,6 +379,12 @@ class Controller {
       }
     case .text:
       typeText(action.value)
+    case .toggleStickyMode:
+      if let appDelegate = appDelegate {
+        appDelegate.toggleStickyMode()
+      } else {
+        print("[Controller] runAction: Cannot toggle sticky mode - appDelegate is nil")
+      }
     default:
       print("\(action.type) unknown")
     }

@@ -272,6 +272,7 @@ enum Type: String, Codable {
   case folder
   case shortcut
   case text
+  case toggleStickyMode
 }
 
 protocol Item {
