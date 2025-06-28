@@ -314,6 +314,7 @@ struct ActionRow: View {
         Text("Folder").tag(Type.folder)
         Text("Shortcut").tag(Type.shortcut)
         Text("Type Text").tag(Type.text)
+        Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
       }
       .frame(width: 110)
       .labelsHidden()
@@ -388,6 +389,12 @@ struct ActionRow: View {
         TextField("Text to type", text: $valueInputValue, onCommit: {
           action.value = valueInputValue
         })
+      case .toggleStickyMode:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .toggleStickyMode for Path \(path), ID \(action.id)")
+        Text("No value required")
+          .foregroundColor(.secondary)
+          .font(.caption)
       default:
         // Log inside case (includes .command initially? Check your Type enum)
         let _ = print("[UI LOG] ActionRow Switch Case: .default/\(String(describing: action.type)) for Path \(path), ID \(action.id)") // Log action.type
