@@ -140,6 +140,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Setup background services and UI elements
     setupFileMonitor()      // Defined in private extension
     setupStatusItem()       // Defined in private extension
+    setupUpdaterController() // Configure auto-update behavior
 
     // Attempt to start the global event tap immediately
     print("[AppDelegate] Attempting initial startEventTapMonitoring()...")
@@ -388,12 +389,29 @@ private extension AppDelegate {
             }
         }
     }
-
+    
     // Helper to check if running within Xcode's testing environment
     func isRunningTests() -> Bool {
         let isTesting = ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
         if isTesting { print("[AppDelegate] isRunningTests detected.") }
         return isTesting
+    }
+    
+    func setupUpdaterController() {
+        print("[AppDelegate] setupUpdaterController: Configuring auto-update behavior.")
+        
+        // Set initial automatic update check preference
+        updaterController.updater.automaticallyChecksForUpdates = Defaults[.automaticallyChecksForUpdates]
+        
+        // Observe changes to the auto-update preference
+        Task {
+            for await value in Defaults.updates(.automaticallyChecksForUpdates) {
+                DispatchQueue.main.async {
+                    print("[AppDelegate] Auto-update setting changed to: \(value). Updating Sparkle configuration.")
+                    self.updaterController.updater.automaticallyChecksForUpdates = value
+                }
+            }
+        }
     }
 }
 

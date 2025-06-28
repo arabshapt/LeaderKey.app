@@ -15,6 +15,7 @@ struct AdvancedPane: View {
   @Default(.cheatsheetDelayMS) var cheatsheetDelayMS
   @Default(.reactivateBehavior) var reactivateBehavior
   @Default(.showAppIconsInCheatsheet) var showAppIconsInCheatsheet
+  @Default(.automaticallyChecksForUpdates) var automaticallyChecksForUpdates
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -137,6 +138,7 @@ struct AdvancedPane: View {
         Defaults.Toggle("Show Leader Key in menubar", key: .showMenuBarIcon)
         Defaults.Toggle(
           "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
+        Defaults.Toggle("Automatically check for updates", key: .automaticallyChecksForUpdates)
         // Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
       }
       

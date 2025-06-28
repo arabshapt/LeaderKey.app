@@ -48,6 +48,7 @@ With this configuration:
 ```
 
 You can:
+
 1. Press your leader key → `a` → `s` to toggle sticky mode on
 2. The window will become transparent (alpha 0.2) when sticky mode is active
 3. You can now navigate without holding the modifier key
@@ -56,15 +57,18 @@ You can:
 ## How Sticky Mode Works
 
 Sticky mode can be activated in two ways:
+
 1. **Modifier Key**: Hold the Command key (or Control key, depending on your configuration)
 2. **Toggle Action**: Use the `toggleStickyMode` action in a sequence
 
 When sticky mode is active:
+
 - The Leader Key window becomes very transparent (alpha 0.2)
 - You can continue navigating through the menu without holding modifier keys
 - Actions will execute without closing the window
 
 Sticky mode is automatically reset when:
+
 - You press Escape
 - You activate the leader key again (starting a new sequence)
 - The window is hidden
