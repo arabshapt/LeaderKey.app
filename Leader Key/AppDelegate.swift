@@ -710,8 +710,8 @@ extension AppDelegate {
                     hide()
                     resetSequenceState()
                 } else {
-                    print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Resetting sequence, keeping window open.")
-                    resetSequenceState() // Reset sequence state but keep window open
+                    print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
+                    // In sticky mode, do NOT reset sequence state - preserve navigation state
                 }
                 return true // Event handled
 
