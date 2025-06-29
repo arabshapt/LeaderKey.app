@@ -288,9 +288,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Command Key Release Handling Methods
+    
+    private func handleCommandPressed(_ modifierFlags: NSEvent.ModifierFlags) {
+        // Command key press is tracked but no action needed on press
+        // We only act on release
+        print("[AppDelegate] handleCommandPressed: Command key pressed")
+    }
+
+    private func handleCommandReleased(_ modifierFlags: NSEvent.ModifierFlags) {
+        // Only reset and close if the setting is enabled and we're in a sequence
+        guard Defaults[.resetOnCmdRelease] && currentSequenceGroup != nil else {
+            return
+        }
+        
+        // Also check that we're in the correct modifier configuration (command used for sticky mode)
+        let config = Defaults[.modifierKeyConfiguration]
+        guard config == .controlGroupOptionSticky else {
+            return
+        }
+        
+        // If we still have an active activation shortcut, this means the user hasn't
+        // started using Leader Key yet, so ignore this Cmd release (it's part of the activation)
+        if activeActivationShortcut != nil {
+            print("[AppDelegate] handleCommandReleased: Still have active activation shortcut - user hasn't started using Leader Key yet. Ignoring.")
+            return
+        }
+        
+        print("[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Resetting and hiding.")
+        DispatchQueue.main.async {
+            self.resetSequenceState()
+            self.hide()
+        }
+    }
+
     // --- Activation Logic (Called by Event Tap) ---
-  func handleActivation(type: Controller.ActivationType) {
+  func handleActivation(type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil) {
       print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
+      // Track the activation shortcut to prevent immediate command release triggers
+      activeActivationShortcut = activationShortcut
+      
       // This function decides what to do when an activation shortcut is pressed.
 
       if controller.window.isVisible { // Check if the Leader Key window is already visible
@@ -555,6 +592,14 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.stickyModeToggled) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.stickyModeToggled, newValue) }
     }
+    private var lastModifierFlags: NSEvent.ModifierFlags {
+        get { NSEvent.ModifierFlags(rawValue: getAssociatedObject(self, &AssociatedKeys.lastModifierFlags) ?? 0) }
+        set { setAssociatedObject(self, &AssociatedKeys.lastModifierFlags, newValue.rawValue) }
+    }
+    private var activeActivationShortcut: KeyboardShortcuts.Shortcut? {
+        get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
+        set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
@@ -563,6 +608,8 @@ extension AppDelegate {
         static var currentSequenceGroup = "currentSequenceGroup"
         static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
         static var stickyModeToggled = "stickyModeToggled"
+        static var lastModifierFlags = "lastModifierFlags"
+        static var activeActivationShortcut = "activeActivationShortcut"
     }
 
     // --- Event Tap Logic Methods ---
@@ -703,12 +750,28 @@ extension AppDelegate {
                 return Unmanaged.passRetained(event)
             }
             
+            let currentFlags = nsEvent.modifierFlags
+            let previousFlags = lastModifierFlags
+            
+            // Detect command press/release
+            let commandPressed = currentFlags.contains(.command) && !previousFlags.contains(.command)
+            let commandReleased = !currentFlags.contains(.command) && previousFlags.contains(.command)
+            
+            if commandPressed {
+                handleCommandPressed(currentFlags)
+            } else if commandReleased {
+                handleCommandReleased(currentFlags)
+            }
+            
+            // Update stored modifier flags
+            lastModifierFlags = currentFlags
+            
             // Update transparency based on current modifier state
-            let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
+            let isStickyModeActive = isInStickyMode(currentFlags)
             DispatchQueue.main.async {
                 self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
             }
-            print("[AppDelegate] handleFlagsChangedEvent: Modifier flags changed, sticky mode = \(isStickyModeActive), setting transparency.")
+            print("[AppDelegate] handleFlagsChangedEvent: Modifier flags changed, command pressed: \(commandPressed), command released: \(commandReleased), sticky mode = \(isStickyModeActive)")
         }
         
         // Always pass through modifier changes
@@ -720,21 +783,24 @@ extension AppDelegate {
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
         let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
         var matchedActivationType: Controller.ActivationType? = nil
+        var matchedShortcut: KeyboardShortcuts.Shortcut? = nil
 
         // Check App-Specific Shortcut
         if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
             print("[AppDelegate] processKeyEvent: Matched App-Specific shortcut.")
             matchedActivationType = .appSpecificWithFallback
+            matchedShortcut = shortcut
         }
         // Check Default Only Shortcut
         else if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
             print("[AppDelegate] processKeyEvent: Matched Default Only shortcut.")
             matchedActivationType = .defaultOnly
+            matchedShortcut = shortcut
         }
 
         // 2. If an activation shortcut was pressed, handle it
         if let type = matchedActivationType {
-            handleActivation(type: type) // This handles show/hide/reset logic
+            handleActivation(type: type, activationShortcut: matchedShortcut) // Pass the matched shortcut
             return true // Consume the activation shortcut press
         }
 
@@ -776,6 +842,14 @@ extension AppDelegate {
 
             // If not Cmd+, process the key normally within the sequence
             print("[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence...")
+            
+            // Clear the activation shortcut since the user is now actively using Leader Key
+            // This enables the Cmd-release reset feature after activation
+            if activeActivationShortcut != nil {
+                print("[AppDelegate] processKeyEvent: Clearing activeActivationShortcut - user is now actively using Leader Key.")
+                activeActivationShortcut = nil
+            }
+            
             return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
         }
 
@@ -887,6 +961,12 @@ extension AppDelegate {
                 print("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
                 self.stickyModeToggled = false
             }
+            
+            // Reset modifier flags tracking
+            self.lastModifierFlags = []
+            
+            // Clear activation shortcut tracking
+            self.activeActivationShortcut = nil
             
             // Also tell the UserState to clear its navigation path etc. on the main thread
             DispatchQueue.main.async {

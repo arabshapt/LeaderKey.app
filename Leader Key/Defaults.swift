@@ -37,6 +37,8 @@ extension Defaults.Keys {
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
+  static let resetOnCmdRelease = Key<Bool>(
+    "resetOnCmdRelease", default: false, suite: defaultsSuite)
     
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)

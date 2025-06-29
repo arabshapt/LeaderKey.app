@@ -16,6 +16,7 @@ struct AdvancedPane: View {
   @Default(.reactivateBehavior) var reactivateBehavior
   @Default(.showAppIconsInCheatsheet) var showAppIconsInCheatsheet
   @Default(.automaticallyChecksForUpdates) var automaticallyChecksForUpdates
+  @Default(.resetOnCmdRelease) var resetOnCmdRelease
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -76,6 +77,13 @@ struct AdvancedPane: View {
             )
             .font(.callout)
             .foregroundColor(.secondary)
+          }
+          
+          // Show the cmd release option only when cmd is used for sticky mode
+          if modifierKeyConfiguration == .controlGroupOptionSticky {
+            Defaults.Toggle(
+              "Reset and close on ⌘ release", key: .resetOnCmdRelease)
+              .help("When enabled, releasing the Command key will reset Leader Key and close the window")
           }
         }
         .padding(.top, 2)
