@@ -403,6 +403,17 @@ struct ActionRow: View {
         })
       }
 
+      // Add sticky mode checkbox for all action types except Toggle Sticky Mode
+      if action.type != .toggleStickyMode {
+        Toggle("SM", isOn: Binding(
+          get: { action.stickyMode ?? false },
+          set: { action.stickyMode = $0 }
+        ))
+        .toggleStyle(.checkbox)
+        .frame(width: 40)
+        .help("Sticky Mode: Keep window open after executing this action")
+      }
+
       Spacer()
 
       TextField(action.bestGuessDisplayName, text: $labelInputValue, onCommit: {

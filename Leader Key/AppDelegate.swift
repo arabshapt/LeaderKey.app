@@ -272,6 +272,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Activate sticky mode programmatically (for use in actions with stickyMode enabled)
+    func activateStickyMode() {
+        if !stickyModeToggled {
+            stickyModeToggled = true
+            print("[AppDelegate] activateStickyMode: Sticky mode activated")
+            
+            // Update window transparency immediately if we're in a sequence
+            if currentSequenceGroup != nil {
+                let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
+                DispatchQueue.main.async {
+                    self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+                }
+            }
+        }
+    }
+
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType) {
       print("[AppDelegate] handleActivation: Received activation request of type: \(type)")

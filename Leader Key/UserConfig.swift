@@ -291,6 +291,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var value: String
   var iconPath: String?
   var activates: Bool?
+  var stickyMode: Bool?
 
   var displayName: String {
     guard let labelValue = label else { return bestGuessDisplayName }
@@ -360,7 +361,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, iconPath, activates
+    case key, type, value, actions, label, iconPath, activates, stickyMode
   }
 
   init(from decoder: Decoder) throws {
@@ -370,6 +371,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     let label = try container.decodeIfPresent(String.self, forKey: .label)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
     let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
+    let stickyMode = try container.decodeIfPresent(Bool.self, forKey: .stickyMode)
 
     switch type {
     case .group:
@@ -377,7 +379,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       self = .group(Group(key: key, label: label, iconPath: iconPath, actions: actions))
     default:
       let value = try container.decode(String.self, forKey: .value)
-      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates))
+      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates, stickyMode: stickyMode))
     }
   }
 
@@ -393,6 +395,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(action.activates, forKey: .activates)
+      try container.encodeIfPresent(action.stickyMode, forKey: .stickyMode)
     case .group(let group):
       try container.encode(group.key, forKey: .key)
       try container.encode(Type.group, forKey: .type)

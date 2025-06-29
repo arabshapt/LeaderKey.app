@@ -389,6 +389,16 @@ class Controller {
       print("\(action.type) unknown")
     }
 
+    // Check if this action has sticky mode enabled (except for Toggle Sticky Mode action)
+    if action.type != .toggleStickyMode && action.stickyMode == true {
+      if let appDelegate = appDelegate {
+        appDelegate.activateStickyMode()
+        print("[Controller] runAction: Activated sticky mode for action with stickyMode enabled")
+      } else {
+        print("[Controller] runAction: Cannot activate sticky mode - appDelegate is nil")
+      }
+    }
+
     if window.isVisible {
       window.makeKeyAndOrderFront(nil)
     }
