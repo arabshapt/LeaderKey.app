@@ -75,6 +75,28 @@ fileprivate struct KeyboardShortcutsView: View {
 
 
 
+fileprivate struct OpacityPane: View {
+    @Default(.normalModeOpacity) var normalModeOpacity
+    @Default(.stickyModeOpacity) var stickyModeOpacity
+
+    var body: some View {
+        Settings.Container(contentWidth: 400) {
+            Settings.Section(title: "Opacity") {
+                VStack(alignment: .leading) {
+                    Text("Normal Mode Opacity")
+                    Slider(value: $normalModeOpacity, in: 0.1...1.0)
+                    Text(String(format: "%.2f", normalModeOpacity))
+                }
+                VStack(alignment: .leading) {
+                    Text("Sticky Mode Opacity")
+                    Slider(value: $stickyModeOpacity, in: 0.1...1.0)
+                    Text(String(format: "%.2f", stickyModeOpacity))
+                }
+            }
+        }
+    }
+}
+
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
     // --- Properties ---
@@ -88,9 +110,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
       Settings.Pane(
-        identifier: .general, title: "General",
+        identifier: .general,
+        title: "General",
         toolbarIcon: NSImage(named: NSImage.preferencesGeneralName)!,
         contentView: { GeneralPane().environmentObject(self.config) }
+      ),
+      Settings.Pane(
+        identifier: .opacity,
+        title: "Opacity",
+        toolbarIcon: NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Opacity Settings")!,
+        contentView: { OpacityPane() }
       ),
       Settings.Pane(
         identifier: .search, title: "Search",
@@ -168,7 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Make settings window resizable
     if let window = settingsWindowController.window {
-        window.styleMask.insert(.resizable)
+        window.styleMask.insert(NSWindow.StyleMask.resizable)
         window.minSize = NSSize(width: 450, height: 650)
     }
   }
@@ -280,7 +309,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if currentSequenceGroup != nil {
             let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
             DispatchQueue.main.async {
-                self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+                self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
             }
         }
     }
@@ -748,7 +777,7 @@ extension AppDelegate {
             // Update transparency based on current modifier state
             let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
             DispatchQueue.main.async {
-                self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+                self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
             }
         }
         
@@ -782,7 +811,7 @@ extension AppDelegate {
             // Update transparency based on current modifier state
             let isStickyModeActive = isInStickyMode(currentFlags)
             DispatchQueue.main.async {
-                self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+                self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
             }
             print("[AppDelegate] handleFlagsChangedEvent: Modifier flags changed, command pressed: \(commandPressed), command released: \(commandReleased), sticky mode = \(isStickyModeActive)")
         }
@@ -962,7 +991,7 @@ extension AppDelegate {
                 // Ensure UI reflects the start of the sequence at the root group.
                 self.controller.userState.navigateToGroup(rootGroup)
                 // Reset window transparency when starting a new sequence
-                self.controller.window.alphaValue = 1.0
+                self.controller.window.alphaValue = Defaults[.normalModeOpacity]
             }
         }
          print("[AppDelegate] startSequence: Sequence setup complete.")

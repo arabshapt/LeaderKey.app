@@ -39,6 +39,10 @@ extension Defaults.Keys {
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
   static let resetOnCmdRelease = Key<Bool>(
     "resetOnCmdRelease", default: false, suite: defaultsSuite)
+  static let normalModeOpacity = Key<Double>(
+    "normalModeOpacity", default: 0.9, suite: defaultsSuite)
+  static let stickyModeOpacity = Key<Double>(
+    "stickyModeOpacity", default: 0.9, suite: defaultsSuite)
     
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)

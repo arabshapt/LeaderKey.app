@@ -135,7 +135,7 @@ class Controller {
 
     // Reset window transparency when showing the window
     DispatchQueue.main.async {
-        self.window.alphaValue = 1.0
+        self.window.alphaValue = Defaults[.normalModeOpacity]
     }
 
     if !window.hasCheatsheet || userState.isShowingRefreshState {
