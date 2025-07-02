@@ -234,7 +234,170 @@ extension UserConfig {
     }
 }
 
-// MARK: - Config Data Structures (Keep in main file)
+// MARK: - Search Data Structures
+enum SearchMatchType: String, Hashable, CaseIterable {
+    case all = "All"
+    case key = "Key"
+    case label = "Label"
+    case value = "Value"
+    case appName = "App Name"
+}
+
+struct SearchResult: Identifiable, Hashable {
+    let id = UUID()
+    let keySequence: String  // e.g., "o → s" or "r → w → f"
+    let item: ActionOrGroup
+    let path: [Int]
+    let configName: String
+    let matchType: SearchMatchType
+    let matchReason: String
+    
+    var displayName: String {
+        return item.item.displayName
+    }
+    
+    var typeDescription: String {
+        switch item {
+        case .action(let action):
+            return action.type.rawValue.capitalized
+        case .group:
+            return "Group"
+        }
+    }
+    
+    var valueDescription: String {
+        switch item {
+        case .action(let action):
+            switch action.type {
+            case .application:
+                return (action.value as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
+            case .url:
+                return action.value
+            case .command:
+                return action.value
+            case .folder:
+                return (action.value as NSString).lastPathComponent
+            case .text:
+                let snippet = action.value.prefix(30)
+                return snippet.count < action.value.count ? "\(snippet)..." : String(snippet)
+            default:
+                return action.value
+            }
+        case .group(let group):
+            return "Contains \(group.actions.count) items"
+        }
+    }
+    
+    static func == (lhs: SearchResult, rhs: SearchResult) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+extension UserConfig {
+    // Public method to initiate a search across all configurations
+    func searchSequences(query: String, matchType: SearchMatchType, includeGroups: Bool) -> [SearchResult] {
+        let lowercasedQuery = query.lowercased()
+        var results: [SearchResult] = []
+
+        // Search in the default config (config.json)
+        let defaultResults = search(in: root, query: lowercasedQuery, configName: globalDefaultDisplayName, matchType: matchType, includeGroups: includeGroups)
+        results.append(contentsOf: defaultResults)
+
+        // Search in all discovered app-specific configs
+        for (configName, configPath) in discoveredConfigFiles where configName != globalDefaultDisplayName {
+            if let configGroup = decodeConfig(from: configPath, suppressAlerts: true, isDefaultConfig: false) {
+                let appResults = search(in: configGroup, query: lowercasedQuery, configName: configName, matchType: matchType, includeGroups: includeGroups)
+                results.append(contentsOf: appResults)
+            }
+        }
+        
+        return results.sorted { $0.keySequence < $1.keySequence } // Sort alphabetically by key sequence
+    }
+
+    // Recursive helper function to search within a specific group
+    private func search(
+        in group: Group,
+        query: String,
+        configName: String,
+        matchType: SearchMatchType,
+        includeGroups: Bool,
+        currentPath: [Int] = [],
+        keySequence: [String] = []
+    ) -> [SearchResult] {
+        var findings: [SearchResult] = []
+
+        for (index, actionOrGroup) in group.actions.enumerated() {
+            let newPath = currentPath + [index]
+            let newKeySequence = keySequence + [actionOrGroup.item.key ?? ""]
+            let keySequenceString = newKeySequence.filter { !$0.isEmpty }.joined(separator: " → ")
+
+            var matchReason: String?
+            let item = actionOrGroup.item
+
+            // Determine if the item matches the query
+            if matchType == .all || matchType == .key {
+                if let key = item.key, key.lowercased().contains(query) {
+                    matchReason = "Matched key: '\(key)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .label) {
+                if let label = item.label, label.lowercased().contains(query) {
+                    matchReason = "Matched label: '\(label)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .value) {
+                if case .action(let action) = actionOrGroup, action.value.lowercased().contains(query) {
+                    matchReason = "Matched value: '\(action.value)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .appName) {
+                 if case .action(let action) = actionOrGroup, action.type == .application {
+                    let appName = (action.value as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "").lowercased()
+                    if appName.contains(query) {
+                        matchReason = "Matched app name: '\(appName.capitalized)'"
+                    }
+                }
+            }
+
+            // If a match is found, create a SearchResult
+            if let reason = matchReason {
+                let result = SearchResult(
+                    keySequence: keySequenceString,
+                    item: actionOrGroup,
+                    path: newPath,
+                    configName: configName,
+                    matchType: .key, // This should be more specific based on what matched
+                    matchReason: reason
+                )
+                findings.append(result)
+            }
+
+            // Recurse into subgroups if necessary
+            if case .group(let subGroup) = actionOrGroup {
+                if includeGroups || matchReason == nil { // Also search inside if the group itself didn't match
+                    let subGroupFindings = search(
+                        in: subGroup,
+                        query: query,
+                        configName: configName,
+                        matchType: matchType,
+                        includeGroups: includeGroups,
+                        currentPath: newPath,
+                        keySequence: newKeySequence
+                    )
+                    findings.append(contentsOf: subGroupFindings)
+                }
+            }
+        }
+
+        return findings
+    }
+}
+
+    
 
 let defaultConfig = """
   {

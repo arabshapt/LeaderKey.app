@@ -73,6 +73,8 @@ fileprivate struct KeyboardShortcutsView: View {
     }
 }
 
+
+
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
     // --- Properties ---
@@ -89,6 +91,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         identifier: .general, title: "General",
         toolbarIcon: NSImage(named: NSImage.preferencesGeneralName)!,
         contentView: { GeneralPane().environmentObject(self.config) }
+      ),
+      Settings.Pane(
+        identifier: .search, title: "Search",
+        toolbarIcon: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
+        contentView: { SearchPane().environmentObject(self.config) }
       ),
       Settings.Pane(
         identifier: .shortcuts, title: "Shortcuts",
@@ -158,6 +165,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     print("[AppDelegate] applicationDidFinishLaunching completed.")
+
+    // Make settings window resizable
+    if let window = settingsWindowController.window {
+        window.styleMask.insert(.resizable)
+        window.minSize = NSSize(width: 450, height: 650)
+    }
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
