@@ -893,6 +893,13 @@ extension AppDelegate {
 
             case .group(let subgroup):
                 print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                
+                // Check if the group has sticky mode enabled
+                if subgroup.stickyMode == true {
+                    print("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
+                    activateStickyMode()
+                }
+                
                 // Navigate into the subgroup
                 currentSequenceGroup = subgroup // Update sequence state
                 controller.userState.navigateToGroup(subgroup) // Update UI state

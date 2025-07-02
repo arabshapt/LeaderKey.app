@@ -103,6 +103,7 @@ extension UserConfig {
             key: group.key,
             label: group.label,
             iconPath: group.iconPath,
+            stickyMode: group.stickyMode,
             actions: sortedActions
         )
     }

@@ -10,6 +10,7 @@ final class ConfigValidatorTests: XCTestCase {
     let group = Group(
       key: nil,  // Root group doesn't need a key
       label: "Root",
+      stickyMode: nil,
       actions: [
         .action(Action(key: "a", type: .application, value: "/Applications/App1.app")),
         .action(Action(key: "b", type: .application, value: "/Applications/App2.app")),
@@ -17,6 +18,7 @@ final class ConfigValidatorTests: XCTestCase {
           Group(
             key: "c",
             label: "Subgroup",
+            stickyMode: nil,
             actions: [
               .action(Action(key: "d", type: .application, value: "/Applications/App3.app")),
               .action(Action(key: "e", type: .application, value: "/Applications/App4.app")),
@@ -37,12 +39,14 @@ final class ConfigValidatorTests: XCTestCase {
     let group = Group(
       key: nil,
       label: "Root",
+      stickyMode: nil,
       actions: [
         .action(Action(key: "", type: .application, value: "/Applications/App1.app")),
         .group(
           Group(
             key: "c",
             label: "Subgroup",
+            stickyMode: nil,
             actions: [
               .action(Action(key: "", type: .application, value: "/Applications/App3.app"))
             ]
@@ -66,12 +70,14 @@ final class ConfigValidatorTests: XCTestCase {
     let group = Group(
       key: nil,
       label: "Root",
+      stickyMode: nil,
       actions: [
         .action(Action(key: "ab", type: .application, value: "/Applications/App1.app")),
         .group(
           Group(
             key: "cd",
             label: "Subgroup",
+            stickyMode: nil,
             actions: []
           )),
       ]
@@ -93,6 +99,7 @@ final class ConfigValidatorTests: XCTestCase {
     let group = Group(
       key: nil,
       label: "Root",
+      stickyMode: nil,
       actions: [
         .action(Action(key: "a", type: .application, value: "/Applications/App1.app")),
         .action(Action(key: "a", type: .application, value: "/Applications/App2.app")),
@@ -100,6 +107,7 @@ final class ConfigValidatorTests: XCTestCase {
           Group(
             key: "c",
             label: "Subgroup",
+            stickyMode: nil,
             actions: [
               .action(Action(key: "d", type: .application, value: "/Applications/App3.app")),
               .action(Action(key: "d", type: .application, value: "/Applications/App4.app")),
@@ -127,12 +135,14 @@ final class ConfigValidatorTests: XCTestCase {
     let group = Group(
       key: nil,
       label: "Root",
+      stickyMode: nil,
       actions: [
         .action(Action(key: "a", type: .application, value: "/Applications/App1.app")),
         .group(
           Group(
             key: "b",
             label: "Subgroup",
+            stickyMode: nil,
             actions: [
               .action(Action(key: "c", type: .application, value: "/Applications/App2.app"))
             ]

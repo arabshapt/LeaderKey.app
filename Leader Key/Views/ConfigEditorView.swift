@@ -12,7 +12,7 @@ func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
         // Recursively duplicate actions within the group
         let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
         // Create a new Group instance, which will get a new UUID
-        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, actions: newActions))
+        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions))
     }
 }
 
@@ -98,7 +98,7 @@ struct GroupContentView: View {
         onAddGroup: {
           withAnimation {
             print("[UI LOG] GroupContentView: Adding new GROUP (key: \"\", actions: []) to group at path \(parentPath)")
-            group.actions.append(.group(Group(key: "", actions: [])))
+            group.actions.append(.group(Group(key: "", stickyMode: nil, actions: [])))
           }
         }
       )
@@ -575,6 +575,15 @@ struct GroupRow: View {
 
         Spacer(minLength: 0)
 
+        // Add sticky mode checkbox for groups
+        Toggle("SM", isOn: Binding(
+          get: { group.stickyMode ?? false },
+          set: { group.stickyMode = $0 }
+        ))
+        .toggleStyle(.checkbox)
+        .frame(width: 40)
+        .help("Sticky Mode: Automatically activate sticky mode when entering this group")
+
         TextField("Label", text: $labelInputValue).frame(width: 120)
           .padding(.trailing, generalPadding)
 
@@ -646,6 +655,7 @@ struct GroupRow: View {
 #Preview {
   let group = Group(
     key: "",
+    stickyMode: nil,
     actions: [
       // Level 1 actions
       .action(
@@ -668,6 +678,7 @@ struct GroupRow: View {
       .group(
         Group(
           key: "b",
+          stickyMode: nil,
           actions: [
             .action(
               Action(
@@ -683,6 +694,7 @@ struct GroupRow: View {
       .group(
         Group(
           key: "r",
+          stickyMode: nil,
           actions: [
             .action(
               Action(
@@ -693,6 +705,7 @@ struct GroupRow: View {
             .group(
               Group(
                 key: "w",
+                stickyMode: nil,
                 actions: [
                   .action(
                     Action(

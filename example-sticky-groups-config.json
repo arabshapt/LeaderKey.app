@@ -1,0 +1,76 @@
+{
+  "type": "group",
+  "actions": [
+    {
+      "key": "a",
+      "type": "group",
+      "label": "Applications", 
+      "stickyMode": true,
+      "actions": [
+        {
+          "key": "t",
+          "type": "application",
+          "value": "/Applications/Terminal.app",
+          "label": "Terminal"
+        },
+        {
+          "key": "s",
+          "type": "application",
+          "value": "/Applications/Safari.app", 
+          "label": "Safari"
+        },
+        {
+          "key": "f",
+          "type": "application",
+          "value": "/Applications/Firefox.app",
+          "label": "Firefox"
+        }
+      ]
+    },
+    {
+      "key": "d",
+      "type": "group",
+      "label": "Development",
+      "actions": [
+        {
+          "key": "v",
+          "type": "application",
+          "value": "/Applications/Visual Studio Code.app",
+          "label": "VS Code"
+        },
+        {
+          "key": "x",
+          "type": "application", 
+          "value": "/Applications/Xcode.app",
+          "label": "Xcode"
+        }
+      ]
+    },
+    {
+      "key": "u",
+      "type": "group",
+      "label": "Utilities",
+      "stickyMode": true,
+      "actions": [
+        {
+          "key": "a",
+          "type": "application",
+          "value": "/System/Applications/Utilities/Activity Monitor.app",
+          "label": "Activity Monitor"
+        },
+        {
+          "key": "t",
+          "type": "application",
+          "value": "/System/Applications/Utilities/Terminal.app",
+          "label": "Terminal"
+        },
+        {
+          "key": "s",
+          "type": "toggleStickyMode",
+          "value": "",
+          "label": "Toggle Sticky Mode"
+        }
+      ]
+    }
+  ]
+}

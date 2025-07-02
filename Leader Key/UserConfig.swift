@@ -3,7 +3,7 @@ import Combine
 import Defaults
 import Foundation
 
-let emptyRoot = Group(key: "🚫", label: "Config error", actions: [])
+let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
 let globalDefaultDisplayName = "Global Default"
 let defaultAppConfigDisplayName = "Default App Config"
 
@@ -328,6 +328,7 @@ struct Group: Item, Codable, Equatable, Identifiable {
   var type: Type = .group
   var label: String?
   var iconPath: String?
+  var stickyMode: Bool?
   var actions: [ActionOrGroup]
 
   var displayName: String {
@@ -338,7 +339,7 @@ struct Group: Item, Codable, Equatable, Identifiable {
 
   static func == (lhs: Group, rhs: Group) -> Bool {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
-      && lhs.actions == rhs.actions
+      && lhs.iconPath == rhs.iconPath && lhs.stickyMode == rhs.stickyMode && lhs.actions == rhs.actions
   }
 }
 
@@ -376,7 +377,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     switch type {
     case .group:
       let actions = try container.decode([ActionOrGroup].self, forKey: .actions)
-      self = .group(Group(key: key, label: label, iconPath: iconPath, actions: actions))
+      self = .group(Group(key: key, label: label, iconPath: iconPath, stickyMode: stickyMode, actions: actions))
     default:
       let value = try container.decode(String.self, forKey: .value)
       self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates, stickyMode: stickyMode))
@@ -404,6 +405,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
         try container.encodeIfPresent(group.label, forKey: .label)
       }
       try container.encodeIfPresent(group.iconPath, forKey: .iconPath)
+      try container.encodeIfPresent(group.stickyMode, forKey: .stickyMode)
     }
   }
 }

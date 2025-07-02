@@ -251,6 +251,16 @@ class Controller {
           self.runGroup(group)
         }
       } else {
+        // Check if the group has sticky mode enabled
+        if group.stickyMode == true {
+          if let appDelegate = appDelegate {
+            appDelegate.activateStickyMode()
+            print("[Controller] handleKey: Group has stickyMode enabled. Activating sticky mode.")
+          } else {
+            print("[Controller] handleKey: Cannot activate sticky mode - appDelegate is nil")
+          }
+        }
+        
         userState.display = group.key
         userState.navigateToGroup(group)
       }
