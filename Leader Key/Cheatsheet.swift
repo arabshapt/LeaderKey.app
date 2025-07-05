@@ -147,16 +147,15 @@ enum Cheatsheet {
     var body: some SwiftUI.View {
       ScrollView {
         SwiftUI.VStack(alignment: .leading, spacing: 4) {
-          if let group = userState.currentGroup {
-            HStack {
-              KeyBadge(key: group.key ?? "•")
-              Text(group.key == nil ? "Leader Key" : group.displayName)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.bottom, 8)
-            Divider()
-              .padding(.bottom, 8)
+          // Header showing current group or root label
+          HStack {
+            KeyBadge(key: userState.currentGroup?.key ?? "•")
+            Text(headerTitle())
+              .foregroundStyle(.secondary)
           }
+          .padding(.bottom, 8)
+          Divider()
+            .padding(.bottom, 8)
 
           ForEach(Array(actions.enumerated()), id: \.offset) { _, item in
             switch item {
@@ -185,6 +184,17 @@ enum Cheatsheet {
       .onPreferenceChange(HeightPreferenceKey.self) { height in
         self.contentHeight = height
       }
+    }
+
+    private func headerTitle() -> String {
+      if let cg = userState.currentGroup {
+        if let keyString = cg.key, !keyString.isEmpty {
+          return cg.displayName
+        } else {
+          return "Leader Key"
+        }
+      }
+      return "Leader Key"
     }
   }
 

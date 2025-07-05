@@ -419,10 +419,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               }
           }
       } else {
-          // Window wasn't visible, so show it AND start the sequence.
-          print("[AppDelegate] handleActivation: Window not visible. Showing window and starting sequence.")
-          show(type: type) // Show the window (Controller loads the appropriate config)
-          startSequence(activationType: type) // Start the key sequence based on the loaded config
+          // Show window invisibly; when ready, start sequence, then the window will reveal.
+          show(type: type) {
+              self.startSequence(activationType: type)
+          }
       }
   }
 

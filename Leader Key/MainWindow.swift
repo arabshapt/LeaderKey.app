@@ -80,23 +80,47 @@ class MainWindow: PanelWindow, NSWindowDelegate {
         print("[MainWindow show(at:)] Centered origin: \(finalOrigin)")
     }
 
-    // 2. Build off-screen & invisible
+    // 2. Apply cached size if available
+    if let currentGroup = controller.userState.currentGroup ?? controller.userState.activeRoot,
+       let cachedSize = ViewSizeCache.shared.size(for: currentGroup) {
+        print("[MainWindow show] Using cached size: \(cachedSize)")
+        setContentSize(cachedSize)
+    }
+
+    // 3. Build off-screen & invisible to measure if needed
     alphaValue = 0
     setFrameOrigin(finalOrigin)
 
-    // Force layout / drawing so SwiftUI completes its first pass before we reveal the window
+    // Force layout / drawing so SwiftUI completes its first pass
     displayIfNeeded()                    // AppKit pass
     contentView?.layoutSubtreeIfNeeded() // SwiftUI pass
 
-    // 3. Show instantly without flicker
-    alphaValue = 1
-    makeKeyAndOrderFront(nil)
+    // 4. If no cache yet, store measured size
+    if let currentGroup = controller.userState.currentGroup ?? controller.userState.activeRoot,
+       ViewSizeCache.shared.size(for: currentGroup) == nil {
+        let measured = contentView?.fittingSize ?? frame.size
+        ViewSizeCache.shared.store(measured, for: currentGroup)
+        print("[MainWindow show] Cached size: \(measured)")
+    }
 
+    // 5. Execute completion, then reveal
     after?()
+
+    // Reveal on next run loop cycle after any state updates from the completion have laid out.
+    DispatchQueue.main.async {
+        // Force layout once more to capture any changes made in the completion (e.g., header update)
+        self.displayIfNeeded()
+        self.contentView?.layoutSubtreeIfNeeded()
+
+        self.alphaValue = 1
+        self.makeKeyAndOrderFront(nil)
+    }
   }
 
   func hide(after: (() -> Void)?) {
-    close()
+    // Make the window fully transparent and remove it from the screen, but keep it alive in memory
+    alphaValue = 0
+    orderOut(nil)
     after?()
   }
 
