@@ -19,6 +19,7 @@ struct AdvancedPane: View {
   @Default(.automaticallyChecksForUpdates) var automaticallyChecksForUpdates
   @Default(.resetOnCmdRelease) var resetOnCmdRelease
   @Default(.panelTopOffsetPercent) var panelTopOffsetPercent
+  @Default(.panelClickThrough) var panelClickThrough
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -158,6 +159,7 @@ struct AdvancedPane: View {
         Defaults.Toggle(
           "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
         Defaults.Toggle("Automatically check for updates", key: .automaticallyChecksForUpdates)
+        Defaults.Toggle("Allow mouse clicks through panel", key: .panelClickThrough)
         // Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
       }
       

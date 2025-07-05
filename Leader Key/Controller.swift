@@ -137,9 +137,10 @@ class Controller {
         completion?()
     }
 
-    // Reset window transparency when showing the window
+    // Apply click-through preference and reset transparency.
     DispatchQueue.main.async {
         self.window.alphaValue = Defaults[.normalModeOpacity]
+        self.window.ignoresMouseEvents = Defaults[.panelClickThrough]
     }
 
     if !window.hasCheatsheet || userState.isShowingRefreshState {
