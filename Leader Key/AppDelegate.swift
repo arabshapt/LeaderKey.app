@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Cocoa
 import Defaults
 import KeyboardShortcuts
@@ -396,6 +397,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               }
               // Clear existing state, reset sequence variables, and start a new sequence based on the activation type.
               controller.userState.clear()
+              // Determine new active root based on the activation shortcut that was just pressed
+              do {
+                let newRoot: Group
+                switch type {
+                case .defaultOnly:
+                  newRoot = self.config.root
+                case .appSpecificWithFallback:
+                  let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                  newRoot = self.config.getConfig(for: bundleId)
+                }
+                self.controller.userState.activeRoot = newRoot
+              }
               print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
               controller.repositionWindowNearMouse()
               startSequence(activationType: type)
