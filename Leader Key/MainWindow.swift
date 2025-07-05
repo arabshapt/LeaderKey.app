@@ -69,19 +69,29 @@ class MainWindow: PanelWindow, NSWindowDelegate {
   }
 
   func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
-    // Set origin if provided, otherwise center the window
+    // 1. Determine the final origin
+    let finalOrigin: NSPoint
     if let newOrigin = origin {
-        print("[MainWindow show(at:)] Setting origin to calculated value: \(newOrigin)")
-        self.setFrameOrigin(newOrigin)
+        finalOrigin = newOrigin
+        print("[MainWindow show(at:)] Using provided origin: \(newOrigin)")
     } else {
-        print("[MainWindow show(at:)] Origin not provided or invalid. Centering window.")
-        self.center() // Fallback to centering
+        self.center()
+        finalOrigin = frame.origin
+        print("[MainWindow show(at:)] Centered origin: \(finalOrigin)")
     }
 
-    // Now make the window key and order it front
+    // 2. Build off-screen & invisible
+    alphaValue = 0
+    setFrameOrigin(finalOrigin)
+
+    // Force layout / drawing so SwiftUI completes its first pass before we reveal the window
+    displayIfNeeded()                    // AppKit pass
+    contentView?.layoutSubtreeIfNeeded() // SwiftUI pass
+
+    // 3. Show instantly without flicker
+    alphaValue = 1
     makeKeyAndOrderFront(nil)
 
-    // Call the completion handler
     after?()
   }
 
