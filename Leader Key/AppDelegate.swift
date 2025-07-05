@@ -395,8 +395,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   NSApp.activate(ignoringOtherApps: true)
                   controller.window.makeKeyAndOrderFront(nil)
               }
-              // Clear existing state, reset sequence variables, and start a new sequence based on the activation type.
+              // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
               controller.userState.clear()
+              self.currentSequenceGroup = nil
+              self.activeRootGroup = nil
+              self.stickyModeToggled = false
+              self.lastModifierFlags = []
               // Determine new active root based on the activation shortcut that was just pressed
               do {
                 let newRoot: Group
@@ -679,7 +683,12 @@ extension AppDelegate {
         print("[AppDelegate] startEventTapMonitoring: Attempting to start...")
 
         // Create the event tap. This requires Accessibility permissions.
-        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue) // Listen for key down, key up, and modifier changes
+        // Build an event mask listening for key down, key up, and modifier-flag changes.
+        let eventMask: CGEventMask =
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue)
+        // (Above mask: key down, key up, and flags-changed)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap, // Listen to all processes in the current session
             place: .headInsertEventTap, // Insert tap before other taps
@@ -774,7 +783,8 @@ extension AppDelegate {
         // Process the key event using our main logic function
         // Let's get the mapped key string here for better logging
         let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
-        print("[AppDelegate] handleKeyDownEvent: Received keyDown, keyCode: \(nsEvent.keyCode) ('\(mappedKeyString)'), mods: \(describeModifiers(nsEvent.modifierFlags)). Processing...")
+        let modsDescription = describeModifiers(nsEvent.modifierFlags)
+        print("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
         let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
 
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
@@ -783,16 +793,18 @@ extension AppDelegate {
     }
 
     private func handleKeyUpEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // For key up events, just update transparency if we're in a sequence
         if currentSequenceGroup != nil {
             guard let nsEvent = NSEvent(cgEvent: event) else {
                 return Unmanaged.passRetained(event)
             }
 
-            // Update transparency based on current modifier state
-            let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
-            DispatchQueue.main.async {
-                self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
+            // Skip opacity changes while an activation shortcut is still in effect to avoid starting
+            // the sequence with sticky-mode transparency.
+            if self.activeActivationShortcut == nil {
+                let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
+                DispatchQueue.main.async {
+                    self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
+                }
             }
         }
 
@@ -823,12 +835,15 @@ extension AppDelegate {
             // Update stored modifier flags
             lastModifierFlags = currentFlags
 
-            // Update transparency based on current modifier state
-            let isStickyModeActive = isInStickyMode(currentFlags)
-            DispatchQueue.main.async {
-                self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
+            // Skip opacity changes while an activation shortcut is still being held to avoid a visible flicker.
+            if self.activeActivationShortcut == nil {
+                let isStickyModeActive = isInStickyMode(currentFlags)
+                DispatchQueue.main.async {
+                    self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
+                }
             }
-            print("[AppDelegate] handleFlagsChangedEvent: Modifier flags changed, command pressed: \(commandPressed), command released: \(commandReleased), sticky mode = \(isStickyModeActive)")
+            let stickyState = isInStickyMode(currentFlags)
+            print("[AppDelegate] handleFlagsChangedEvent: cmdPressed=\(commandPressed) cmdReleased=\(commandReleased) sticky=\(stickyState)")
         }
 
         // Always pass through modifier changes
