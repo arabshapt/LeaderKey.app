@@ -24,7 +24,7 @@ private func eventTapCallback(
     guard let userInfo = userInfo else {
         return Unmanaged.passRetained(event)
     }
-    
+
     // Cast the reference to AppDelegate and call the handler
     let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
     return appDelegate.handleCGEvent(event)
@@ -56,7 +56,7 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 // Define the view for the Shortcuts pane
 fileprivate struct KeyboardShortcutsView: View {
     private let contentWidth = 900.0
-    
+
     var body: some View {
         Settings.Container(contentWidth: contentWidth) {
             Settings.Section(title: "Global Activation Shortcuts") {
@@ -84,12 +84,12 @@ fileprivate struct OpacityPane: View {
             Settings.Section(title: "Opacity") {
                 VStack(alignment: .leading) {
                     Text("Normal Mode Opacity")
-                    Slider(value: $normalModeOpacity, in: 0.1...1.0)
+                    Slider(value: $normalModeOpacity, in: 0.0...1.0)
                     Text(String(format: "%.2f", normalModeOpacity))
                 }
                 VStack(alignment: .leading) {
                     Text("Sticky Mode Opacity")
-                    Slider(value: $stickyModeOpacity, in: 0.1...1.0)
+                    Slider(value: $stickyModeOpacity, in: 0.0...1.0)
                     Text(String(format: "%.2f", stickyModeOpacity))
                 }
             }
@@ -229,7 +229,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @IBAction
   func settingsMenuItemActionHandler(_: NSMenuItem) {
       print("[AppDelegate] settingsMenuItemActionHandler called.")
-      
+
       // Ensure we have the window reference first
       guard let window = settingsWindowController.window else {
           print("[AppDelegate settings] Error: Could not get settings window reference.")
@@ -241,7 +241,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // --- Configure Window Properties First ---
       window.styleMask.insert(NSWindow.StyleMask.resizable)
       window.minSize = NSSize(width: 450, height: 650) // Ensure minSize is set
-      
+
       // --- Defer Positioning Logic Slightly ---
       DispatchQueue.main.async { // Add async dispatch
           print("[AppDelegate settings async] Starting deferred positioning logic...")
@@ -253,7 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           if let targetScreen = screen {
               let screenFrame = targetScreen.visibleFrame
               // Re-check window size within async block, might be updated
-              let windowSize = window.frame.size 
+              let windowSize = window.frame.size
               let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
               let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
 
@@ -304,7 +304,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func toggleStickyMode() {
         stickyModeToggled.toggle()
         print("[AppDelegate] toggleStickyMode: Sticky mode toggled to \(stickyModeToggled)")
-        
+
         // Update window transparency immediately if we're in a sequence
         if currentSequenceGroup != nil {
             let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
@@ -319,7 +319,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !stickyModeToggled {
             stickyModeToggled = true
             print("[AppDelegate] activateStickyMode: Sticky mode activated")
-            
+
             // Update window transparency immediately if we're in a sequence
             if currentSequenceGroup != nil {
                 let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
@@ -331,7 +331,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Command Key Release Handling Methods
-    
+
     private func handleCommandPressed(_ modifierFlags: NSEvent.ModifierFlags) {
         // Command key press is tracked but no action needed on press
         // We only act on release
@@ -343,20 +343,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard Defaults[.resetOnCmdRelease] && currentSequenceGroup != nil else {
             return
         }
-        
+
         // Also check that we're in the correct modifier configuration (command used for sticky mode)
         let config = Defaults[.modifierKeyConfiguration]
         guard config == .controlGroupOptionSticky else {
             return
         }
-        
+
         // If we still have an active activation shortcut, this means the user hasn't
         // started using Leader Key yet, so ignore this Cmd release (it's part of the activation)
         if activeActivationShortcut != nil {
             print("[AppDelegate] handleCommandReleased: Still have active activation shortcut - user hasn't started using Leader Key yet. Ignoring.")
             return
         }
-        
+
         print("[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Resetting and hiding.")
         DispatchQueue.main.async {
             self.resetSequenceState()
@@ -369,7 +369,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
       // Track the activation shortcut to prevent immediate command release triggers
       activeActivationShortcut = activationShortcut
-      
+
       // This function decides what to do when an activation shortcut is pressed.
 
       if controller.window.isVisible { // Check if the Leader Key window is already visible
@@ -423,9 +423,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           startSequence(activationType: type) // Start the key sequence based on the loaded config
       }
   }
-    
-    // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods, 
-    // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers 
+
+    // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods,
+    // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers
     // (setupFileMonitor, setupStatusItem, isRunningTests) should be defined ONLY in extensions below.
     // Ensure there are NO duplicate definitions within this main class body.
 }
@@ -484,20 +484,20 @@ private extension AppDelegate {
             }
         }
     }
-    
+
     // Helper to check if running within Xcode's testing environment
     func isRunningTests() -> Bool {
         let isTesting = ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
         if isTesting { print("[AppDelegate] isRunningTests detected.") }
         return isTesting
     }
-    
+
     func setupUpdaterController() {
         print("[AppDelegate] setupUpdaterController: Configuring auto-update behavior.")
-        
+
         // Set initial automatic update check preference
         updaterController.updater.automaticallyChecksForUpdates = Defaults[.automaticallyChecksForUpdates]
-        
+
         // Observe changes to the auto-update preference
         Task {
             for await value in Defaults.updates(.automaticallyChecksForUpdates) {
@@ -604,7 +604,7 @@ extension AppDelegate {
 
 // MARK: - Event Tap Handling
 extension AppDelegate {
-    
+
     // --- Event Tap Properties (Using Associated Objects) ---
     private var eventTap: CFMachPort? {
         get { getAssociatedObject(self, &AssociatedKeys.eventTap) }
@@ -773,14 +773,14 @@ extension AppDelegate {
             guard let nsEvent = NSEvent(cgEvent: event) else {
                 return Unmanaged.passRetained(event)
             }
-            
+
             // Update transparency based on current modifier state
             let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
             DispatchQueue.main.async {
                 self.controller.window.alphaValue = isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
             }
         }
-        
+
         // Always pass through key up events
         return Unmanaged.passRetained(event)
     }
@@ -791,23 +791,23 @@ extension AppDelegate {
             guard let nsEvent = NSEvent(cgEvent: event) else {
                 return Unmanaged.passRetained(event)
             }
-            
+
             let currentFlags = nsEvent.modifierFlags
             let previousFlags = lastModifierFlags
-            
+
             // Detect command press/release
             let commandPressed = currentFlags.contains(.command) && !previousFlags.contains(.command)
             let commandReleased = !currentFlags.contains(.command) && previousFlags.contains(.command)
-            
+
             if commandPressed {
                 handleCommandPressed(currentFlags)
             } else if commandReleased {
                 handleCommandReleased(currentFlags)
             }
-            
+
             // Update stored modifier flags
             lastModifierFlags = currentFlags
-            
+
             // Update transparency based on current modifier state
             let isStickyModeActive = isInStickyMode(currentFlags)
             DispatchQueue.main.async {
@@ -815,7 +815,7 @@ extension AppDelegate {
             }
             print("[AppDelegate] handleFlagsChangedEvent: Modifier flags changed, command pressed: \(commandPressed), command released: \(commandReleased), sticky mode = \(isStickyModeActive)")
         }
-        
+
         // Always pass through modifier changes
         return Unmanaged.passRetained(event)
     }
@@ -849,8 +849,8 @@ extension AppDelegate {
         // 3. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let isWindowVisible = self.controller.window.isVisible
-            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)") 
-            
+            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)")
+
             if isWindowVisible {
                 // Normal case: Window is visible, reset state, hide, and consume event.
                 print("[AppDelegate] Escape: Window is visible. Resetting state and dispatching hide().")
@@ -871,7 +871,7 @@ extension AppDelegate {
             // Check for Cmd+, specifically *before* normal sequence processing
             if modifiers.contains(.command),
                let nsEvent = NSEvent(cgEvent: cgEvent),
-               nsEvent.charactersIgnoringModifiers == "," 
+               nsEvent.charactersIgnoringModifiers == ","
             {
                 print("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
                 NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
@@ -884,14 +884,14 @@ extension AppDelegate {
 
             // If not Cmd+, process the key normally within the sequence
             print("[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence...")
-            
+
             // Clear the activation shortcut since the user is now actively using Leader Key
             // This enables the Cmd-release reset feature after activation
             if activeActivationShortcut != nil {
                 print("[AppDelegate] processKeyEvent: Clearing activeActivationShortcut - user is now actively using Leader Key.")
                 activeActivationShortcut = nil
             }
-            
+
             return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
         }
 
@@ -902,7 +902,7 @@ extension AppDelegate {
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         print("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))")
-        
+
         // Get the single character string representation for the key event
         guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
             // If we can't map the key event to a string (should be rare), shake the window.
@@ -935,13 +935,13 @@ extension AppDelegate {
 
             case .group(let subgroup):
                 print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
-                
+
                 // Check if the group has sticky mode enabled
                 if subgroup.stickyMode == true {
                     print("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
                     activateStickyMode()
                 }
-                
+
                 // Navigate into the subgroup
                 currentSequenceGroup = subgroup // Update sequence state
                 controller.userState.navigateToGroup(subgroup) // Update UI state
@@ -1004,19 +1004,19 @@ extension AppDelegate {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
-            
+
             // Reset sticky mode toggle state
             if stickyModeToggled {
                 print("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
                 self.stickyModeToggled = false
             }
-            
+
             // Reset modifier flags tracking
             self.lastModifierFlags = []
-            
+
             // Clear activation shortcut tracking
             self.activeActivationShortcut = nil
-            
+
             // Also tell the UserState to clear its navigation path etc. on the main thread
             DispatchQueue.main.async {
                  print("[AppDelegate] resetSequenceState: Dispatching UserState.clear() to main thread.")
@@ -1037,7 +1037,7 @@ extension AppDelegate {
         case .optionGroupControlSticky:
             modifierStickyMode = modifierFlags.contains(.control)
         }
-        
+
         // Sticky mode is active if either the modifier is held OR it's been toggled on
         let isSticky = modifierStickyMode || stickyModeToggled
         print("[AppDelegate] isInStickyMode: Config = \(config), Mods = \(describeModifiers(modifierFlags)), Toggled = \(stickyModeToggled), IsSticky = \(isSticky)")
@@ -1072,7 +1072,7 @@ extension AppDelegate {
         }
 
         // For remaining keys, determine character based on modifiers
-        let nsEvent = NSEvent(cgEvent: cgEvent) 
+        let nsEvent = NSEvent(cgEvent: cgEvent)
         var result: String? = nil
 
         // If Control or Option are involved, get the base character *ignoring* those modifiers,
@@ -1117,7 +1117,7 @@ extension AppDelegate {
         print("[AppDelegate] checkAccessibilityPermissions: AXIsProcessTrustedWithOptions returned \(enabled).")
         return enabled
     }
-    
+
     // Shows the standard alert explaining why Accessibility is needed and offering to open Settings.
     private func showPermissionsAlert() {
         print("[AppDelegate] showPermissionsAlert: Displaying Accessibility permissions alert.")
