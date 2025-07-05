@@ -73,25 +73,26 @@ fileprivate struct KeyboardShortcutsView: View {
     }
 }
 
-
-
 fileprivate struct OpacityPane: View {
     @Default(.normalModeOpacity) var normalModeOpacity
     @Default(.stickyModeOpacity) var stickyModeOpacity
 
     var body: some View {
-        Settings.Container(contentWidth: 400) {
+        Settings.Container(contentWidth: 1100.0) {
             Settings.Section(title: "Opacity") {
-                VStack(alignment: .leading) {
-                    Text("Normal Mode Opacity")
-                    Slider(value: $normalModeOpacity, in: 0.0...1.0)
-                    Text(String(format: "%.2f", normalModeOpacity))
+                VStack {
+                    VStack(alignment: .leading) {
+                        Text("Normal Mode Opacity")
+                        Slider(value: $normalModeOpacity, in: 0.0...1.0)
+                        Text(String(format: "%.2f", normalModeOpacity))
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Sticky Mode Opacity")
+                        Slider(value: $stickyModeOpacity, in: 0.0...1.0)
+                        Text(String(format: "%.2f", stickyModeOpacity))
+                    }
                 }
-                VStack(alignment: .leading) {
-                    Text("Sticky Mode Opacity")
-                    Slider(value: $stickyModeOpacity, in: 0.0...1.0)
-                    Text(String(format: "%.2f", stickyModeOpacity))
-                }
+                .frame(minHeight: 500)
             }
         }
     }
