@@ -1,3 +1,4 @@
+// swiftlint:disable line_length
 import Defaults
 import KeyboardShortcuts
 import LaunchAtLogin
@@ -17,6 +18,7 @@ struct AdvancedPane: View {
   @Default(.showAppIconsInCheatsheet) var showAppIconsInCheatsheet
   @Default(.automaticallyChecksForUpdates) var automaticallyChecksForUpdates
   @Default(.resetOnCmdRelease) var resetOnCmdRelease
+  @Default(.panelTopOffsetPercent) var panelTopOffsetPercent
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -140,6 +142,15 @@ struct AdvancedPane: View {
           }
           .labelsHidden()
           .frame(width: 220)
+
+          // New slider for panel vertical offset percentage
+          HStack {
+            Text("Panel vertical offset: ")
+            Slider(value: $panelTopOffsetPercent, in: 0.1...0.5, step: 0.01)
+              .frame(width: 150)
+            Text("\(Int(panelTopOffsetPercent * 100))%")
+              .frame(width: 40, alignment: .leading)
+          }
         }
       }
       Settings.Section(title: "Other") {

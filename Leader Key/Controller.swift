@@ -1,3 +1,4 @@
+// swiftlint:disable type_body_length
 import Cocoa
 import Combine
 import Defaults
@@ -102,9 +103,11 @@ class Controller {
 
         // Check if window size is valid before calculating position
         if windowSize.width > 0 && windowSize.height > 0 {
-            // Calculate the desired origin: Center horizontally, 40% down vertically from the top
+            // Calculate the desired origin: Center horizontally, but vertically place so that
+            // the TOP of the window is `panelTopOffsetPercent` of the visible frame height
+            let verticalPercent = CGFloat(Defaults[.panelTopOffsetPercent])
             let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
-            let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * 0.4) - (windowSize.height / 2.0)
+            let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * verticalPercent) - windowSize.height
             calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
 
             // ---- DEBUG LOGGING START ----
@@ -435,9 +438,11 @@ class Controller {
           let windowSize = window.frame.size // Use the window instance directly
 
           if windowSize.width > 0 && windowSize.height > 0 {
-              // Calculate the desired origin: Center horizontally, 40% down vertically from the top
+              // Calculate the desired origin: Center horizontally, but vertically place so that
+              // the TOP of the window is `panelTopOffsetPercent` of the visible frame height
+              let verticalPercent = CGFloat(Defaults[.panelTopOffsetPercent])
               let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
-              let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * 0.4) - (windowSize.height / 2.0)
+              let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * verticalPercent) - windowSize.height
               calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
               print("[Controller reposition] Calculated Origin: \(calculatedOrigin!)")
           } else {
