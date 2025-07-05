@@ -155,8 +155,8 @@ class Controller {
     Events.send(.willDeactivate)
 
     window.hide {
-      self.clear()
       afterClose?()
+      self.clear() // Clear UserState *after* external completion (e.g., AppDelegate reset) to avoid premature UI changes
       Events.send(.didDeactivate)
     }
 

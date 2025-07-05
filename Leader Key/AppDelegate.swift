@@ -298,7 +298,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Convenience method to hide the main Leader Key window
     func hide() {
       print("[AppDelegate] hide() called.") // Log entry into hide()
-      controller.hide()
+      controller.hide(afterClose: { [weak self] in
+        // Reset sequence AFTER the window is fully closed to avoid visual flash
+        self?.resetSequenceState()
+      })
     }
 
     // Toggle sticky mode programmatically (for use in actions)
@@ -358,9 +361,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        print("[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Resetting and hiding.")
+        print("[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Hiding window (state resets after close).")
         DispatchQueue.main.async {
-            self.resetSequenceState()
+            print("[AppDelegate] handleCommandReleased: Hiding window – state will reset after close.")
             self.hide()
         }
     }
@@ -380,7 +383,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               // Preference: Hide the window if activated again while visible.
               print("[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence.")
               hide()
-              resetSequenceState() // Reset any ongoing sequence
               return // Stop processing here
 
           case .reset:
@@ -394,7 +396,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               }
               // Clear existing state, reset sequence variables, and start a new sequence based on the activation type.
               controller.userState.clear()
-              resetSequenceState() // Reset sequence state in AppDelegate
               print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
               controller.repositionWindowNearMouse()
               startSequence(activationType: type)
@@ -854,9 +855,8 @@ extension AppDelegate {
 
             if isWindowVisible {
                 // Normal case: Window is visible, reset state, hide, and consume event.
-                print("[AppDelegate] Escape: Window is visible. Resetting state and dispatching hide().")
-                resetSequenceState()
-                DispatchQueue.main.async { self.hide() }
+                print("[AppDelegate] Escape: Window is visible. Hiding window (state resets after close).")
+                hide()
                 return true // Consume the Escape press
             } else {
                 // Inconsistent state: Window is visually present but isVisible is false.
@@ -877,8 +877,7 @@ extension AppDelegate {
                 print("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
                 NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
                 // Reset sequence state and hide the panel
-                resetSequenceState()
-                DispatchQueue.main.async { self.hide() }
+                hide()
                 return true // Consume the Cmd+, press
             }
             // --- END SPECIAL CHECK ---
@@ -928,7 +927,6 @@ extension AppDelegate {
                 if !isStickyModeActive {
                     print("[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence.")
                     hide()
-                    resetSequenceState()
                 } else {
                     print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
                 }
