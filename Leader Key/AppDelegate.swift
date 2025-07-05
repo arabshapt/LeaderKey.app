@@ -391,9 +391,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
               // If window wasn't key (e.g., user clicked elsewhere), make it key first.
               if !controller.window.isKeyWindow {
-                  print("[AppDelegate] handleActivation (Reset): Window visible but not key. Activating.")
-                  NSApp.activate(ignoringOtherApps: true)
-                  controller.window.makeKeyAndOrderFront(nil)
+                  print("[AppDelegate] handleActivation (Reset): Window visible but not key. Making panel key without activating app.")
+                  controller.window.makeKeyAndOrderFront(nil) // non-activating panel; preserves other app focus
               }
               // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
               controller.userState.clear()
