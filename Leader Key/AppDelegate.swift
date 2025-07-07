@@ -932,10 +932,16 @@ extension AppDelegate {
 
         // Get the single character string representation for the key event
         guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
-            // If we can't map the key event to a string (should be rare), shake the window.
-            print("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
-            DispatchQueue.main.async { self.controller.window.shake() }
-            return true // Event handled (by shaking)
+            // If we can't map the key event to a string, decide based on sticky mode.
+            let isStickyModeActive = isInStickyMode(modifiers)
+            if isStickyModeActive {
+                print("[AppDelegate] processKeyInSequence: Could not map event to keyString, but sticky mode ACTIVE – passing event through.")
+                return false // Event NOT handled – let it propagate
+            } else {
+                print("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
+                DispatchQueue.main.async { self.controller.window.shake() }
+                return true // Event handled (by shaking)
+            }
         }
 
         print("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
@@ -974,11 +980,20 @@ extension AppDelegate {
                 return true // Event handled
             }
         } else {
-            // Key not found in the current group - shake the window to indicate error
+            // Key not found in the current group.
             let groupName = currentSequenceGroup?.displayName ?? "(nil)"
-            print("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName).'")
-            DispatchQueue.main.async { self.controller.window.shake() }
-            return true // Event handled (by shaking)
+            print("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName)'.")
+            
+            let isStickyModeActive = isInStickyMode(modifiers)
+            if isStickyModeActive {
+                // In sticky mode: pass the event through so the underlying app receives the key/shortcut.
+                print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE -> passing event through.")
+                return false // Event NOT handled – let it propagate
+            } else {
+                // Not in sticky mode: indicate error by shaking the window and consuming the event.
+                DispatchQueue.main.async { self.controller.window.shake() }
+                return true // Event handled (by shaking)
+            }
         }
     }
 
