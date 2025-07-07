@@ -333,6 +333,11 @@ private struct AddConfigSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            // Pick an application that isn't currently running
+            Button("Choose App from Disk…") {
+                presentOpenPanel()
+            }
+
             Divider()
 
             TextField("Optional sidebar name", text: $customDisplayName)
@@ -359,6 +364,23 @@ private struct AddConfigSheet: View {
         )
         // Dismiss regardless; success/failure alerts handled in helper
         dismiss()
+    }
+
+    // Presents an NSOpenPanel allowing the user to select a .app bundle and extracts its bundle identifier
+    private func presentOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.canChooseDirectories = true // .app is technically a directory
+        panel.canChooseFiles = true   // Allow selecting bundle as a file
+        panel.title = "Select an Application"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if let bundle = Bundle(url: url), let bundleId = bundle.bundleIdentifier {
+                manualBundleId = bundleId
+                showManualEntry = true
+            }
+        }
     }
 }
 
