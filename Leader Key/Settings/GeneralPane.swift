@@ -3,6 +3,7 @@ import KeyboardShortcuts
 import LaunchAtLogin
 import Settings
 import SwiftUI
+import AppKit
 
 struct GeneralPane: View {
   private let contentWidth = 1100.0
@@ -15,6 +16,7 @@ struct GeneralPane: View {
   @State private var filePathToRename: String? = nil
   @State private var keyToLoad: String? = nil
   @State private var listSelection: String? = nil
+  @State private var showingAddConfigSheet = false
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -95,7 +97,17 @@ struct GeneralPane: View {
                       }
                   }
                   
-                  // TODO: Add 'New' / 'Delete' buttons below the list?
+                  // --- Add Config Button ---
+                  Button {
+                      showingAddConfigSheet = true
+                  } label: {
+                      Label("Add Config", systemImage: "plus")
+                  }
+                  .buttonStyle(.borderless)
+                  .padding(.top, 4)
+
+                  // Spacer to push button to top-left alignment
+                  Spacer(minLength: 0)
 
               }
               // --- Left Sidebar: Config List --- END ---
@@ -251,6 +263,11 @@ struct GeneralPane: View {
         messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
         return Text(messageText)
     })
+    // Sheet for creating new configs
+    .sheet(isPresented: $showingAddConfigSheet) {
+        AddConfigSheet()
+            .environmentObject(config) // Pass environment
+    }
   }
 
   private func expandAllGroups(in group: Group, parentPath: [Int]) {
@@ -262,6 +279,87 @@ struct GeneralPane: View {
       }
     }
   }
+}
+
+// MARK: - AddConfigSheet
+private struct AddConfigSheet: View {
+    @EnvironmentObject var config: UserConfig
+    @Environment(\.dismiss) private var dismiss
+
+    // Running applications with a bundle id & regular activation policy
+    private var runningApps: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.bundleIdentifier != nil && $0.activationPolicy == .regular }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+    }
+
+    @State private var selectedApp: NSRunningApplication? = NSWorkspace.shared.frontmostApplication
+    @State private var showManualEntry = false
+    @State private var manualBundleId = ""
+    @State private var customDisplayName = ""
+
+    private var effectiveBundleId: String {
+        if showManualEntry {
+            return manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return selectedApp?.bundleIdentifier ?? ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Create New Configuration")
+                .font(.title2)
+
+            // Picker for running applications
+            Picker("Application", selection: $selectedApp) {
+                ForEach(runningApps, id: \.processIdentifier) { app in
+                    HStack {
+                        Image(nsImage: app.icon ?? NSImage())
+                            .resizable()
+                            .frame(width: 16, height: 16)
+                        Text(app.localizedName ?? app.bundleIdentifier ?? "Unknown")
+                    }
+                    .tag(app as NSRunningApplication?)
+                }
+            }
+            .disabled(showManualEntry)
+
+            // Advanced manual entry
+            Toggle("Advanced: Enter bundle identifier manually", isOn: $showManualEntry)
+
+            if showManualEntry {
+                TextField("com.example.app", text: $manualBundleId)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            Divider()
+
+            TextField("Optional sidebar name", text: $customDisplayName)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Create") {
+                    createConfig()
+                }
+                .disabled(effectiveBundleId.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 400)
+    }
+
+    private func createConfig() {
+        let _ = config.createConfigForApp(
+            bundleId: effectiveBundleId,
+            templateKey: nil,
+            customName: customDisplayName.isEmpty ? nil : customDisplayName
+        )
+        // Dismiss regardless; success/failure alerts handled in helper
+        dismiss()
+    }
 }
 
 struct GeneralPane_Previews: PreviewProvider {
