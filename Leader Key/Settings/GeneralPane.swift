@@ -12,11 +12,13 @@ struct GeneralPane: View {
   @Default(.theme) var theme
   @State private var expandedGroups = Set<[Int]>()
   @State private var showingRenameAlert = false
+  @State private var showingDeleteAlert = false
   @State private var newConfigNameInput = ""
   @State private var filePathToRename: String? = nil
   @State private var keyToLoad: String? = nil
   @State private var listSelection: String? = nil
   @State private var showingAddConfigSheet = false
+  @State private var keyToDelete: String? = nil
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -53,7 +55,7 @@ struct GeneralPane: View {
                                   .truncationMode(.middle)
                               Spacer()
                               // Simple Rename Button - could be improved with context menu later
-                              if key != globalDefaultDisplayName {
+                              if key != globalDefaultDisplayName && key != defaultAppConfigDisplayName {
                                   Button {
                                       // Get current custom name or default name to pre-fill
                                       if let filePath = config.discoveredConfigFiles[key] {
@@ -71,6 +73,16 @@ struct GeneralPane: View {
                                   }
                                   .buttonStyle(.plain) // Use plain style for subtle look in list
                                   .foregroundColor(.secondary)
+
+                                  // Delete button
+                                   Button {
+                                       keyToDelete = key
+                                       showingDeleteAlert = true
+                                   } label: {
+                                       Image(systemName: "trash")
+                                   }
+                                   .buttonStyle(.plain)
+                                   .foregroundColor(.red)
                               }
                           }
                       }
@@ -263,6 +275,20 @@ struct GeneralPane: View {
         messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
         return Text(messageText)
     })
+    // Delete confirmation alert
+    .alert("Delete Configuration", isPresented: $showingDeleteAlert, actions: {
+        Button("Delete", role: .destructive) {
+            if let key = keyToDelete {
+                _ = config.deleteConfig(displayKey: key)
+            }
+            keyToDelete = nil
+        }
+        Button("Cancel", role: .cancel) {
+            keyToDelete = nil
+        }
+    }, message: {
+        Text("Are you sure you want to delete the configuration ‘\(keyToDelete ?? "")’? This action cannot be undone.")
+    })
     // Sheet for creating new configs
     .sheet(isPresented: $showingAddConfigSheet) {
         AddConfigSheet()
@@ -324,9 +350,19 @@ private struct AddConfigSheet: View {
                 }
             }
             .disabled(showManualEntry)
+            .onChange(of: selectedApp) { newApp in
+                if !showManualEntry {
+                    customDisplayName = newApp?.localizedName ?? ""
+                }
+            }
 
             // Advanced manual entry
             Toggle("Advanced: Enter bundle identifier manually", isOn: $showManualEntry)
+                .onChange(of: showManualEntry) { manual in
+                    if manual {
+                        selectedApp = nil // clear dropdown selection
+                    }
+                }
 
             if showManualEntry {
                 TextField("com.example.app", text: $manualBundleId)
@@ -379,6 +415,11 @@ private struct AddConfigSheet: View {
             if let bundle = Bundle(url: url), let bundleId = bundle.bundleIdentifier {
                 manualBundleId = bundleId
                 showManualEntry = true
+                if let name = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String {
+                    customDisplayName = name
+                } else {
+                    customDisplayName = url.deletingPathExtension().lastPathComponent
+                }
             }
         }
     }
