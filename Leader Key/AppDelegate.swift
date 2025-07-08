@@ -62,10 +62,10 @@ fileprivate struct KeyboardShortcutsView: View {
         Settings.Container(contentWidth: contentWidth) {
             Settings.Section(title: "Global Activation Shortcuts") {
                 Form {
-                    KeyboardShortcuts.Recorder("Activate (App-Specific):", name: .activateAppSpecific)
-                    KeyboardShortcuts.Recorder("Activate (Default Only):", name: .activateDefaultOnly)
+                    KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
+                    KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
                 }
-                Text("These shortcuts activate Leader Key globally.\nApp-Specific tries to load the config for the frontmost app.\nDefault Only always loads the default config.")
+                Text("Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)

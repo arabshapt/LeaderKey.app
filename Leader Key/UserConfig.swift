@@ -4,7 +4,7 @@ import Defaults
 import Foundation
 
 let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
-let globalDefaultDisplayName = "Global Default"
+let globalDefaultDisplayName = "Global"
 let defaultAppConfigDisplayName = "Default App Config"
 
 class UserConfig: ObservableObject {
