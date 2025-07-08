@@ -90,9 +90,9 @@ struct GroupContentView: View {
       AddButtons(
         onAddAction: {
           withAnimation {
-            print("[UI LOG] GroupContentView: Adding new ACTION (key: \"\", type: .application, value: \"\") to group at path \(parentPath)")
+            print("[UI LOG] GroupContentView: Adding new ACTION (key: \"\", type: .shortcut, value: \"\") to group at path \(parentPath)")
             group.actions.append(
-              .action(Action(key: "", type: .application, value: "")))
+              .action(Action(key: "", type: .shortcut, value: "")))
           }
         },
         onAddGroup: {
@@ -255,7 +255,7 @@ struct ActionRow: View {
   @State private var labelInputValue: String = ""
   @State private var isListening: Bool = false
   @State private var wasPreviouslyListening: Bool = false
-  @State private var selectedType: Type = .application // Local state for Picker
+  @State private var selectedType: Type = .shortcut // Local state for Picker
 
   var body: some View {
     // Log action details + ID for tracking
@@ -308,11 +308,11 @@ struct ActionRow: View {
       // Log before Picker
       let _ = print("[UI LOG] ActionRow BODY: Drawing Picker for Path \(path), ID \(action.id), Type: \(selectedType)") // Log selectedType
       Picker("Type", selection: $selectedType) { // Bind Picker to local state
+        Text("Shortcut").tag(Type.shortcut)
         Text("Application").tag(Type.application)
         Text("URL").tag(Type.url)
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
-        Text("Shortcut").tag(Type.shortcut)
         Text("Type Text").tag(Type.text)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
       }
