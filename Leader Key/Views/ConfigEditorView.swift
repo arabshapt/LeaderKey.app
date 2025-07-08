@@ -256,6 +256,12 @@ struct ActionRow: View {
   @State private var isListening: Bool = false
   @State private var wasPreviouslyListening: Bool = false
   @State private var selectedType: Type = .shortcut // Local state for Picker
+  // UI state for inline editors
+  @State private var isShortcutEditorPresented = false
+  @State private var isTextEditorPresented = false
+  @State private var isUrlEditorPresented = false
+  @State private var isCommandEditorPresented = false
+  @State private var showingShortcutHelp = false
 
   var body: some View {
     // Log action details + ID for tracking
@@ -366,29 +372,120 @@ struct ActionRow: View {
       case .shortcut:
         // Log inside case
         let _ = print("[UI LOG] ActionRow Switch Case: .shortcut for Path \(path), ID \(action.id)")
-        TextField("Shortcut (e.g., CSb, Oa)", text: $valueInputValue, onCommit: {
-          action.value = valueInputValue
-        })
+        Button {
+          isShortcutEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "keyboard")
+            Text(valueInputValue.isEmpty ? "Set shortcut…" : (valueInputValue.count > 25 ? "\(valueInputValue.prefix(25))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isShortcutEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Shortcut")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
+              .font(.footnote)
+              .foregroundColor(.secondary)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                // Revert local changes
+                valueInputValue = action.value
+                isShortcutEditorPresented = false
+              }
+              Button("Save") {
+                action.value = valueInputValue
+                isShortcutEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 380)
+        }
       case .url:
         // Log inside case
         let _ = print("[UI LOG] ActionRow Switch Case: .url for Path \(path), ID \(action.id)")
-        HStack {
-          TextField("URL", text: $valueInputValue, onCommit: {
-            action.value = valueInputValue
-          })
-          Toggle("Activates", isOn: Binding(
-            get: { action.activates ?? true },
-            set: { action.activates = $0 }
-          ))
-          .toggleStyle(.checkbox)
-          .frame(width: 90)
+        Button {
+          isUrlEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "link")
+            Text(valueInputValue.isEmpty ? "Edit URL…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isUrlEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit URL")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Toggle("Activate after open", isOn: Binding(
+              get: { action.activates ?? true },
+              set: { action.activates = $0 }
+            ))
+            .toggleStyle(.checkbox)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = action.value
+                isUrlEditorPresented = false
+              }
+              Button("Save") {
+                action.value = valueInputValue
+                isUrlEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
         }
       case .text:
         // Log inside case
         let _ = print("[UI LOG] ActionRow Switch Case: .text for Path \(path), ID \(action.id)")
-        TextField("Text to type", text: $valueInputValue, onCommit: {
-          action.value = valueInputValue
-        })
+        Button {
+          isTextEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "square.and.pencil")
+            Text(valueInputValue.isEmpty ? "Edit text…" : (valueInputValue.count > 20 ? "\(valueInputValue.prefix(20))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isTextEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Text to Type")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 180)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = action.value
+                isTextEditorPresented = false
+              }
+              Button("Save") {
+                action.value = valueInputValue
+                isTextEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 480, height: 300)
+        }
       case .toggleStickyMode:
         // Log inside case
         let _ = print("[UI LOG] ActionRow Switch Case: .toggleStickyMode for Path \(path), ID \(action.id)")
@@ -398,9 +495,39 @@ struct ActionRow: View {
       default:
         // Log inside case (includes .command initially? Check your Type enum)
         let _ = print("[UI LOG] ActionRow Switch Case: .default/\(String(describing: action.type)) for Path \(path), ID \(action.id)") // Log action.type
-        TextField("Value", text: $valueInputValue, onCommit: {
-          action.value = valueInputValue
-        })
+        Button {
+          isCommandEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "terminal")
+            Text(valueInputValue.isEmpty ? "Edit command…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isCommandEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Command")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = action.value
+                isCommandEditorPresented = false
+              }
+              Button("Save") {
+                action.value = valueInputValue
+                isCommandEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
       }
 
       // Add sticky mode checkbox for all action types except Toggle Sticky Mode
@@ -452,8 +579,10 @@ struct ActionRow: View {
     }
     // Re-add onChange listeners to sync local state back to the model
     .onChange(of: valueInputValue) { newValue in
-        if action.value != newValue {
-            print("[UI LOG] ActionRow.onChange(valueInputValue): Path \(path) syncing value '\(newValue)' to action.value.")
+        // Avoid syncing while the dedicated editor sheet is open; commit occurs on Save.
+        let editorOpen = isShortcutEditorPresented || isUrlEditorPresented || isCommandEditorPresented || isTextEditorPresented
+        if !editorOpen && action.value != newValue {
+            print("[UI LOG] ActionRow.onChange(valueInputValue): Path \(path) syncing value '\(newValue)' to action.value (inline update).")
             action.value = newValue
         }
     }
