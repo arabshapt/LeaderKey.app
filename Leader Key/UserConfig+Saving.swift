@@ -55,7 +55,9 @@ extension UserConfig {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [
-                .prettyPrinted, .withoutEscapingSlashes, // .sortedKeys not needed as we sort manually
+                .prettyPrinted,
+                .withoutEscapingSlashes,
+                .sortedKeys // ensure deterministic key order in saved JSON
             ]
             // Encode the SORTED group
             let jsonData = try encoder.encode(sortedGroup)
