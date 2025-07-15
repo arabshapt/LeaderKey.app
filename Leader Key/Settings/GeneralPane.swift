@@ -108,6 +108,13 @@ struct GeneralPane: View {
                            print("[GeneralPane onAppear] Initialized listSelection to \(listSelection ?? "nil")")
                       }
                   }
+                  .onChange(of: config.selectedConfigKeyForEditing) { newSelectedKey in
+                      // Update the sidebar selection when the config's selected key changes
+                      if listSelection != newSelectedKey {
+                          print("[GeneralPane onChange(selectedConfigKeyForEditing)] Updating listSelection from \(listSelection ?? "nil") to \(newSelectedKey)")
+                          listSelection = newSelectedKey
+                      }
+                  }
                   
                   // --- Add Config Button ---
                   Button {

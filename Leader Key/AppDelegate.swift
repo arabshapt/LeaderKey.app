@@ -232,10 +232,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func settingsMenuItemActionHandler(_: NSMenuItem) {
       print("[AppDelegate] settingsMenuItemActionHandler called.")
 
+      // Determine which config to focus on based on current state
+      let configKeyToFocus = determineConfigToFocus()
+      
+      // Update the UserConfig to select the appropriate config for editing
+      print("[AppDelegate] Setting config to focus on: \(configKeyToFocus)")
+      config.loadConfigForEditing(key: configKeyToFocus)
+
       // Ensure we have the window reference first
       guard let window = settingsWindowController.window else {
           print("[AppDelegate settings] Error: Could not get settings window reference.")
-          settingsWindowController.show()
+          settingsWindowController.show(pane: .general)
           NSApp.activate(ignoringOtherApps: true)
           return
       }
@@ -284,11 +291,94 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       } // End async dispatch
 
       // Show the window controller immediately (positioning will happen asynchronously)
-      settingsWindowController.show()
+      // Always open to the General tab where configuration editing happens
+      settingsWindowController.show(pane: .general)
 
       NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
       print("[AppDelegate] Settings window show() called (positioning deferred).")
   }
+
+    // Determine which config to focus on based on current state
+    private func determineConfigToFocus() -> String {
+        // First check if we have an active sequence state
+        if let activeRoot = self.activeRootGroup {
+            print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
+            return findConfigKeyForGroup(activeRoot)
+        }
+        
+        // Check if the Controller's UserState has an active root
+        if let userStateActiveRoot = controller.userState.activeRoot {
+            print("[AppDelegate] Using UserState activeRoot to determine config")
+            return findConfigKeyForGroup(userStateActiveRoot)
+        }
+        
+        // Check frontmost application to determine if we should use app-specific config
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
+           let bundleId = frontmostApp.bundleIdentifier {
+            print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
+            
+            // Check if an app-specific config exists for this bundle ID
+            let appConfig = config.getConfig(for: bundleId)
+            // If the returned config is not the default root, then an app-specific config exists
+            if !areGroupsEqual(appConfig, config.root) {
+                return findConfigKeyForGroup(appConfig)
+            }
+        }
+        
+        // Default fallback - use global default
+        print("[AppDelegate] Falling back to global default config")
+        return globalDefaultDisplayName
+    }
+    
+    // Find the configuration key for a given Group
+    private func findConfigKeyForGroup(_ group: Group) -> String {
+        // Check if this is the global default (root config)
+        if areGroupsEqual(group, config.root) {
+            return globalDefaultDisplayName
+        }
+        
+        // Search through discovered config files to find a match
+        for (key, filePath) in config.discoveredConfigFiles {
+            // Skip the global default entry
+            if key == globalDefaultDisplayName {
+                continue
+            }
+            
+            // Try to load the config from this file path and compare
+            if let loadedGroup = config.decodeConfig(from: filePath, suppressAlerts: true, isDefaultConfig: false) {
+                if areGroupsEqual(loadedGroup, group) {
+                    return key
+                }
+            }
+        }
+        
+        // If we can't find a specific match, try to infer from bundle ID
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
+           let bundleId = frontmostApp.bundleIdentifier {
+            
+            // Look for an app-specific config key pattern
+            for key in config.discoveredConfigFiles.keys {
+                if key.contains(bundleId) {
+                    return key
+                }
+            }
+            
+            // Check if there's a default app config
+            if config.discoveredConfigFiles.keys.contains(defaultAppConfigDisplayName) {
+                return defaultAppConfigDisplayName
+            }
+        }
+        
+        // Final fallback
+        return globalDefaultDisplayName
+    }
+    
+    // Helper method to compare two Group objects for equality
+    private func areGroupsEqual(_ group1: Group, _ group2: Group) -> Bool {
+        return group1.key == group2.key && 
+               group1.label == group2.label && 
+               group1.actions.count == group2.actions.count
+    }
 
     // Convenience method to show the main Leader Key window
     func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
