@@ -2,6 +2,21 @@ import Defaults
 import SwiftUI
 import SymbolPicker
 
+struct KeyReference {
+    static let keyCategories: [String: [String]] = [
+        "Letters": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"],
+        "Numbers": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        "Arrows": ["left_arrow", "right_arrow", "up_arrow", "down_arrow"],
+        "Function Keys": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20"],
+        "Special Keys": ["escape", "tab", "spacebar", "return_or_enter", "enter", "delete_or_backspace", "delete_forward", "home", "end", "page_up", "page_down", "help", "insert"],
+        "Keypad": ["keypad_0", "keypad_1", "keypad_2", "keypad_3", "keypad_4", "keypad_5", "keypad_6", "keypad_7", "keypad_8", "keypad_9", "keypad_period", "keypad_enter", "keypad_plus", "keypad_minus", "keypad_multiply", "keypad_divide", "keypad_equal_sign", "keypad_clear", "keypad_num_lock"],
+        "Modifiers": ["caps_lock", "left_control", "left_shift", "left_option", "left_command", "right_control", "right_shift", "right_option", "right_command", "fn"],
+        "Symbols": ["grave_accent_and_tilde", "hyphen", "equal_sign", "open_bracket", "close_bracket", "backslash", "semicolon", "quote", "comma", "period", "slash"],
+        "Media": ["volume_increment", "volume_decrement", "mute"],
+        "Other": ["print_screen", "scroll_lock", "pause", "lang1", "lang2", "japanese_eisuu", "japanese_kana"]
+    ]
+}
+
 // Helper function to create a deep duplicate with a new UUID
 func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     switch item {
@@ -262,6 +277,7 @@ struct ActionRow: View {
   @State private var isUrlEditorPresented = false
   @State private var isCommandEditorPresented = false
   @State private var showingShortcutHelp = false
+  @State private var showingKeyReference = false
 
   var body: some View {
     // Log action details + ID for tracking
@@ -393,6 +409,35 @@ struct ActionRow: View {
             Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
               .font(.footnote)
               .foregroundColor(.secondary)
+            
+            DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
+              ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                  ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text(category)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                      
+                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                        ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
+                          Text(key)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+                      }
+                    }
+                  }
+                }
+                .padding(.top, 8)
+              }
+              .frame(maxHeight: 200)
+            }
+            .font(.footnote)
             HStack {
               Spacer()
               Button("Cancel") {
