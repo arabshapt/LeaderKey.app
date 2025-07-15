@@ -950,17 +950,15 @@ struct MacroEditorSheet: View {
         .font(.body)
         .foregroundColor(.secondary)
       
-      ScrollView {
-        LazyVStack(spacing: 8) {
-          ForEach($macroSteps) { $step in
-            MacroStepRow(step: $step, onDelete: {
-              if let index = macroSteps.firstIndex(where: { $0.id == step.id }) {
-                macroSteps.remove(at: index)
-              }
-            })
-          }
-          .onMove(perform: moveMacroStep)
+      List {
+        ForEach($macroSteps) { $step in
+          MacroStepRow(step: $step, onDelete: {
+            if let index = macroSteps.firstIndex(where: { $0.id == step.id }) {
+              macroSteps.remove(at: index)
+            }
+          })
         }
+        .onMove(perform: moveMacroStep)
       }
       .frame(minHeight: 200)
       .border(Color.gray.opacity(0.2))
