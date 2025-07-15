@@ -400,6 +400,8 @@ class Controller {
       } else {
         print("[Controller] runAction: Cannot toggle sticky mode - appDelegate is nil")
       }
+    case .macro:
+      runMacro(action)
     default:
       print("\(action.type) unknown")
     }
@@ -416,6 +418,43 @@ class Controller {
 
     if window.isVisible {
       window.makeKeyAndOrderFront(nil)
+    }
+  }
+
+  func runMacro(_ action: Action) {
+    guard let macroSteps = action.macroSteps else {
+      print("[Controller] runMacro: No macro steps found for action")
+      return
+    }
+    
+    print("[Controller] runMacro: Starting macro with \(macroSteps.count) steps")
+    
+    // Execute macro steps asynchronously with delays
+    DispatchQueue.global(qos: .userInitiated).async {
+      for (index, step) in macroSteps.enumerated() {
+        guard step.enabled else {
+          print("[Controller] runMacro: Step \(index + 1) is disabled, skipping")
+          continue
+        }
+        
+        // Apply delay before executing the step
+        if step.delay > 0 {
+          print("[Controller] runMacro: Waiting \(step.delay) seconds before step \(index + 1)")
+          Thread.sleep(forTimeInterval: step.delay)
+        }
+        
+        print("[Controller] runMacro: Executing step \(index + 1)/\(macroSteps.count)")
+        
+        // Execute the step action on the main thread
+        DispatchQueue.main.async {
+          self.runAction(step.action)
+        }
+        
+        // Small delay between steps to ensure proper execution
+        Thread.sleep(forTimeInterval: 0.1)
+      }
+      
+      print("[Controller] runMacro: Completed macro execution")
     }
   }
 

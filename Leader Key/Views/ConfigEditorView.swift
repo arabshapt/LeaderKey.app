@@ -7,7 +7,7 @@ func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     switch item {
     case .action(let action):
         // Create a new Action instance, which will get a new UUID
-        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates))
+        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps))
     case .group(let group):
         // Recursively duplicate actions within the group
         let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
@@ -321,6 +321,7 @@ struct ActionRow: View {
         Text("Folder").tag(Type.folder)
         Text("Type Text").tag(Type.text)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+        Text("Macro").tag(Type.macro)
       }
       .frame(width: 110)
       .labelsHidden()
@@ -492,6 +493,10 @@ struct ActionRow: View {
         Text("No value required")
           .foregroundColor(.secondary)
           .font(.caption)
+      case .macro:
+        // Log inside case
+        let _ = print("[UI LOG] ActionRow Switch Case: .macro for Path \(path), ID \(action.id)")
+        MacroEditorView(action: $action, path: path)
       default:
         // Log inside case (includes .command initially? Check your Type enum)
         let _ = print("[UI LOG] ActionRow Switch Case: .default/\(String(describing: action.type)) for Path \(path), ID \(action.id)") // Log action.type
@@ -853,4 +858,153 @@ struct GroupRow: View {
   return ConfigEditorView(group: .constant(group), expandedGroups: .constant(Set<[Int]>()))
     .frame(width: 600, height: 500)
     .environmentObject(userConfig)
+}
+
+struct MacroEditorView: View {
+  @Binding var action: Action
+  var path: [Int]
+  @State private var isMacroEditorPresented = false
+  
+  var body: some View {
+    Button {
+      isMacroEditorPresented = true
+    } label: {
+      HStack(spacing: 4) {
+        Image(systemName: "play.rectangle.on.rectangle")
+        Text(macroButtonText)
+      }
+    }
+    .buttonStyle(.plain)
+    .sheet(isPresented: $isMacroEditorPresented) {
+      MacroEditorSheet(action: $action, path: path, isPresented: $isMacroEditorPresented)
+    }
+  }
+  
+  private var macroButtonText: String {
+    let stepCount = action.macroSteps?.count ?? 0
+    if stepCount == 0 {
+      return "Create macro…"
+    } else {
+      return "Edit macro (\(stepCount) steps)"
+    }
+  }
+}
+
+struct MacroEditorSheet: View {
+  @Binding var action: Action
+  var path: [Int]
+  @Binding var isPresented: Bool
+  @State private var macroSteps: [MacroStep] = []
+  
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Edit Macro")
+        .font(.title2)
+      
+      Text("Create a sequence of actions that will be executed in order with configurable delays.")
+        .font(.body)
+        .foregroundColor(.secondary)
+      
+      ScrollView {
+        LazyVStack(spacing: 8) {
+          ForEach($macroSteps) { $step in
+            MacroStepRow(step: $step, onDelete: {
+              if let index = macroSteps.firstIndex(where: { $0.id == step.id }) {
+                macroSteps.remove(at: index)
+              }
+            })
+          }
+          .onMove(perform: moveMacroStep)
+        }
+      }
+      .frame(minHeight: 200)
+      .border(Color.gray.opacity(0.2))
+      
+      Button("Add Step") {
+        let newStep = MacroStep(
+          action: Action(key: "", type: .shortcut, value: ""),
+          delay: 0.0,
+          enabled: true
+        )
+        macroSteps.append(newStep)
+      }
+      
+      HStack {
+        Spacer()
+        Button("Cancel") {
+          // Revert changes
+          macroSteps = action.macroSteps ?? []
+          isPresented = false
+        }
+        Button("Save") {
+          action.macroSteps = macroSteps
+          isPresented = false
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(24)
+    .frame(width: 600, height: 500)
+    .onAppear {
+      macroSteps = action.macroSteps ?? []
+    }
+  }
+  
+  private func moveMacroStep(from source: IndexSet, to destination: Int) {
+    macroSteps.move(fromOffsets: source, toOffset: destination)
+  }
+}
+
+struct MacroStepRow: View {
+  @Binding var step: MacroStep
+  let onDelete: () -> Void
+  
+  var body: some View {
+    HStack(spacing: 12) {
+      // Drag handle
+      Image(systemName: "line.3.horizontal")
+        .foregroundColor(.secondary)
+        .frame(width: 20)
+      
+      // Enable/disable toggle
+      Toggle("", isOn: $step.enabled)
+        .toggleStyle(.checkbox)
+        .frame(width: 20)
+      
+      // Delay field
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Delay")
+          .font(.caption)
+          .foregroundColor(.secondary)
+        TextField("0.0", value: $step.delay, format: .number)
+          .frame(width: 60)
+          .textFieldStyle(.roundedBorder)
+      }
+      
+      // Action type picker
+      Picker("Type", selection: $step.action.type) {
+        Text("Shortcut").tag(Type.shortcut)
+        Text("Application").tag(Type.application)
+        Text("URL").tag(Type.url)
+        Text("Command").tag(Type.command)
+        Text("Folder").tag(Type.folder)
+        Text("Type Text").tag(Type.text)
+      }
+      .frame(width: 100)
+      .labelsHidden()
+      
+      // Action value field
+      TextField("Value", text: $step.action.value)
+        .textFieldStyle(.roundedBorder)
+      
+      // Delete button
+      Button(role: .destructive, action: onDelete) {
+        Image(systemName: "trash")
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(8)
+    .background(Color.gray.opacity(0.1))
+    .cornerRadius(4)
+  }
 }

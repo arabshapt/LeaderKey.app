@@ -436,6 +436,18 @@ enum Type: String, Codable {
   case shortcut
   case text
   case toggleStickyMode
+  case macro
+}
+
+struct MacroStep: Codable, Equatable, Identifiable {
+  let id = UUID()
+  var action: Action
+  var delay: Double // Delay in seconds before executing this step
+  var enabled: Bool = true
+  
+  private enum CodingKeys: String, CodingKey {
+    case action, delay, enabled
+  }
 }
 
 protocol Item {
@@ -455,6 +467,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var iconPath: String?
   var activates: Bool?
   var stickyMode: Bool?
+  var macroSteps: [MacroStep]?
 
   var displayName: String {
     guard let labelValue = label else { return bestGuessDisplayName }
@@ -479,6 +492,9 @@ struct Action: Item, Codable, Equatable, Identifiable {
       let snippet = value.prefix(20)
       let suffix = value.count > 20 ? "..." : ""
       return "Type: '\(snippet)\(suffix)'"
+    case .macro:
+      let stepCount = macroSteps?.count ?? 0
+      return "Macro: \(stepCount) steps"
     default:
       return value
     }
@@ -525,7 +541,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, iconPath, activates, stickyMode
+    case key, type, value, actions, label, iconPath, activates, stickyMode, macroSteps
   }
 
   init(from decoder: Decoder) throws {
@@ -543,7 +559,8 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       self = .group(Group(key: key, label: label, iconPath: iconPath, stickyMode: stickyMode, actions: actions))
     default:
       let value = try container.decode(String.self, forKey: .value)
-      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates, stickyMode: stickyMode))
+      let macroSteps = try container.decodeIfPresent([MacroStep].self, forKey: .macroSteps)
+      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates, stickyMode: stickyMode, macroSteps: macroSteps))
     }
   }
 
@@ -560,6 +577,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(action.activates, forKey: .activates)
       try container.encodeIfPresent(action.stickyMode, forKey: .stickyMode)
+      try container.encodeIfPresent(action.macroSteps, forKey: .macroSteps)
     case .group(let group):
       try container.encode(group.key, forKey: .key)
       try container.encode(Type.group, forKey: .type)
