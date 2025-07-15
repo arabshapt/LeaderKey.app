@@ -1001,6 +1001,12 @@ struct MacroEditorSheet: View {
 struct MacroStepRow: View {
   @Binding var step: MacroStep
   let onDelete: () -> Void
+  @State private var valueInputValue: String = ""
+  @State private var isShortcutEditorPresented = false
+  @State private var isTextEditorPresented = false
+  @State private var isUrlEditorPresented = false
+  @State private var isCommandEditorPresented = false
+  @State private var showingKeyReference = false
   
   var body: some View {
     HStack(spacing: 12) {
@@ -1043,9 +1049,219 @@ struct MacroStepRow: View {
       .frame(width: 100)
       .labelsHidden()
       
-      // Action value field
-      TextField("Value", text: $step.action.value)
-        .textFieldStyle(.roundedBorder)
+      // Action value field - now with popup editors similar to ActionRow, made wider
+      HStack(spacing: 8) {
+        switch step.action.type {
+      case .application:
+        Button("Choose…") {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+          if panel.runModal() == .OK {
+            step.action.value = panel.url?.path ?? ""
+          }
+        }
+        .buttonStyle(.plain)
+        Text(step.action.value).truncationMode(.middle).lineLimit(1)
+      case .folder:
+        Button("Choose…") {
+          let panel = NSOpenPanel()
+          panel.allowsMultipleSelection = false
+          panel.canChooseDirectories = true
+          panel.canChooseFiles = false
+          panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+
+          if panel.runModal() == .OK {
+            step.action.value = panel.url?.path ?? ""
+          }
+        }
+        .buttonStyle(.plain)
+        Text(step.action.value).truncationMode(.middle).lineLimit(1)
+      case .shortcut:
+        Button {
+          isShortcutEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "keyboard")
+            Text(valueInputValue.isEmpty ? "Set shortcut…" : (valueInputValue.count > 25 ? "\(valueInputValue.prefix(25))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isShortcutEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Shortcut")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
+              .font(.footnote)
+              .foregroundColor(.secondary)
+            
+            DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
+              ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                  ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text(category)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                      
+                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                        ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
+                          Text(key)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+                      }
+                    }
+                  }
+                }
+                .padding(.top, 8)
+              }
+              .frame(maxHeight: 200)
+            }
+            .font(.footnote)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isShortcutEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isShortcutEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 380)
+        }
+      case .url:
+        Button {
+          isUrlEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "link")
+            Text(valueInputValue.isEmpty ? "Edit URL…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isUrlEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit URL")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Toggle("Activate after open", isOn: Binding(
+              get: { step.action.activates ?? true },
+              set: { step.action.activates = $0 }
+            ))
+            .toggleStyle(.checkbox)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isUrlEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isUrlEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      case .text:
+        Button {
+          isTextEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "square.and.pencil")
+            Text(valueInputValue.isEmpty ? "Edit text…" : (valueInputValue.count > 20 ? "\(valueInputValue.prefix(20))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isTextEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Text to Type")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 180)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isTextEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isTextEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 480, height: 300)
+        }
+      case .toggleStickyMode:
+        Text("No value required")
+          .foregroundColor(.secondary)
+          .font(.caption)
+      default:
+        Button {
+          isCommandEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "terminal")
+            Text(valueInputValue.isEmpty ? "Edit command…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isCommandEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Command")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isCommandEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isCommandEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      }
+        
+        Spacer()
+      }
       
       // Delete button
       Button(role: .destructive, action: onDelete) {
@@ -1056,5 +1272,11 @@ struct MacroStepRow: View {
     .padding(8)
     .background(Color.gray.opacity(0.1))
     .cornerRadius(4)
+    .onAppear {
+      valueInputValue = step.action.value
+    }
+    .onChange(of: step.action.value) { newValue in
+      valueInputValue = newValue
+    }
   }
 }
