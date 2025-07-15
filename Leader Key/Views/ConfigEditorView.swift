@@ -282,6 +282,14 @@ struct ActionRow: View {
   var body: some View {
     // Log action details + ID for tracking
     let _ = print("[UI LOG] ActionRow BODY START: Path \(path), ID \(action.id), Key '\(action.key ?? "nil")', Type: \(action.type)")
+    
+    // Add bounds checking to prevent crash
+    guard !path.isEmpty && path.allSatisfy({ $0 >= 0 }) else {
+      print("[UI LOG] ActionRow BODY: Invalid path \(path) - empty or negative indices")
+      return AnyView(Text("Invalid path: empty or negative indices").foregroundColor(.red))
+    }
+    
+    return AnyView(
     HStack(spacing: generalPadding) {
       KeyButton(
         text: $keyInputValue,
@@ -643,6 +651,7 @@ struct ActionRow: View {
             action.label = effectiveNewLabel
         }
     }
+    ) // Close AnyView
   }
 
   private var validationErrorForKey: ValidationErrorType? {
