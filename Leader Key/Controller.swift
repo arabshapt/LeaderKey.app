@@ -449,9 +449,6 @@ class Controller {
         DispatchQueue.main.async {
           self.runAction(step.action)
         }
-        
-        // Small delay between steps to ensure proper execution
-        Thread.sleep(forTimeInterval: 0.1)
       }
       
       print("[Controller] runMacro: Completed macro execution")

@@ -973,10 +973,17 @@ struct MacroStepRow: View {
       
       // Delay field
       VStack(alignment: .leading, spacing: 2) {
-        Text("Delay")
+        Text("Delay (s)")
           .font(.caption)
           .foregroundColor(.secondary)
-        TextField("0.0", value: $step.delay, format: .number)
+        TextField("0.0", text: Binding(
+          get: { String(step.delay) },
+          set: { newValue in
+            if let doubleValue = Double(newValue) {
+              step.delay = doubleValue
+            }
+          }
+        ))
           .frame(width: 60)
           .textFieldStyle(.roundedBorder)
       }
