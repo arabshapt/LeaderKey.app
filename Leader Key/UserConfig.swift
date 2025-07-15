@@ -36,8 +36,9 @@ class UserConfig: ObservableObject {
 
   func ensureAndLoad() {
     self.ensureValidConfigDirectory()
-    self.discoverConfigFiles() // Discover before ensuring/loading
     self.ensureConfigFileExists() // Ensures default config.json exists
+    self.ensureDefaultAppConfigExists() // Ensures default app.default.json exists
+    self.discoverConfigFiles() // Discover after ensuring both files exist
     self.loadConfig() // Loads the default config into 'root'
     // Initially, load the default config for editing
     if let defaultPath = discoveredConfigFiles[globalDefaultDisplayName] {

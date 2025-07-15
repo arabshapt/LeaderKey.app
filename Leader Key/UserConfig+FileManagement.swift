@@ -55,6 +55,17 @@ extension UserConfig {
         }
     }
 
+    internal func ensureDefaultAppConfigExists() {
+        let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
+        guard !fileManager.fileExists(atPath: defaultAppConfigPath) else { return }
+
+        do {
+            try bootstrapDefaultAppConfig()
+        } catch {
+            handleError(error, critical: false) // Non-critical since it's a fallback config
+        }
+    }
+
     private func bootstrapConfig() throws {
         guard let data = defaultConfig.data(using: .utf8) else {
             throw NSError(
@@ -64,6 +75,18 @@ extension UserConfig {
             )
         }
         try writeFile(data: data)
+    }
+
+    private func bootstrapDefaultAppConfig() throws {
+        guard let data = defaultConfig.data(using: .utf8) else {
+            throw NSError(
+                domain: "UserConfig",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode default app config"]
+            )
+        }
+        let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
+        try data.write(to: URL(fileURLWithPath: defaultAppConfigPath))
     }
 
     private func writeFile(data: Data) throws {
