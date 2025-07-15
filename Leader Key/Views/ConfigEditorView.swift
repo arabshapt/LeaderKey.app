@@ -756,9 +756,16 @@ struct GroupRow: View {
 
           }
         ) {
-          Image(systemName: "chevron.right")
-            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            .padding(.leading, generalPadding / 3)
+          HStack {
+            Image(systemName: "chevron.right")
+              .rotationEffect(.degrees(isExpanded ? 90 : 0))
+              .padding(.leading, generalPadding / 3)
+            Spacer()
+          }
+          .frame(width: 30, height: 16)
+          .background(Color.blue.opacity(0.2))
+          .cornerRadius(4)
+          .contentShape(Rectangle())
         }.buttonStyle(.plain)
 
         Spacer(minLength: 0)
