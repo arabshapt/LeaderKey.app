@@ -66,53 +66,47 @@ struct GroupContentView: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
-    // Log actions count and items being rendered
-    // let _ = print("[GroupContentView] Rendering group '\(group.displayName)' with \(group.actions.count) actions. Path: \(parentPath)")
     LazyVStack(spacing: generalPadding) {
-      ForEach($group.actions) { $itemInForEach in // Iterating over bindings to identifiable items
-        // Find the index of the current item to construct the path
-        // This is necessary if ActionOrGroupRow or its children rely on the index-based path.
-        // Ensure this logic correctly handles potential nil if item is not found (should not happen here).
-        if let index = group.actions.firstIndex(where: { $0.id == itemInForEach.id }) {
-            let currentPath = parentPath + [index]
-            ActionOrGroupRow(
-              item: $itemInForEach, // Pass the binding directly
-              path: currentPath,
-              onDelete: {
-                // Remove by ID, which is safer when the array might be reordered
-                group.actions.removeAll { $0.id == itemInForEach.id }
+      ForEach(Array(group.actions.enumerated()), id: \.element.id) { index, item in
+        if index >= 0 && index < group.actions.count {
+          let currentPath = parentPath + [index]
+          ActionOrGroupRow(
+            item: Binding(
+              get: { 
+                guard index < group.actions.count else { return item }
+                return group.actions[index]
               },
-              onDuplicate: {
-                // Use the new makeTrueDuplicate function
-                if let sourceIndex = group.actions.firstIndex(where: { $0.id == itemInForEach.id }) {
-                    let duplicatedItemWithNewID = makeTrueDuplicate(item: itemInForEach)
-                    // Insert after the current item, or at the same index if preferred.
-                    // Make sure the index is valid.
-                    let insertAtIndex = min(sourceIndex + 1, group.actions.count)
-                    group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
-                }
-              },
-              expandedGroups: $expandedGroups
-            )
-        } else {
-            // Fallback or error logging if an item's index can't be found.
-            // This case should ideally not be reached if itemInForEach is always from group.actions.
-            // Text("Error: Item not found in group.actions for ID \\(itemInForEach.id)")
-            //     .foregroundColor(.red)
+              set: { newValue in
+                guard index < group.actions.count else { return }
+                group.actions[index] = newValue
+              }
+            ),
+            path: currentPath,
+            onDelete: {
+              group.actions.removeAll { $0.id == item.id }
+            },
+            onDuplicate: {
+              let duplicatedItemWithNewID = makeTrueDuplicate(item: item)
+              if let sourceIndex = group.actions.firstIndex(where: { $0.id == item.id }),
+                 sourceIndex >= 0 && sourceIndex < group.actions.count {
+                let insertAtIndex = min(sourceIndex + 1, group.actions.count)
+                group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
+              }
+            },
+            expandedGroups: $expandedGroups
+          )
         }
       }
 
       AddButtons(
         onAddAction: {
           withAnimation {
-            print("[UI LOG] GroupContentView: Adding new ACTION (key: \"\", type: .shortcut, value: \"\") to group at path \(parentPath)")
             group.actions.append(
               .action(Action(key: "", type: .shortcut, value: "")))
           }
         },
         onAddGroup: {
           withAnimation {
-            print("[UI LOG] GroupContentView: Adding new GROUP (key: \"\", actions: []) to group at path \(parentPath)")
             group.actions.append(.group(Group(key: "", stickyMode: nil, actions: [])))
           }
         }
@@ -129,8 +123,6 @@ struct ConfigEditorView: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
-    // Log the received group when the view appears or updates
-    // let _ = Self._printChanges()
     ScrollView {
       GroupContentView(
         group: $group, isRoot: isRoot, parentPath: [], expandedGroups: $expandedGroups
@@ -152,16 +144,11 @@ struct ActionOrGroupRow: View {
   @Binding var expandedGroups: Set<[Int]>
 
   var body: some View {
-    // Log which type of row is being rendered
-    // let _ = print("[ActionOrGroupRow] Path: \(path), Rendering item with key '\(item.item.key ?? "nil")' as \(item.item.type == .group ? "GroupRow" : "ActionRow")")
     switch item {
-    case .action:
+    case .action(let action):
       ActionRow(
         action: Binding(
-          get: {
-            if case .action(let action) = item { return action }
-            fatalError("Unexpected state")
-          },
+          get: { action },
           set: { newAction in
             item = .action(newAction)
           }
@@ -170,13 +157,10 @@ struct ActionOrGroupRow: View {
         onDelete: onDelete,
         onDuplicate: onDuplicate
       )
-    case .group:
+    case .group(let group):
       GroupRow(
         group: Binding(
-          get: {
-            if case .group(let group) = item { return group }
-            fatalError("Unexpected state")
-          },
+          get: { group },
           set: { newGroup in
             item = .group(newGroup)
           }
@@ -197,20 +181,22 @@ struct IconPickerMenu: View {
   var body: some View {
     Menu {
       Button("App Icon") {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.applicationBundle, .application]
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        if panel.runModal() == .OK {
-          switch item {
-          case .action(var action):
-            action.iconPath = panel.url?.path
-            item = .action(action)
-          case .group(var group):
-            group.iconPath = panel.url?.path
-            item = .group(group)
+        DispatchQueue.main.async {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+          if panel.runModal() == .OK {
+            switch item {
+            case .action(var action):
+              action.iconPath = panel.url?.path
+              item = .action(action)
+            case .group(var group):
+              group.iconPath = panel.url?.path
+              item = .group(group)
+            }
           }
         }
       }
@@ -257,6 +243,38 @@ struct IconPickerMenu: View {
   }
 }
 
+struct ActionRowState {
+  var keyInputValue: String
+  var valueInputValue: String
+  var labelInputValue: String
+  var isListening: Bool
+  var wasPreviouslyListening: Bool
+  var selectedType: Type
+  var isShortcutEditorPresented: Bool
+  var isTextEditorPresented: Bool
+  var isUrlEditorPresented: Bool
+  var isCommandEditorPresented: Bool
+  var showingKeyReference: Bool
+  
+  var isAnyEditorPresented: Bool {
+    isShortcutEditorPresented || isTextEditorPresented || isUrlEditorPresented || isCommandEditorPresented
+  }
+  
+  init() {
+    self.keyInputValue = ""
+    self.valueInputValue = ""
+    self.labelInputValue = ""
+    self.isListening = false
+    self.wasPreviouslyListening = false
+    self.selectedType = .shortcut
+    self.isShortcutEditorPresented = false
+    self.isTextEditorPresented = false
+    self.isUrlEditorPresented = false
+    self.isCommandEditorPresented = false
+    self.showingKeyReference = false
+  }
+}
+
 struct ActionRow: View {
   @Binding var action: Action
   var path: [Int]
@@ -265,79 +283,46 @@ struct ActionRow: View {
   @FocusState private var isKeyFocused: Bool
   @EnvironmentObject var userConfig: UserConfig
   
-  @State private var keyInputValue: String = ""
-  @State private var valueInputValue: String = ""
-  @State private var labelInputValue: String = ""
-  @State private var isListening: Bool = false
-  @State private var wasPreviouslyListening: Bool = false
-  @State private var selectedType: Type = .shortcut // Local state for Picker
-  // UI state for inline editors
-  @State private var isShortcutEditorPresented = false
-  @State private var isTextEditorPresented = false
-  @State private var isUrlEditorPresented = false
-  @State private var isCommandEditorPresented = false
-  @State private var showingShortcutHelp = false
-  @State private var showingKeyReference = false
+  @State private var state = ActionRowState()
 
   var body: some View {
-    // Log action details + ID for tracking
-    let _ = print("[UI LOG] ActionRow BODY START: Path \(path), ID \(action.id), Key '\(action.key ?? "nil")', Type: \(action.type)")
-    
     // Add bounds checking to prevent crash
     guard !path.isEmpty && path.allSatisfy({ $0 >= 0 }) else {
-      print("[UI LOG] ActionRow BODY: Invalid path \(path) - empty or negative indices")
       return AnyView(Text("Invalid path: empty or negative indices").foregroundColor(.red))
     }
     
     return AnyView(
     HStack(spacing: generalPadding) {
       KeyButton(
-        text: $keyInputValue,
+        text: $state.keyInputValue,
         placeholder: "Key", 
         validationError: validationErrorForKey,
         path: path,
         onKeyChanged: { keyButtonPath, capturedKey in
-          print("[UI LOG] ActionRow KeyButton.onKeyChanged: Path \(keyButtonPath), Captured key: '\(capturedKey)'. Updating local keyInputValue.")
-          keyInputValue = capturedKey
-          print("[UI LOG] ActionRow KeyButton.onKeyChanged: Forcing call to userConfig.updateKey for path \(keyButtonPath) with key '\(capturedKey)'.")
+          state.keyInputValue = capturedKey
           userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
         }
       )
-      .onChange(of: isListening) { isNowListening in
-          // Split log for ActionRow.onChange(isListening)
-          print("[UI LOG] ActionRow.onChange(isListening): Path \(path), isNowListen: \(isNowListening), wasPrevListen: \(wasPreviouslyListening)")
-          print("[UI LOG] ActionRow.onChange(isListening): Path \(path), keyInVal: '\(keyInputValue)', modelKey: '\(action.key ?? "nil")'.")
-          if wasPreviouslyListening && !isNowListening {
+      .onChange(of: state.isListening) { isNowListening in
+          if state.wasPreviouslyListening && !isNowListening {
               let modelKey = action.key ?? ""
-              if keyInputValue != modelKey {
-                  print("[UI LOG] ActionRow.onChange(isListening): Key value changed for path \(path) from '\(modelKey)' to '\(keyInputValue)'. Calling userConfig.updateKey.")
-                  userConfig.updateKey(at: path, newKey: keyInputValue)
-              } else {
-                  print("[UI LOG] ActionRow.onChange(isListening): Key value NOT changed for path \(path). Current: '\(keyInputValue)'. No call to userConfig.updateKey.")
+              if state.keyInputValue != modelKey {
+                  userConfig.updateKey(at: path, newKey: state.keyInputValue)
               }
           }
-          wasPreviouslyListening = isNowListening
+          state.wasPreviouslyListening = isNowListening
       }
       // Add onChange for the local selectedType state
-      .onChange(of: selectedType) { newTypeValue in
-        // Call the UserConfig method to handle the update
-        // This avoids direct mutation of the binding within this view's update cycle
-        let oldModelType = action.type // Store the type from the model BEFORE the update
-        print("[UI LOG] ActionRow.onChange(selectedType): Path \(path) detected change TO \(newTypeValue). Old model type: \(oldModelType). Calling userConfig.updateActionType.")
+      .onChange(of: state.selectedType) { newTypeValue in
+        let oldModelType = action.type
         userConfig.updateActionType(at: path, newType: newTypeValue)
 
-        // Check if the model's type ACTUALLY changed as a result of the call
         if action.type != oldModelType {
-            print("[UI LOG] ActionRow.onChange(selectedType): Path \(path). Model type CHANGED from \(oldModelType) to \(action.type). Resetting valueInputValue locally.")
-            valueInputValue = "" // Only reset if the type in the model was actually changed
-        } else {
-            print("[UI LOG] ActionRow.onChange(selectedType): Path \(path). Model type (\(action.type)) did NOT change from old (\(oldModelType)). Not resetting valueInputValue.")
+            state.valueInputValue = ""
         }
       }
 
-      // Log before Picker
-      let _ = print("[UI LOG] ActionRow BODY: Drawing Picker for Path \(path), ID \(action.id), Type: \(selectedType)") // Log selectedType
-      Picker("Type", selection: $selectedType) { // Bind Picker to local state
+      Picker("Type", selection: $state.selectedType) {
         Text("Shortcut").tag(Type.shortcut)
         Text("Application").tag(Type.application)
         Text("URL").tag(Type.url)
@@ -360,57 +345,53 @@ struct ActionRow: View {
           }
         ))
 
-      // Log before Switch
-      let _ = print("[UI LOG] ActionRow BODY: Entering Switch for Path \(path), ID \(action.id), Type: \(action.type)") // Log action.type
-      switch action.type { // Switch on the actual model type
+      switch action.type {
       case .application:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .application for Path \(path), ID \(action.id)")
         Button("Choose…") {
-          let panel = NSOpenPanel()
-          panel.allowedContentTypes = [.applicationBundle, .application]
-          panel.canChooseFiles = true
-          panel.canChooseDirectories = true
-          panel.allowsMultipleSelection = false
-          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+          DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.applicationBundle, .application]
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = URL(fileURLWithPath: "/Applications")
 
-          if panel.runModal() == .OK {
-            action.value = panel.url?.path ?? ""
+            if panel.runModal() == .OK {
+              action.value = panel.url?.path ?? ""
+            }
           }
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .folder:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .folder for Path \(path), ID \(action.id)")
         Button("Choose…") {
-          let panel = NSOpenPanel()
-          panel.allowsMultipleSelection = false
-          panel.canChooseDirectories = true
-          panel.canChooseFiles = false
-          panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+          DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
 
-          if panel.runModal() == .OK {
-            action.value = panel.url?.path ?? ""
+            if panel.runModal() == .OK {
+              action.value = panel.url?.path ?? ""
+            }
           }
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .shortcut:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .shortcut for Path \(path), ID \(action.id)")
         Button {
-          isShortcutEditorPresented = true
+          state.isShortcutEditorPresented = true
         } label: {
           HStack(spacing: 4) {
             Image(systemName: "keyboard")
-            Text(valueInputValue.isEmpty ? "Set shortcut…" : (valueInputValue.count > 25 ? "\(valueInputValue.prefix(25))…" : valueInputValue))
+            Text(state.valueInputValue.isEmpty ? "Set shortcut…" : (state.valueInputValue.count > 25 ? "\(state.valueInputValue.prefix(25))…" : state.valueInputValue))
           }
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $isShortcutEditorPresented) {
+        .sheet(isPresented: $state.isShortcutEditorPresented) {
           VStack(alignment: .leading, spacing: 12) {
             Text("Edit Shortcut")
               .font(.title2)
-            TextEditor(text: $valueInputValue)
+            TextEditor(text: $state.valueInputValue)
               .font(.system(.body, design: .monospaced))
               .frame(minHeight: 120)
               .border(Color.gray.opacity(0.2))
@@ -418,7 +399,7 @@ struct ActionRow: View {
               .font(.footnote)
               .foregroundColor(.secondary)
             
-            DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
+            DisclosureGroup("Key Reference", isExpanded: $state.showingKeyReference) {
               ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                   ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
@@ -450,12 +431,12 @@ struct ActionRow: View {
               Spacer()
               Button("Cancel") {
                 // Revert local changes
-                valueInputValue = action.value
-                isShortcutEditorPresented = false
+                state.valueInputValue = action.value
+                state.isShortcutEditorPresented = false
               }
               Button("Save") {
-                action.value = valueInputValue
-                isShortcutEditorPresented = false
+                action.value = state.valueInputValue
+                state.isShortcutEditorPresented = false
               }
               .keyboardShortcut(.defaultAction)
             }
@@ -464,22 +445,20 @@ struct ActionRow: View {
           .frame(width: 380)
         }
       case .url:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .url for Path \(path), ID \(action.id)")
         Button {
-          isUrlEditorPresented = true
+          state.isUrlEditorPresented = true
         } label: {
           HStack(spacing: 4) {
             Image(systemName: "link")
-            Text(valueInputValue.isEmpty ? "Edit URL…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+            Text(state.valueInputValue.isEmpty ? "Edit URL…" : (state.valueInputValue.count > 30 ? "\(state.valueInputValue.prefix(30))…" : state.valueInputValue))
           }
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $isUrlEditorPresented) {
+        .sheet(isPresented: $state.isUrlEditorPresented) {
           VStack(alignment: .leading, spacing: 12) {
             Text("Edit URL")
               .font(.title2)
-            TextEditor(text: $valueInputValue)
+            TextEditor(text: $state.valueInputValue)
               .font(.system(.body, design: .monospaced))
               .frame(minHeight: 120)
               .border(Color.gray.opacity(0.2))
@@ -491,12 +470,12 @@ struct ActionRow: View {
             HStack {
               Spacer()
               Button("Cancel") {
-                valueInputValue = action.value
-                isUrlEditorPresented = false
+                state.valueInputValue = action.value
+                state.isUrlEditorPresented = false
               }
               Button("Save") {
-                action.value = valueInputValue
-                isUrlEditorPresented = false
+                action.value = state.valueInputValue
+                state.isUrlEditorPresented = false
               }
               .keyboardShortcut(.defaultAction)
             }
@@ -505,34 +484,32 @@ struct ActionRow: View {
           .frame(width: 420)
         }
       case .text:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .text for Path \(path), ID \(action.id)")
         Button {
-          isTextEditorPresented = true
+          state.isTextEditorPresented = true
         } label: {
           HStack(spacing: 4) {
             Image(systemName: "square.and.pencil")
-            Text(valueInputValue.isEmpty ? "Edit text…" : (valueInputValue.count > 20 ? "\(valueInputValue.prefix(20))…" : valueInputValue))
+            Text(state.valueInputValue.isEmpty ? "Edit text…" : (state.valueInputValue.count > 20 ? "\(state.valueInputValue.prefix(20))…" : state.valueInputValue))
           }
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $isTextEditorPresented) {
+        .sheet(isPresented: $state.isTextEditorPresented) {
           VStack(alignment: .leading, spacing: 12) {
             Text("Edit Text to Type")
               .font(.title2)
-            TextEditor(text: $valueInputValue)
+            TextEditor(text: $state.valueInputValue)
               .font(.system(.body, design: .monospaced))
               .frame(minHeight: 180)
               .border(Color.gray.opacity(0.2))
             HStack {
               Spacer()
               Button("Cancel") {
-                valueInputValue = action.value
-                isTextEditorPresented = false
+                state.valueInputValue = action.value
+                state.isTextEditorPresented = false
               }
               Button("Save") {
-                action.value = valueInputValue
-                isTextEditorPresented = false
+                action.value = state.valueInputValue
+                state.isTextEditorPresented = false
               }
               .keyboardShortcut(.defaultAction)
             }
@@ -541,44 +518,38 @@ struct ActionRow: View {
           .frame(width: 480, height: 300)
         }
       case .toggleStickyMode:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .toggleStickyMode for Path \(path), ID \(action.id)")
         Text("No value required")
           .foregroundColor(.secondary)
           .font(.caption)
       case .macro:
-        // Log inside case
-        let _ = print("[UI LOG] ActionRow Switch Case: .macro for Path \(path), ID \(action.id)")
         MacroEditorView(action: $action, path: path)
       default:
-        // Log inside case (includes .command initially? Check your Type enum)
-        let _ = print("[UI LOG] ActionRow Switch Case: .default/\(String(describing: action.type)) for Path \(path), ID \(action.id)") // Log action.type
         Button {
-          isCommandEditorPresented = true
+          state.isCommandEditorPresented = true
         } label: {
           HStack(spacing: 4) {
             Image(systemName: "terminal")
-            Text(valueInputValue.isEmpty ? "Edit command…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+            Text(state.valueInputValue.isEmpty ? "Edit command…" : (state.valueInputValue.count > 30 ? "\(state.valueInputValue.prefix(30))…" : state.valueInputValue))
           }
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $isCommandEditorPresented) {
+        .sheet(isPresented: $state.isCommandEditorPresented) {
           VStack(alignment: .leading, spacing: 12) {
             Text("Edit Command")
               .font(.title2)
-            TextEditor(text: $valueInputValue)
+            TextEditor(text: $state.valueInputValue)
               .font(.system(.body, design: .monospaced))
               .frame(minHeight: 120)
               .border(Color.gray.opacity(0.2))
             HStack {
               Spacer()
               Button("Cancel") {
-                valueInputValue = action.value
-                isCommandEditorPresented = false
+                state.valueInputValue = action.value
+                state.isCommandEditorPresented = false
               }
               Button("Save") {
-                action.value = valueInputValue
-                isCommandEditorPresented = false
+                action.value = state.valueInputValue
+                state.isCommandEditorPresented = false
               }
               .keyboardShortcut(.defaultAction)
             }
@@ -601,8 +572,8 @@ struct ActionRow: View {
 
       Spacer()
 
-      TextField(action.bestGuessDisplayName, text: $labelInputValue, onCommit: {
-        action.label = labelInputValue.isEmpty ? nil : labelInputValue
+      TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
+        action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
       })
       .frame(width: 120)
       .padding(.trailing, generalPadding)
@@ -619,35 +590,25 @@ struct ActionRow: View {
       .padding(.trailing, generalPadding)
     }
     .onAppear {
-      print("[UI LOG] ActionRow.onAppear: Path \(path), Initial action key: '\(action.key ?? "nil")', value: '\(action.value)', label: '\(action.label ?? "nil")'. Setting local state.")
-      keyInputValue = action.key ?? ""
-      valueInputValue = action.value
-      // If the label from the model is nil when the view appears,
-      // set the local state to the best guess display name.
-      // The onChange(of: labelInputValue) below will update the model.
+      state.keyInputValue = action.key ?? ""
+      state.valueInputValue = action.value
       if action.label == nil {
         let guessedLabel = action.bestGuessDisplayName
-        labelInputValue = guessedLabel
-        print("[UI LOG] ActionRow.onAppear: Path \(path), Label was nil. Set labelInputValue to guessed name '\(guessedLabel)'.")
+        state.labelInputValue = guessedLabel
       } else {
-        labelInputValue = action.label ?? ""
+        state.labelInputValue = action.label ?? ""
       }
-      // Set initial local state for the Picker type
-      selectedType = action.type 
+      state.selectedType = action.type 
     }
-    // Re-add onChange listeners to sync local state back to the model
-    .onChange(of: valueInputValue) { newValue in
-        // Avoid syncing while the dedicated editor sheet is open; commit occurs on Save.
-        let editorOpen = isShortcutEditorPresented || isUrlEditorPresented || isCommandEditorPresented || isTextEditorPresented
-        if !editorOpen && action.value != newValue {
-            print("[UI LOG] ActionRow.onChange(valueInputValue): Path \(path) syncing value '\(newValue)' to action.value (inline update).")
+    // Consolidated onChange handler for better performance
+    .onChange(of: state.valueInputValue) { newValue in
+        if !state.isAnyEditorPresented && action.value != newValue {
             action.value = newValue
         }
     }
-    .onChange(of: labelInputValue) { newValue in
+    .onChange(of: state.labelInputValue) { newValue in
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue
         if action.label != effectiveNewLabel {
-            print("[UI LOG] ActionRow.onChange(labelInputValue): Path \(path) syncing label '\(effectiveNewLabel ?? "nil")' to action.label.")
             action.label = effectiveNewLabel
         }
     }
@@ -697,8 +658,6 @@ struct GroupRow: View {
   }
 
   var body: some View {
-    // Log group details
-    // let _ = print("[GroupRow] Rendering group. Path: \(path), Key: '\(group.key ?? "nil")', Actions count: \(group.actions.count)")
     VStack(spacing: generalPadding) {
       HStack(spacing: generalPadding) {
         // --- Add simple debug text --- START
@@ -715,23 +674,15 @@ struct GroupRow: View {
           validationError: validationErrorForKey,
           path: path,
           onKeyChanged: { keyButtonPath, capturedKey in
-            print("[UI LOG] GroupRow KeyButton.onKeyChanged: Path \(keyButtonPath), Captured key: '\(capturedKey)'. Updating local keyInputValue.")
             keyInputValue = capturedKey
-            print("[UI LOG] GroupRow KeyButton.onKeyChanged: Forcing call to userConfig.updateKey for path \(keyButtonPath) with key '\(capturedKey)'.")
             userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
           }
         )
         .onChange(of: isListening) { isNowListening in
-          // Split log for GroupRow.onChange(isListening)
-          print("[UI LOG] GroupRow.onChange(isListening): Path \(path), isNowListen: \(isNowListening), wasPrevListen: \(wasPreviouslyListening)")
-          print("[UI LOG] GroupRow.onChange(isListening): Path \(path), keyInVal: '\(keyInputValue)', modelKey: '\(group.key ?? "nil")'.")
             if wasPreviouslyListening && !isNowListening {
                 let modelKey = group.key ?? ""
                 if keyInputValue != modelKey {
-                    print("[UI LOG] GroupRow.onChange(isListening): Key value changed for path \(path) from '\(modelKey)' to '\(keyInputValue)'. Calling userConfig.updateKey.")
                     userConfig.updateKey(at: path, newKey: keyInputValue)
-                } else {
-                    print("[UI LOG] GroupRow.onChange(isListening): Key value NOT changed for path \(path). Current: '\(keyInputValue)'. No call to userConfig.updateKey.")
                 }
             }
             wasPreviouslyListening = isNowListening
@@ -808,15 +759,13 @@ struct GroupRow: View {
       }
     }
     .onAppear {
-      print("[UI LOG] GroupRow.onAppear: Path \(path), Initial group key: '\(group.key ?? "nil")', label: '\(group.label ?? "nil")'. Setting local state.")
       keyInputValue = group.key ?? ""
       labelInputValue = group.label ?? ""
     }
     .onChange(of: group.key) { newValue in
         let newKeyValue = newValue ?? ""
-        if keyInputValue != newKeyValue { // Prevent potential loops
+        if keyInputValue != newKeyValue {
             keyInputValue = newKeyValue
-            print("[UI LOG] GroupRow.onChange(group.key): Path \(path). Model key changed to '\(newKeyValue)'. Updated keyInputValue.") // Added log
         }
     }
     .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
@@ -969,7 +918,8 @@ struct MacroEditorSheet: View {
       List {
         ForEach($macroSteps) { $step in
           MacroStepRow(step: $step, onDelete: {
-            if let index = macroSteps.firstIndex(where: { $0.id == step.id }) {
+            if let index = macroSteps.firstIndex(where: { $0.id == step.id }),
+               index >= 0 && index < macroSteps.count {
               macroSteps.remove(at: index)
             }
           })

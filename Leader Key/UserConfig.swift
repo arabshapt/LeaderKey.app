@@ -88,104 +88,56 @@ class UserConfig: ObservableObject {
 extension UserConfig {
     // Public method to initiate key update
     func updateKey(at path: [Int], newKey: String) {
-        print("[UserConfig LOG] updateKey: Path \(path), newKey: '\(newKey)'")
-        // To print the whole group, consider a more structured logging or a concise summary
-        // print("[UserConfig LOG] updateKey: BEFORE currentlyEditingGroup: \(self.currentlyEditingGroup)")
-
         let updateLogic = {
-            print("[UserConfig LOG] updateKey.updateLogic: Executing. Path \(path), newKey: '\(newKey)'")
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
                 let effectiveKey = newKey.isEmpty ? nil : newKey
-                print("[UserConfig LOG] updateKey.closure: effectiveKey: '\(effectiveKey ?? "nil")' for path \(path)")
                 
                 switch item {
                 case .action(var action):
                     let oldKey = action.key
-                    print("[UserConfig LOG] updateKey.closure: ACTION at path \(path). Old key: '\(oldKey ?? "nil")'")
                     if oldKey != effectiveKey {
                         action.key = effectiveKey
                         item = .action(action)
-                        print("[UserConfig LOG] updateKey.closure: Updated ACTION key at \(path) to '\(effectiveKey ?? "nil")'")
-                    } else {
-                        print("[UserConfig LOG] updateKey.closure: ACTION key at \(path) not changed (was '\(effectiveKey ?? "nil")')")
                     }
                 case .group(var subGroup):
                     let oldKey = subGroup.key
-                    print("[UserConfig LOG] updateKey.closure: GROUP at path \(path). Old key: '\(oldKey ?? "nil")'")
                     if oldKey != effectiveKey {
                         subGroup.key = effectiveKey
                         item = .group(subGroup)
-                        print("[UserConfig LOG] updateKey.closure: Updated GROUP key at \(path) to '\(effectiveKey ?? "nil")'")
-                    } else {
-                        print("[UserConfig LOG] updateKey.closure: GROUP key at \(path) not changed (was '\(effectiveKey ?? "nil")')")
                     }
                 @unknown default:
-                   print("[UserConfig LOG] updateKey.closure: Unhandled case for path \(path)")
+                   break
                 }
             }
             self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update
-            // print("[UserConfig LOG] updateKey.updateLogic: AFTER currentlyEditingGroup: \(self.currentlyEditingGroup)")
-            print("[UserConfig LOG] updateKey.updateLogic: Finished for path \(path)")
         }
 
-        if Thread.isMainThread {
-            print("[UserConfig LOG] updateKey: Main thread. Executing directly for path \(path).")
-            updateLogic()
-        } else {
-            print("[UserConfig LOG] updateKey: Background thread. Dispatching to main for path \(path).")
-            DispatchQueue.main.async {
-                print("[UserConfig LOG] updateKey: Dispatch main async block for path \(path).")
-                updateLogic()
-            }
-        }
-        print("[UserConfig LOG] updateKey: Finished method for path \(path)")
+        updateLogic()
     }
 
     private func modifyItem(in group: inout Group, at path: [Int], update: (inout ActionOrGroup) -> Void) {
-        let groupName = group.label ?? group.key ?? "RootG"
-        print("[UserConfig LOG] modifyItem: Group '\(groupName)' (key: '\(group.key ?? "nil")'), path: \(path)")
         guard !path.isEmpty else {
-            print("[UserConfig LOG] modifyItem: Path empty for group '\(groupName)'. Cannot modify.")
             return
         }
 
         var currentPath = path
         let index = currentPath.removeFirst()
-        print("[UserConfig LOG] modifyItem: Group '\(groupName)', index \(index). Remaining path: \(currentPath)")
 
         guard index >= 0 && index < group.actions.count else {
-            print("[UserConfig LOG] modifyItem: Index \(index) OOB (count \(group.actions.count)) for '\(groupName)', path \(path).")
             return
         }
 
-        let itemKeyBefore = group.actions[index].item.key
-        let itemTypeBefore = String(describing: group.actions[index].item.type)
-        print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). BEFORE update. Key: '\(itemKeyBefore ?? "nil")', Type: \(itemTypeBefore)")
-
         if currentPath.isEmpty {
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Target reached. Applying update.")
             var itemToUpdate = group.actions[index]
             update(&itemToUpdate)
             group.actions[index] = itemToUpdate
-            let itemKeyAfter = group.actions[index].item.key
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). AFTER update. New Key: '\(itemKeyAfter ?? "nil")'")
         } else {
-            let currentItemType = String(describing: group.actions[index].item.type)
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Go deeper. Item type: \(currentItemType)")
             guard case .group(var subgroup) = group.actions[index] else {
-                print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Error: Not a group (type \(currentItemType)) at path \(path).")
                 return
             }
-            let subGroupName = subgroup.label ?? subgroup.key ?? "SubG"
-            let originalSubgroupKey = subgroup.key
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Recurse into '\(subGroupName)' (key '\(originalSubgroupKey ?? "nil")') with path \(currentPath).")
             modifyItem(in: &subgroup, at: currentPath, update: update)
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Recurse return from '\(subGroupName)' (orig key '\(originalSubgroupKey ?? "nil")').")
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Cont. New subkey: '\(subgroup.key ?? "nil")'. Updating parent.")
             group.actions[index] = .group(subgroup)
-            print("[UserConfig LOG] modifyItem: Group '\(groupName)', Idx \(index). Parent updated with modified subgroup.")
         }
-        print("[UserConfig LOG] modifyItem: Finished for group '\(groupName)', index \(index).")
     }
     
     // Remove the now unused finishEditingKey method if it exists
@@ -196,42 +148,22 @@ extension UserConfig {
 extension UserConfig {
     // Public method to update an action's type and reset its value
     func updateActionType(at path: [Int], newType: Type) {
-        print("[UserConfig LOG] updateActionType: Path \(path), newType: \(newType)")
-        // Ensure we're modifying the correct structure
-        // print("[UserConfig LOG] updateActionType: BEFORE currentlyEditingGroup: \(self.currentlyEditingGroup)") 
-
         let updateLogic = { 
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
-                print("[UserConfig LOG] updateActionType.closure: Modifying item at path \(path)")
                 guard case .action(var action) = item else {
-                    print("[UserConfig LOG] updateActionType.closure: ERROR - Item at path \(path) is not an Action.")
                     return
                 }
                 
                 if action.type != newType {
-                    let oldType = action.type
-                    let oldValue = action.value
                     action.type = newType
                     action.value = "" // Reset value when type changes
                     item = .action(action)
-                    print("[UserConfig LOG] updateActionType.closure: Updated ACTION at \(path). Type: \(oldType) -> \(newType). Value: '\(oldValue)' -> ''")
-                } else {
-                    print("[UserConfig LOG] updateActionType.closure: ACTION at \(path) already has type \(newType). No change.")
                 }
             }
             self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update if needed
-            print("[UserConfig LOG] updateActionType: Finished update logic for path \(path).")
         }
 
-        // Ensure execution on the main thread
-        if Thread.isMainThread {
-            updateLogic()
-        } else {
-            DispatchQueue.main.async {
-                updateLogic()
-            }
-        }
-        print("[UserConfig LOG] updateActionType: Finished method for path \(path).")
+        updateLogic()
     }
 }
 
