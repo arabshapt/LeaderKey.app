@@ -330,6 +330,7 @@ private struct AddConfigSheet: View {
     @State private var showManualEntry = false
     @State private var manualBundleId = ""
     @State private var customDisplayName = ""
+    @State private var selectedTemplate = "Empty"
 
     private var effectiveBundleId: String {
         if showManualEntry {
@@ -337,6 +338,18 @@ private struct AddConfigSheet: View {
         } else {
             return selectedApp?.bundleIdentifier ?? ""
         }
+    }
+
+    private var templateOptions: [String] {
+        var options = ["Empty"]
+        options.append(contentsOf: config.discoveredConfigFiles.keys.sorted { key1, key2 in
+            if key1 == globalDefaultDisplayName { return true }
+            if key2 == globalDefaultDisplayName { return false }
+            if key1 == defaultAppConfigDisplayName { return true }
+            if key2 == defaultAppConfigDisplayName { return false }
+            return key1 < key2
+        })
+        return options
     }
 
     var body: some View {
@@ -383,6 +396,24 @@ private struct AddConfigSheet: View {
 
             Divider()
 
+            // Template selection
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Start with:")
+                    .font(.headline)
+                
+                Picker("Template", selection: $selectedTemplate) {
+                    ForEach(templateOptions, id: \.self) { template in
+                        Text(template).tag(template)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text("Choose a configuration to use as a starting point, or select 'Empty' to start from scratch.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             TextField("Optional sidebar name", text: $customDisplayName)
                 .textFieldStyle(.roundedBorder)
 
@@ -400,9 +431,10 @@ private struct AddConfigSheet: View {
     }
 
     private func createConfig() {
+        let templateKey = selectedTemplate == "Empty" ? "EMPTY_TEMPLATE" : selectedTemplate
         let _ = config.createConfigForApp(
             bundleId: effectiveBundleId,
-            templateKey: nil,
+            templateKey: templateKey,
             customName: customDisplayName.isEmpty ? nil : customDisplayName
         )
         // Dismiss regardless; success/failure alerts handled in helper

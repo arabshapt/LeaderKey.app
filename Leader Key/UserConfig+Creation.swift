@@ -33,9 +33,14 @@ extension UserConfig {
 
         // Determine the source Group to duplicate
         var sourceGroup: Group = self.root // Default template
-        if let key = templateKey, let srcPath = discoveredConfigFiles[key] {
-            if let dupGroup = decodeConfig(from: srcPath, suppressAlerts: true, isDefaultConfig: false) {
-                sourceGroup = dupGroup
+        if let key = templateKey {
+            if key == "EMPTY_TEMPLATE" {
+                // Create an empty group with no actions
+                sourceGroup = Group(actions: [])
+            } else if let srcPath = discoveredConfigFiles[key] {
+                if let dupGroup = decodeConfig(from: srcPath, suppressAlerts: true, isDefaultConfig: false) {
+                    sourceGroup = dupGroup
+                }
             }
         }
 
