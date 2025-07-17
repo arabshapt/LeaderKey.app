@@ -2,6 +2,65 @@ import Cocoa
 import Combine
 import Defaults
 import Foundation
+import AppKit
+
+// MARK: - ClipboardManager
+class ClipboardManager: ObservableObject {
+    static let shared = ClipboardManager()
+    
+    @Published var copiedItem: ActionOrGroup?
+    @Published var clipboardType: ClipboardType = .none
+    @Published var sourceConfig: String? // Track which config the item was copied from
+    
+    enum ClipboardType {
+        case none
+        case action
+        case group
+    }
+    
+    private init() {}
+    
+    func copyItem(_ item: ActionOrGroup, fromConfig: String? = nil) {
+        let duplicatedItem = item.makeTrueDuplicate()
+        
+        do {
+            let jsonData = try JSONEncoder().encode(duplicatedItem)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setData(jsonData, forType: .string)
+            
+            copiedItem = duplicatedItem
+            clipboardType = getCopyType(for: duplicatedItem)
+            sourceConfig = fromConfig
+        } catch {
+            print("Failed to copy item to clipboard: \(error)")
+        }
+    }
+    
+    func pasteItem() -> ActionOrGroup? {
+        guard let copiedItem = copiedItem else { return nil }
+        return copiedItem.makeTrueDuplicate()
+    }
+    
+    func canPaste() -> Bool {
+        return copiedItem != nil
+    }
+    
+    func clear() {
+        copiedItem = nil
+        clipboardType = .none
+        sourceConfig = nil
+    }
+    
+    private func getCopyType(for item: ActionOrGroup) -> ClipboardType {
+        switch item {
+        case .action:
+            return .action
+        case .group:
+            return .group
+        }
+    }
+}
 
 let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
 let globalDefaultDisplayName = "Global"
@@ -164,6 +223,106 @@ extension UserConfig {
         }
 
         updateLogic()
+    }
+}
+
+// MARK: - Copy/Paste Logic (New Extension)
+extension UserConfig {
+    func pasteItem(at path: [Int]) {
+        guard let pastedItem = ClipboardManager.shared.pasteItem() else { return }
+        
+        let validatedItem = validateAndCleanItem(pastedItem, at: path)
+        insertItem(validatedItem, at: path)
+    }
+    
+    func insertItem(_ item: ActionOrGroup, at path: [Int]) {
+        let insertLogic = {
+            self.insertItemInGroup(item, in: &self.currentlyEditingGroup, at: path)
+            self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update
+        }
+        
+        insertLogic()
+    }
+    
+    private func validateAndCleanItem(_ item: ActionOrGroup, at path: [Int]) -> ActionOrGroup {
+        var cleanedItem = item
+        
+        // Check for duplicate keys at the same level
+        let parentGroup = getParentGroup(at: path)
+        let existingKeys = parentGroup.actions.compactMap { $0.item.key }
+        
+        switch cleanedItem {
+        case .action(var action):
+            if let key = action.key, existingKeys.contains(key) {
+                action.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+            }
+            cleanedItem = .action(action)
+        case .group(var group):
+            if let key = group.key, existingKeys.contains(key) {
+                group.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+            }
+            cleanedItem = .group(group)
+        }
+        
+        return cleanedItem
+    }
+    
+    private func getParentGroup(at path: [Int]) -> Group {
+        var currentGroup = currentlyEditingGroup
+        var pathCopy = path
+        
+        // Navigate to parent group
+        if !pathCopy.isEmpty {
+            pathCopy.removeLast() // Remove the insertion index
+            
+            for index in pathCopy {
+                guard index >= 0 && index < currentGroup.actions.count,
+                      case .group(let subgroup) = currentGroup.actions[index] else {
+                    break
+                }
+                currentGroup = subgroup
+            }
+        }
+        
+        return currentGroup
+    }
+    
+    private func generateUniqueKey(base: String, existingKeys: [String]) -> String {
+        let baseKey = base.isEmpty ? "key" : base
+        var counter = 1
+        var newKey = baseKey
+        
+        while existingKeys.contains(newKey) {
+            newKey = "\(baseKey)_\(counter)"
+            counter += 1
+        }
+        
+        return newKey
+    }
+    
+    private func insertItemInGroup(_ item: ActionOrGroup, in group: inout Group, at path: [Int]) {
+        guard !path.isEmpty else {
+            group.actions.append(item)
+            return
+        }
+        
+        var currentPath = path
+        let index = currentPath.removeFirst()
+        
+        guard index >= 0 && index <= group.actions.count else {
+            return
+        }
+        
+        if currentPath.isEmpty {
+            group.actions.insert(item, at: index)
+        } else {
+            guard index < group.actions.count,
+                  case .group(var subgroup) = group.actions[index] else {
+                return
+            }
+            insertItemInGroup(item, in: &subgroup, at: currentPath)
+            group.actions[index] = .group(subgroup)
+        }
     }
 }
 
@@ -522,4 +681,37 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       try container.encodeIfPresent(group.stickyMode, forKey: .stickyMode)
     }
   }
+}
+
+// MARK: - ActionOrGroup Extensions
+extension ActionOrGroup {
+    func makeTrueDuplicate() -> ActionOrGroup {
+        switch self {
+        case .action(let action):
+            return .action(Action(
+                key: action.key,
+                type: action.type,
+                label: action.label,
+                value: action.value,
+                iconPath: action.iconPath,
+                activates: action.activates,
+                stickyMode: action.stickyMode,
+                macroSteps: action.macroSteps?.map { step in
+                    MacroStep(
+                        action: step.action,
+                        delay: step.delay,
+                        enabled: step.enabled
+                    )
+                }
+            ))
+        case .group(let group):
+            return .group(Group(
+                key: group.key,
+                label: group.label,
+                iconPath: group.iconPath,
+                stickyMode: group.stickyMode,
+                actions: group.actions.map { $0.makeTrueDuplicate() }
+            ))
+        }
+    }
 }

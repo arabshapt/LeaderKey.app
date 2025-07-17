@@ -36,6 +36,8 @@ let generalPadding: CGFloat = 8
 struct AddButtons: View {
   let onAddAction: () -> Void
   let onAddGroup: () -> Void
+  let onPaste: () -> Void
+  @ObservedObject var clipboardManager = ClipboardManager.shared
 
   var body: some View {
     HStack(spacing: generalPadding) {
@@ -53,6 +55,14 @@ struct AddButtons: View {
         Image(systemName: "folder")
         Text("Add group")
       }
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Paste' button TAPPED.")
+        onPaste()
+      }) {
+        Image(systemName: "doc.on.clipboard.fill")
+        Text("Paste")
+      }
+      .disabled(!clipboardManager.canPaste())
       Spacer()
     }
   }
@@ -109,6 +119,11 @@ struct GroupContentView: View {
           withAnimation {
             group.actions.append(.group(Group(key: "", stickyMode: nil, actions: [])))
           }
+        },
+        onPaste: {
+          withAnimation {
+            userConfig.pasteItem(at: parentPath + [group.actions.count])
+          }
         }
       )
       .padding(.top, generalPadding * 0.5)
@@ -142,34 +157,57 @@ struct ActionOrGroupRow: View {
   let onDuplicate: () -> Void
   @EnvironmentObject var userConfig: UserConfig
   @Binding var expandedGroups: Set<[Int]>
+  @ObservedObject var clipboardManager = ClipboardManager.shared
 
   var body: some View {
-    switch item {
-    case .action(let action):
-      ActionRow(
-        action: Binding(
-          get: { action },
-          set: { newAction in
-            item = .action(newAction)
-          }
-        ),
-        path: path,
-        onDelete: onDelete,
-        onDuplicate: onDuplicate
-      )
-    case .group(let group):
-      GroupRow(
-        group: Binding(
-          get: { group },
-          set: { newGroup in
-            item = .group(newGroup)
-          }
-        ),
-        path: path,
-        expandedGroups: $expandedGroups,
-        onDelete: onDelete,
-        onDuplicate: onDuplicate
-      )
+    SwiftUI.Group {
+      switch item {
+      case .action(let action):
+        ActionRow(
+          action: Binding(
+            get: { action },
+            set: { newAction in
+              item = .action(newAction)
+            }
+          ),
+          path: path,
+          onDelete: onDelete,
+          onDuplicate: onDuplicate
+        )
+      case .group(let group):
+        GroupRow(
+          group: Binding(
+            get: { group },
+            set: { newGroup in
+              item = .group(newGroup)
+            }
+          ),
+          path: path,
+          expandedGroups: $expandedGroups,
+          onDelete: onDelete,
+          onDuplicate: onDuplicate
+        )
+      }
+    }
+    .contextMenu {
+      Button("Copy") {
+        ClipboardManager.shared.copyItem(item, fromConfig: userConfig.selectedConfigKeyForEditing)
+      }
+      
+      Button("Paste") {
+        userConfig.pasteItem(at: path)
+      }
+      .disabled(!clipboardManager.canPaste())
+      
+      Divider()
+      
+      Button("Duplicate") {
+        onDuplicate()
+      }
+      
+      Button("Delete") {
+        onDelete()
+      }
     }
   }
 }
@@ -578,6 +616,13 @@ struct ActionRow: View {
       .frame(width: 120)
       .padding(.trailing, generalPadding)
 
+      Button(role: .none, action: {
+        ClipboardManager.shared.copyItem(.action(action), fromConfig: userConfig.selectedConfigKeyForEditing)
+      }) {
+        Image(systemName: "doc.on.clipboard")
+      }
+      .buttonStyle(.plain)
+
       Button(role: .none, action: onDuplicate) {
         Image(systemName: "document.on.document")
       }
@@ -732,6 +777,13 @@ struct GroupRow: View {
 
         TextField("Label", text: $labelInputValue).frame(width: 120)
           .padding(.trailing, generalPadding)
+
+        Button(role: .none, action: {
+          ClipboardManager.shared.copyItem(.group(group), fromConfig: userConfig.selectedConfigKeyForEditing)
+        }) {
+          Image(systemName: "doc.on.clipboard")
+        }
+        .buttonStyle(.plain)
 
         Button(role: .none, action: onDuplicate) {
           Image(systemName: "document.on.document")
