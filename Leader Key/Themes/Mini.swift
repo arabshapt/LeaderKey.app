@@ -15,12 +15,18 @@ enum Mini {
     }
 
     override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      // Calculate dynamic size based on content
+      let contentSize = contentView?.fittingSize ?? NSSize(width: 100, height: Mini.size)
+      let width = max(contentSize.width + (Mini.margin * 2), 60)
+      let height = Mini.size
+      
       if let explicitOrigin = origin {
           print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
           self.setFrameOrigin(explicitOrigin)
-          self.setContentSize(NSSize(width: 250, height: 150))
+          self.setContentSize(NSSize(width: width, height: height))
       } else {
           print("[MiniWindow show(at:)] Origin not provided, centering.")
+          self.setContentSize(NSSize(width: width, height: height))
           self.center()
       }
 
@@ -69,6 +75,7 @@ enum Mini {
       .background(
         VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
       )
+      .clipShape(RoundedRectangle(cornerRadius: 10.0, style: .continuous))
     }
   }
 }

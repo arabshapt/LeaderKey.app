@@ -18,7 +18,7 @@ enum MysteryBox {
       if let explicitOrigin = origin {
         print("[MysteryBoxWindow show(at:)] Using provided origin: \(explicitOrigin)")
         self.setFrameOrigin(explicitOrigin)
-        self.setContentSize(NSSize(width: 300, height: 200))
+        self.setContentSize(NSSize(width: MysteryBox.size, height: MysteryBox.size))
       } else {
         print("[MysteryBoxWindow show(at:)] Origin not provided, centering.")
         self.center()

@@ -132,6 +132,7 @@ enum Breadcrumbs {
       .background(
         VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
       )
+      .clipShape(RoundedRectangle(cornerRadius: 10.0, style: .continuous))
     }
   }
 }

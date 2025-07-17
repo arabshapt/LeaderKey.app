@@ -12,7 +12,7 @@ enum ForTheHorde {
       super.init(
         controller: controller,
         contentRect: NSRect(
-          x: 0, y: 0, width: MysteryBox.size, height: MysteryBox.size))
+          x: 0, y: 0, width: ForTheHorde.size, height: ForTheHorde.size))
       center()
 
       backgroundColor = .clear
@@ -26,12 +26,15 @@ enum ForTheHorde {
     }
 
     override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      animationState.isShowing = true
+      
       if let explicitOrigin = origin {
         print("[ForTheHordeWindow show(at:)] Using provided origin: \(explicitOrigin)")
         self.setFrameOrigin(explicitOrigin)
-        self.setContentSize(NSSize(width: 400, height: 300))
+        self.setContentSize(NSSize(width: ForTheHorde.size, height: ForTheHorde.size))
       } else {
         print("[ForTheHordeWindow show(at:)] Origin not provided, centering.")
+        self.setContentSize(NSSize(width: ForTheHorde.size, height: ForTheHorde.size))
         self.center()
       }
 
