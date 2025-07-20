@@ -139,7 +139,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         contentView: { AdvancedPane().environmentObject(self.config) }
       ),
     ],
-    style: .segmentedControl
+    style: .segmentedControl,
+    animated: false
   )
 
     // --- Lifecycle Methods ---
