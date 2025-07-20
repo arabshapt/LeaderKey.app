@@ -252,47 +252,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       window.styleMask.insert(NSWindow.StyleMask.resizable)
       window.minSize = NSSize(width: 450, height: 650) // Ensure minSize is set
 
-      // --- Defer Positioning Logic Slightly ---
-      DispatchQueue.main.async { // Add async dispatch
-          print("[AppDelegate settings async] Starting deferred positioning logic...")
-          // --- Calculate Target Origin --- START ---
-          var calculatedOrigin: NSPoint? = nil
-          let mouseLocation = NSEvent.mouseLocation
-          let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+      // --- Position Window Before Showing to Prevent Flicker ---
+      print("[AppDelegate settings] Positioning window before show...")
+      var calculatedOrigin: NSPoint? = nil
+      let mouseLocation = NSEvent.mouseLocation
+      let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
 
-          if let targetScreen = screen {
-              let screenFrame = targetScreen.visibleFrame
-              // Re-check window size within async block, might be updated
-              let windowSize = window.frame.size
-              let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
-              let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
+      if let targetScreen = screen {
+          let screenFrame = targetScreen.visibleFrame
+          let windowSize = window.frame.size
+          let effectiveWidth = (windowSize.width > 0) ? windowSize.width : window.minSize.width
+          let effectiveHeight = (windowSize.height > 0) ? windowSize.height : window.minSize.height
 
-              if effectiveWidth > 0 && effectiveHeight > 0 {
-                  let newOriginX = screenFrame.origin.x + (screenFrame.size.width - effectiveWidth) / 2.0
-                  let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
-                  calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
-                  print("[AppDelegate settings async] Calculated Center Origin: \(calculatedOrigin!)")
-              } else {
-                  print("[AppDelegate settings async] Warning: Could not determine effective window size (Size: \(windowSize)). Origin calculation skipped.")
-              }
+          if effectiveWidth > 0 && effectiveHeight > 0 {
+              let newOriginX = screenFrame.origin.x + (screenFrame.size.width - effectiveWidth) / 2.0
+              let newOriginY = screenFrame.origin.y + (screenFrame.size.height - effectiveHeight) / 2.0
+              calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
+              print("[AppDelegate settings] Calculated Center Origin: \(calculatedOrigin!)")
           } else {
-              print("[AppDelegate settings async] Warning: Could not get target screen. Origin calculation skipped.")
+              print("[AppDelegate settings] Warning: Could not determine effective window size (Size: \(windowSize)). Origin calculation skipped.")
           }
-          // --- Calculate Target Origin --- END ---
+      } else {
+          print("[AppDelegate settings] Warning: Could not get target screen. Origin calculation skipped.")
+      }
 
-          // --- Set Origin --- START ---
-          if let originToSet = calculatedOrigin {
-              print("[AppDelegate settings async] Setting origin: \(originToSet)")
-              window.setFrameOrigin(originToSet)
-          } else {
-              print("[AppDelegate settings async] Origin calculation failed. Centering window.")
-              window.center()
-          }
-          // --- Set Origin --- END ---
-      } // End async dispatch
+      // Set position before showing
+      if let originToSet = calculatedOrigin {
+          print("[AppDelegate settings] Setting origin: \(originToSet)")
+          window.setFrameOrigin(originToSet)
+      } else {
+          print("[AppDelegate settings] Origin calculation failed. Centering window.")
+          window.center()
+      }
 
-      // Show the window controller immediately (positioning will happen asynchronously)
-      // Always open to the General tab where configuration editing happens
+      // Show the window controller after positioning
       settingsWindowController.show(pane: .general)
 
       NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
