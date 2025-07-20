@@ -3,7 +3,7 @@ import Settings
 import SwiftUI
 
 struct SearchPane: View {
-    private let contentWidth = 1000.0
+    private let contentWidth = SettingsConfig.contentWidth
     @EnvironmentObject private var config: UserConfig
     
     @State private var searchQuery = ""

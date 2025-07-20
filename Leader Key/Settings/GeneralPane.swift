@@ -6,7 +6,7 @@ import SwiftUI
 import AppKit
 
 struct GeneralPane: View {
-  private let contentWidth = 1100.0
+  private let contentWidth = SettingsConfig.contentWidth
   @EnvironmentObject private var config: UserConfig
   @Default(.configDir) var configDir
   @Default(.theme) var theme
@@ -193,7 +193,6 @@ struct GeneralPane: View {
               .frame(maxWidth: .infinity) // Allow right side to expand
               // --- Right Content Area: Config Editor --- END ---
           }
-          .padding(.leading, -40) // Increased negative padding to shift left further
           .task(id: keyToLoad) {
               guard let key = keyToLoad else { return } // Only run if keyToLoad is set
               

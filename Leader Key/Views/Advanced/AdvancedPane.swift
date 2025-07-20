@@ -9,7 +9,7 @@ struct AdvancedPane: View {
   @Default(.reactivateBehavior) var reactivateBehavior
 
   var body: some View {
-    Settings.Container(contentWidth: 450.0) {
+    Settings.Container(contentWidth: SettingsConfig.contentWidth) {
       Settings.Section(
         title: "Keyboard",
         description: "Configure keyboard related options."

@@ -56,7 +56,7 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 
 // Define the view for the Shortcuts pane
 fileprivate struct KeyboardShortcutsView: View {
-    private let contentWidth = 900.0
+    private let contentWidth = SettingsConfig.contentWidth
 
     var body: some View {
         Settings.Container(contentWidth: contentWidth) {
@@ -79,7 +79,7 @@ fileprivate struct OpacityPane: View {
     @Default(.stickyModeOpacity) var stickyModeOpacity
 
     var body: some View {
-        Settings.Container(contentWidth: 1100.0) {
+        Settings.Container(contentWidth: SettingsConfig.contentWidth) {
             Settings.Section(title: "Opacity") {
                 VStack {
                     VStack(alignment: .leading) {
