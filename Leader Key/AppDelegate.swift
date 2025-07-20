@@ -497,8 +497,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 case .defaultOnly:
                   newRoot = self.config.root
                 case .appSpecificWithFallback:
-                  let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                  newRoot = self.config.getConfig(for: bundleId)
+                  // Use the same overlay detection logic as initial activation
+                  let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+                  let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
+                  newRoot = self.config.getConfig(for: configKey)
                 }
                 self.controller.userState.activeRoot = newRoot
               }

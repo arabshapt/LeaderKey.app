@@ -50,6 +50,12 @@ extension Defaults.Keys {
     
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)
+  
+  // Overlay detection settings
+  /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs
+  static let overlayDetectionEnabled = Key<Bool>("overlayDetectionEnabled", default: false, suite: defaultsSuite)
+  /// List of bundle IDs for apps that should be checked for overlay windows
+  static let overlayApps = Key<[String]>("overlayApps", default: ["com.raycast.macos", "com.runningwithcrayons.Alfred"], suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {

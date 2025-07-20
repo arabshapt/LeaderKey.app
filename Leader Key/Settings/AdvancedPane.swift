@@ -20,9 +20,17 @@ struct AdvancedPane: View {
   @Default(.resetOnCmdRelease) var resetOnCmdRelease
   @Default(.panelTopOffsetPercent) var panelTopOffsetPercent
   @Default(.panelClickThrough) var panelClickThrough
+  @Default(.overlayDetectionEnabled) var overlayDetectionEnabled
+  @Default(.overlayApps) var overlayApps
+  
+  @State private var hasAccessibilityPermissions = false
+  @State private var testResult = ""
+  @State private var showingTestResult = false
+  @State private var isContinuousTestingEnabled = false
 
   var body: some View {
-    Settings.Container(contentWidth: contentWidth) {
+    ScrollView {
+      Settings.Container(contentWidth: contentWidth) {
       Settings.Section(
         title: "Config directory",
         bottomDivider: true
@@ -154,6 +162,177 @@ struct AdvancedPane: View {
           }
         }
       }
+      
+      Settings.Section(title: "Overlay Detection", bottomDivider: true) {
+        VStack(alignment: .leading, spacing: 12) {
+          Defaults.Toggle("Enable overlay detection", key: .overlayDetectionEnabled)
+            .help("Detect overlay windows (like Raycast/Alfred) for separate configs")
+          
+          if overlayDetectionEnabled {
+            // Permission Status
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text("Accessibility Permissions:")
+                  .font(.subheadline)
+                  .fontWeight(.medium)
+                
+                Spacer()
+                
+                HStack {
+                  Image(systemName: hasAccessibilityPermissions ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(hasAccessibilityPermissions ? .green : .orange)
+                  
+                  Text(hasAccessibilityPermissions ? "Granted" : "Required")
+                    .font(.caption)
+                    .foregroundColor(hasAccessibilityPermissions ? .green : .orange)
+                }
+              }
+              
+              if !hasAccessibilityPermissions {
+                HStack {
+                  Button("Request Permissions") {
+                    _ = OverlayDetector.shared.requestAccessibilityPermissions()
+                    updatePermissionStatus()
+                  }
+                  
+                  Button("Open System Settings") {
+                    OverlayDetector.shared.openAccessibilitySettings()
+                  }
+                }
+                .font(.caption)
+                
+                Text("Accessibility permissions are required to detect overlay windows. Please enable 'Leader Key' in System Settings > Privacy & Security > Accessibility.")
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+                  .padding(.top, 2)
+              }
+            }
+            .padding(.bottom, 8)
+            
+            // Overlay Apps Configuration
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Overlay Apps (Bundle IDs):")
+                .font(.subheadline)
+                .fontWeight(.medium)
+              
+              ForEach(overlayApps.indices, id: \.self) { index in
+                HStack {
+                  TextField("Bundle ID (e.g., com.raycast.macos)", text: Binding(
+                    get: { overlayApps[index] },
+                    set: { newValue in
+                      overlayApps[index] = newValue
+                    }
+                  ))
+                  
+                  Button(action: {
+                    overlayApps.remove(at: index)
+                  }) {
+                    Image(systemName: "minus.circle.fill")
+                      .foregroundColor(.red)
+                  }
+                  .buttonStyle(BorderlessButtonStyle())
+                  .help("Remove this overlay app")
+                }
+              }
+              
+              Button(action: {
+                overlayApps.append("")
+              }) {
+                HStack {
+                  Image(systemName: "plus.circle.fill")
+                    .foregroundColor(.green)
+                  Text("Add overlay app")
+                }
+              }
+              .buttonStyle(BorderlessButtonStyle())
+              
+              Text("Overlay configs use '.overlay' suffix (e.g., 'app.com.raycast.macos.overlay.json')")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+            }
+            .padding(.bottom, 8)
+            
+            // Test Detection
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text("Testing:")
+                  .font(.subheadline)
+                  .fontWeight(.medium)
+                
+                Spacer()
+                
+                Button("Test Detection") {
+                  testResult = OverlayDetector.shared.testDetection()
+                  showingTestResult = true
+                }
+                .disabled(!hasAccessibilityPermissions)
+              }
+              
+              // Continuous Testing Toggle
+              HStack {
+                Text("Continuous Testing:")
+                  .font(.subheadline)
+                  .fontWeight(.medium)
+                
+                Spacer()
+                
+                Button(isContinuousTestingEnabled ? "Stop Continuous Testing" : "Start Continuous Testing") {
+                  OverlayDetector.shared.toggleContinuousTesting()
+                  isContinuousTestingEnabled = OverlayDetector.shared.isContinuousTestingEnabled
+                }
+                .disabled(!hasAccessibilityPermissions)
+              }
+              
+              if isContinuousTestingEnabled {
+                Text("🔍 Continuous testing active - check Console.app for real-time detection logs (search for '[OverlayDetector]')")
+                  .font(.caption)
+                  .foregroundColor(.blue)
+                  .padding(8)
+                  .background(Color.blue.opacity(0.1))
+                  .cornerRadius(4)
+              }
+              
+              if showingTestResult {
+                VStack(alignment: .leading, spacing: 4) {
+                  Text("Detection Result:")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                  
+                  Text(testResult)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(8)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(4)
+                  
+                  Button("Clear") {
+                    showingTestResult = false
+                    testResult = ""
+                  }
+                  .font(.caption)
+                }
+              }
+            }
+          }
+        }
+        .onAppear {
+          updatePermissionStatus()
+          updateContinuousTestingState()
+        }
+        .onChange(of: overlayDetectionEnabled) { _ in
+          if overlayDetectionEnabled {
+            updatePermissionStatus()
+          } else {
+            // Stop continuous testing if overlay detection is disabled
+            if isContinuousTestingEnabled {
+              OverlayDetector.shared.stopContinuousTesting()
+              updateContinuousTestingState()
+            }
+          }
+        }
+      }
+      
       Settings.Section(title: "Other") {
         Defaults.Toggle("Show Leader Key in menubar", key: .showMenuBarIcon)
         Defaults.Toggle(
@@ -182,7 +361,16 @@ struct AdvancedPane: View {
       }
       // --- Add Reset Section Here --- END ---
       
+      }
     }
+  }
+  
+  private func updatePermissionStatus() {
+    hasAccessibilityPermissions = OverlayDetector.shared.hasAccessibilityPermissions()
+  }
+  
+  private func updateContinuousTestingState() {
+    isContinuousTestingEnabled = OverlayDetector.shared.isContinuousTestingEnabled
   }
 }
 

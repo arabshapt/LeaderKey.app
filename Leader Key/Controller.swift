@@ -73,18 +73,20 @@ class Controller {
   }
 
   func show(type: ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
-    Events.send(.willActivate)
-
-    // Determine which config to load based on type
+    // IMPORTANT: Detect overlay state BEFORE sending activation events
+    // This prevents overlay apps from hiding their overlays before we can detect them
     let configToLoad: Group
     switch type {
     case .defaultOnly:
       configToLoad = userConfig.root // Use the already loaded default config
     case .appSpecificWithFallback:
-      let frontmostApp = NSWorkspace.shared.frontmostApplication
-      let bundleId = frontmostApp?.bundleIdentifier
-      configToLoad = userConfig.getConfig(for: bundleId) // Use the enhanced getter
+      let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+      let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
+      configToLoad = userConfig.getConfig(for: configKey) // Use the enhanced getter
     }
+
+    // Now send activation events after detection is complete
+    Events.send(.willActivate)
 
     userState.activeRoot = configToLoad // Update UserState with the selected config
 
@@ -162,6 +164,10 @@ class Controller {
     window.hide {
       afterClose?()
       self.clear() // Clear UserState *after* external completion (e.g., AppDelegate reset) to avoid premature UI changes
+      
+      // Invalidate overlay detection cache to ensure fresh detection on next activation
+      OverlayDetector.shared.invalidateDetectionCache()
+      
       Events.send(.didDeactivate)
     }
 
