@@ -361,8 +361,10 @@ struct AdvancedPane: View {
       }
       // --- Add Reset Section Here --- END ---
       
-      }
     }
+    }
+    .frame(width: contentWidth + 60)
+    .frame(minHeight: 600)
   }
   
   private func updatePermissionStatus() {
