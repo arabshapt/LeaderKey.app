@@ -9,12 +9,14 @@ extension UserConfig {
     ///   - bundleId: The application bundle identifier.
     ///   - templateKey: Optional display key whose JSON will be duplicated. When `nil` the global default config is used.
     ///   - customName: Optional custom sidebar name that will override the default "App: <bundleId>" display name.
+    ///   - isOverlay: Whether this is an overlay configuration (adds .overlay suffix to filename).
     /// - Returns: The sidebar display name that was ultimately inserted, or `nil` if the creation failed.
     @discardableResult
     func createConfigForApp(
         bundleId: String,
         templateKey: String? = nil,
-        customName: String? = nil
+        customName: String? = nil,
+        isOverlay: Bool = false
     ) -> String? {
         let trimmedId = bundleId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedId.isEmpty else {
@@ -22,12 +24,18 @@ extension UserConfig {
             return nil
         }
 
-        // Destination path  e.g.  app.<bundleId>.json
-        let destFileName = "\(appConfigPrefix)\(trimmedId).json"
+        // Destination path  e.g.  app.<bundleId>.json or app.<bundleId>.overlay.json
+        let destFileName: String
+        if isOverlay {
+            destFileName = "\(appConfigPrefix)\(trimmedId).overlay.json"
+        } else {
+            destFileName = "\(appConfigPrefix)\(trimmedId).json"
+        }
         let destPath = (Defaults[.configDir] as NSString).appendingPathComponent(destFileName)
 
         if fileManager.fileExists(atPath: destPath) {
-            alertHandler.showAlert(style: .warning, message: "A configuration for ‘\(trimmedId)’ already exists.")
+            let configType = isOverlay ? "overlay configuration" : "configuration"
+            alertHandler.showAlert(style: .warning, message: "An \(configType) for '\(trimmedId)' already exists.")
             return nil
         }
 
@@ -66,7 +74,13 @@ extension UserConfig {
         self.reloadConfig()
 
         // Calculate the final display key (may include custom name)
-        let defaultDisplay = "App: \(trimmedId)"
+        let defaultDisplay: String
+        if isOverlay {
+            defaultDisplay = "App: \(trimmedId) (Overlay)"
+        } else {
+            defaultDisplay = "App: \(trimmedId)"
+        }
+        
         let finalDisplayName: String
         if let custom = customName, !custom.isEmpty {
             finalDisplayName = custom
