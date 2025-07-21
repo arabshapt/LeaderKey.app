@@ -14,20 +14,25 @@ enum Mini {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
-      let screen = NSScreen.main == nil ? NSSize() : NSScreen.main!.frame.size
-
-      self.setFrame(
-        CGRect(
-          x: screen.width - Mini.size - Mini.margin,
-          y: Mini.margin, width: Mini.size, height: Mini.size),
-        display: true)
-
-      makeKeyAndOrderFront(nil)
-
-      fadeIn {
-        after?()
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+      // Calculate dynamic size based on content
+      let contentSize = contentView?.fittingSize ?? NSSize(width: 100, height: Mini.size)
+      let width = max(contentSize.width + (Mini.margin * 2), 60)
+      let height = Mini.size
+      
+      if let explicitOrigin = origin {
+          print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
+          self.setFrameOrigin(explicitOrigin)
+          self.setContentSize(NSSize(width: width, height: height))
+      } else {
+          print("[MiniWindow show(at:)] Origin not provided, centering.")
+          self.setContentSize(NSSize(width: width, height: height))
+          self.center()
       }
+
+      self.displayIfNeeded()
+      makeKeyAndOrderFront(nil)
+      after?()
     }
 
     override func hide(after: (() -> Void)? = nil) {
@@ -70,11 +75,12 @@ enum Mini {
       .background(
         VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
       )
+      .clipShape(RoundedRectangle(cornerRadius: 10.0, style: .continuous))
     }
   }
 }
 
-struct Invisible_MainView_Previews: PreviewProvider {
+struct MiniMainViewPreviews: PreviewProvider {
   static var previews: some View {
     VStack {
       MysteryBox.MainView().environmentObject(

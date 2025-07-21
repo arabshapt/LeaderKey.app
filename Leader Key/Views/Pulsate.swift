@@ -40,7 +40,7 @@ extension View {
   }
 }
 
-struct Pulsate_Preview: PreviewProvider {
+struct PulsatePreview: PreviewProvider {
   static var previews: some View {
     ZStack {
       Text("●")

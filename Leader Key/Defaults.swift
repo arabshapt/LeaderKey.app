@@ -19,6 +19,8 @@ extension Defaults.Keys {
     "modifierKeyConfiguration", default: .controlGroupOptionSticky, suite: defaultsSuite)
   static let theme = Key<Theme>(
     "theme", default: .mysteryBox, suite: defaultsSuite)
+  static let automaticallyChecksForUpdates = Key<Bool>(
+    "automaticallyChecksForUpdates", default: true, suite: defaultsSuite)
 
   static let autoOpenCheatsheet = Key<AutoOpenCheatsheetSetting>(
     "autoOpenCheatsheet",
@@ -35,9 +37,25 @@ extension Defaults.Keys {
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .hide, suite: defaultsSuite)
-
-  // Group shortcuts - maps group paths to shortcut names
-  static let groupShortcuts = Key<[String: String]>("groupShortcuts", default: [:], suite: defaultsSuite)
+  static let resetOnCmdRelease = Key<Bool>(
+    "resetOnCmdRelease", default: false, suite: defaultsSuite)
+  static let normalModeOpacity = Key<Double>(
+    "normalModeOpacity", default: 0.9, suite: defaultsSuite)
+  static let stickyModeOpacity = Key<Double>(
+    "stickyModeOpacity", default: 0.9, suite: defaultsSuite)
+  static let panelTopOffsetPercent = Key<Double>(
+    "panelTopOffsetPercent", default: 0.3, suite: defaultsSuite)
+  static let panelClickThrough = Key<Bool>(
+    "panelClickThrough", default: false, suite: defaultsSuite)
+    
+  // User-defined names for config files - maps file paths to custom names
+  static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)
+  
+  // Overlay detection settings
+  /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs
+  static let overlayDetectionEnabled = Key<Bool>("overlayDetectionEnabled", default: false, suite: defaultsSuite)
+  /// List of bundle IDs for apps that should be checked for overlay windows
+  static let overlayApps = Key<[String]>("overlayApps", default: ["com.raycast.macos", "com.runningwithcrayons.Alfred"], suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -81,7 +99,7 @@ extension KeyboardShortcuts.Name {
   )
 
   // Helper for group-specific shortcuts
-  static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
-    KeyboardShortcuts.Name("group_\(path)")
-  }
+  // static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
+  //   KeyboardShortcuts.Name("group_\(path)")
+  // }
 }

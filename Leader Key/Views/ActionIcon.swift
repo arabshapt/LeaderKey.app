@@ -42,6 +42,11 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
         Image(systemName: "folder")
           .foregroundStyle(.secondary)
           .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
+    case .macro:
+      return AnyView(
+        Image(systemName: "play.rectangle.on.rectangle")
+          .foregroundStyle(.secondary)
+          .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
     default:
       return AnyView(
         Image(systemName: "questionmark")

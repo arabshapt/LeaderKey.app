@@ -2,22 +2,67 @@ import Defaults
 import SwiftUI
 import SymbolPicker
 
+struct KeyReference {
+    static let keyCategories: [String: [String]] = [
+        "Letters": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"],
+        "Numbers": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        "Arrows": ["left_arrow", "right_arrow", "up_arrow", "down_arrow"],
+        "Function Keys": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20"],
+        "Special Keys": ["escape", "tab", "spacebar", "return_or_enter", "enter", "delete_or_backspace", "delete_forward", "home", "end", "page_up", "page_down", "help", "insert"],
+        "Keypad": ["keypad_0", "keypad_1", "keypad_2", "keypad_3", "keypad_4", "keypad_5", "keypad_6", "keypad_7", "keypad_8", "keypad_9", "keypad_period", "keypad_enter", "keypad_plus", "keypad_minus", "keypad_multiply", "keypad_divide", "keypad_equal_sign", "keypad_clear", "keypad_num_lock"],
+        "Modifiers": ["caps_lock", "left_control", "left_shift", "left_option", "left_command", "right_control", "right_shift", "right_option", "right_command", "fn"],
+        "Symbols": ["grave_accent_and_tilde", "hyphen", "equal_sign", "open_bracket", "close_bracket", "backslash", "semicolon", "quote", "comma", "period", "slash"],
+        "Media": ["volume_increment", "volume_decrement", "mute"],
+        "Other": ["print_screen", "scroll_lock", "pause", "lang1", "lang2", "japanese_eisuu", "japanese_kana"]
+    ]
+}
+
+// Helper function to create a deep duplicate with a new UUID
+func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
+    switch item {
+    case .action(let action):
+        // Create a new Action instance, which will get a new UUID
+        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps))
+    case .group(let group):
+        // Recursively duplicate actions within the group
+        let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
+        // Create a new Group instance, which will get a new UUID
+        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions))
+    }
+}
+
 let generalPadding: CGFloat = 8
 
 struct AddButtons: View {
   let onAddAction: () -> Void
   let onAddGroup: () -> Void
+  let onPaste: () -> Void
+  @ObservedObject var clipboardManager = ClipboardManager.shared
 
   var body: some View {
     HStack(spacing: generalPadding) {
-      Button(action: onAddAction) {
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Add action' button TAPPED.")
+        onAddAction()
+      }) {
         Image(systemName: "rays")
         Text("Add action")
       }
-      Button(action: onAddGroup) {
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Add group' button TAPPED.")
+        onAddGroup()
+      }) {
         Image(systemName: "folder")
         Text("Add group")
       }
+      Button(action: {
+        print("[UI LOG] AddButtons: 'Paste' button TAPPED.")
+        onPaste()
+      }) {
+        Image(systemName: "doc.on.clipboard.fill")
+        Text("Paste")
+      }
+      .disabled(!clipboardManager.canPaste())
       Spacer()
     }
   }
@@ -32,40 +77,57 @@ struct GroupContentView: View {
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(group.actions.indices, id: \.self) { index in
-        let currentPath = parentPath + [index]
-        ActionOrGroupRow(
-          item: binding(for: index),
-          path: currentPath,
-          onDelete: { group.actions.remove(at: index) },
-          onDuplicate: { group.actions.insert(group.actions[index], at: index) },
-          expandedGroups: $expandedGroups
-        )
-        .id(index)
+      ForEach(Array(group.actions.enumerated()), id: \.element.id) { index, item in
+        if index >= 0 && index < group.actions.count {
+          let currentPath = parentPath + [index]
+          ActionOrGroupRow(
+            item: Binding(
+              get: { 
+                guard index < group.actions.count else { return item }
+                return group.actions[index]
+              },
+              set: { newValue in
+                guard index < group.actions.count else { return }
+                group.actions[index] = newValue
+              }
+            ),
+            path: currentPath,
+            onDelete: {
+              group.actions.removeAll { $0.id == item.id }
+            },
+            onDuplicate: {
+              let duplicatedItemWithNewID = makeTrueDuplicate(item: item)
+              if let sourceIndex = group.actions.firstIndex(where: { $0.id == item.id }),
+                 sourceIndex >= 0 && sourceIndex < group.actions.count {
+                let insertAtIndex = min(sourceIndex + 1, group.actions.count)
+                group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
+              }
+            },
+            expandedGroups: $expandedGroups
+          )
+        }
       }
 
       AddButtons(
         onAddAction: {
           withAnimation {
             group.actions.append(
-              .action(Action(key: "", type: .application, value: "")))
+              .action(Action(key: "", type: .shortcut, value: "")))
           }
         },
         onAddGroup: {
           withAnimation {
-            group.actions.append(.group(Group(key: "", actions: [])))
+            group.actions.append(.group(Group(key: "", stickyMode: nil, actions: [])))
+          }
+        },
+        onPaste: {
+          withAnimation {
+            userConfig.pasteItem(at: parentPath + [group.actions.count])
           }
         }
       )
       .padding(.top, generalPadding * 0.5)
     }
-  }
-
-  private func binding(for index: Int) -> Binding<ActionOrGroup> {
-    Binding(
-      get: { group.actions[index] },
-      set: { group.actions[index] = $0 }
-    )
   }
 }
 
@@ -95,40 +157,57 @@ struct ActionOrGroupRow: View {
   let onDuplicate: () -> Void
   @EnvironmentObject var userConfig: UserConfig
   @Binding var expandedGroups: Set<[Int]>
+  @ObservedObject var clipboardManager = ClipboardManager.shared
 
   var body: some View {
-    switch item {
-    case .action:
-      ActionRow(
-        action: Binding(
-          get: {
-            if case .action(let action) = item { return action }
-            fatalError("Unexpected state")
-          },
-          set: { newAction in
-            item = .action(newAction)
-          }
-        ),
-        path: path,
-        onDelete: onDelete,
-        onDuplicate: onDuplicate
-      )
-    case .group:
-      GroupRow(
-        group: Binding(
-          get: {
-            if case .group(let group) = item { return group }
-            fatalError("Unexpected state")
-          },
-          set: { newGroup in
-            item = .group(newGroup)
-          }
-        ),
-        path: path,
-        expandedGroups: $expandedGroups,
-        onDelete: onDelete,
-        onDuplicate: onDuplicate
-      )
+    SwiftUI.Group {
+      switch item {
+      case .action(let action):
+        ActionRow(
+          action: Binding(
+            get: { action },
+            set: { newAction in
+              item = .action(newAction)
+            }
+          ),
+          path: path,
+          onDelete: onDelete,
+          onDuplicate: onDuplicate
+        )
+      case .group(let group):
+        GroupRow(
+          group: Binding(
+            get: { group },
+            set: { newGroup in
+              item = .group(newGroup)
+            }
+          ),
+          path: path,
+          expandedGroups: $expandedGroups,
+          onDelete: onDelete,
+          onDuplicate: onDuplicate
+        )
+      }
+    }
+    .contextMenu {
+      Button("Copy") {
+        ClipboardManager.shared.copyItem(item, fromConfig: userConfig.selectedConfigKeyForEditing)
+      }
+      
+      Button("Paste") {
+        userConfig.pasteItem(at: path)
+      }
+      .disabled(!clipboardManager.canPaste())
+      
+      Divider()
+      
+      Button("Duplicate") {
+        onDuplicate()
+      }
+      
+      Button("Delete") {
+        onDelete()
+      }
     }
   }
 }
@@ -140,20 +219,22 @@ struct IconPickerMenu: View {
   var body: some View {
     Menu {
       Button("App Icon") {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.applicationBundle, .application]
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        if panel.runModal() == .OK {
-          switch item {
-          case .action(var action):
-            action.iconPath = panel.url?.path
-            item = .action(action)
-          case .group(var group):
-            group.iconPath = panel.url?.path
-            item = .group(group)
+        DispatchQueue.main.async {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+          if panel.runModal() == .OK {
+            switch item {
+            case .action(var action):
+              action.iconPath = panel.url?.path
+              item = .action(action)
+            case .group(var group):
+              group.iconPath = panel.url?.path
+              item = .group(group)
+            }
           }
         }
       }
@@ -200,6 +281,38 @@ struct IconPickerMenu: View {
   }
 }
 
+struct ActionRowState {
+  var keyInputValue: String
+  var valueInputValue: String
+  var labelInputValue: String
+  var isListening: Bool
+  var wasPreviouslyListening: Bool
+  var selectedType: Type
+  var isShortcutEditorPresented: Bool
+  var isTextEditorPresented: Bool
+  var isUrlEditorPresented: Bool
+  var isCommandEditorPresented: Bool
+  var showingKeyReference: Bool
+  
+  var isAnyEditorPresented: Bool {
+    isShortcutEditorPresented || isTextEditorPresented || isUrlEditorPresented || isCommandEditorPresented
+  }
+  
+  init() {
+    self.keyInputValue = ""
+    self.valueInputValue = ""
+    self.labelInputValue = ""
+    self.isListening = false
+    self.wasPreviouslyListening = false
+    self.selectedType = .shortcut
+    self.isShortcutEditorPresented = false
+    self.isTextEditorPresented = false
+    self.isUrlEditorPresented = false
+    self.isCommandEditorPresented = false
+    self.showingKeyReference = false
+  }
+}
+
 struct ActionRow: View {
   @Binding var action: Action
   var path: [Int]
@@ -207,22 +320,55 @@ struct ActionRow: View {
   let onDuplicate: () -> Void
   @FocusState private var isKeyFocused: Bool
   @EnvironmentObject var userConfig: UserConfig
+  
+  @State private var state = ActionRowState()
 
   var body: some View {
+    // Add bounds checking to prevent crash
+    guard !path.isEmpty && path.allSatisfy({ $0 >= 0 }) else {
+      return AnyView(Text("Invalid path: empty or negative indices").foregroundColor(.red))
+    }
+    
+    return AnyView(
     HStack(spacing: generalPadding) {
       KeyButton(
-        text: Binding(
-          get: { action.key ?? "" },
-          set: { action.key = $0 }
-        ), placeholder: "Key", validationError: validationErrorForKey,
-        onKeyChanged: { userConfig.finishEditingKey() }
+        text: $state.keyInputValue,
+        placeholder: "Key", 
+        validationError: validationErrorForKey,
+        path: path,
+        onKeyChanged: { keyButtonPath, capturedKey in
+          state.keyInputValue = capturedKey
+          userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
+        }
       )
+      .onChange(of: state.isListening) { isNowListening in
+          if state.wasPreviouslyListening && !isNowListening {
+              let modelKey = action.key ?? ""
+              if state.keyInputValue != modelKey {
+                  userConfig.updateKey(at: path, newKey: state.keyInputValue)
+              }
+          }
+          state.wasPreviouslyListening = isNowListening
+      }
+      // Add onChange for the local selectedType state
+      .onChange(of: state.selectedType) { newTypeValue in
+        let oldModelType = action.type
+        userConfig.updateActionType(at: path, newType: newTypeValue)
 
-      Picker("Type", selection: $action.type) {
+        if action.type != oldModelType {
+            state.valueInputValue = ""
+        }
+      }
+
+      Picker("Type", selection: $state.selectedType) {
+        Text("Shortcut").tag(Type.shortcut)
         Text("Application").tag(Type.application)
         Text("URL").tag(Type.url)
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
+        Text("Type Text").tag(Type.text)
+        Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+        Text("Macro").tag(Type.macro)
       }
       .frame(width: 110)
       .labelsHidden()
@@ -240,41 +386,242 @@ struct ActionRow: View {
       switch action.type {
       case .application:
         Button("Choose…") {
-          let panel = NSOpenPanel()
-          panel.allowedContentTypes = [.applicationBundle, .application]
-          panel.canChooseFiles = true
-          panel.canChooseDirectories = true
-          panel.allowsMultipleSelection = false
-          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+          DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.applicationBundle, .application]
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = URL(fileURLWithPath: "/Applications")
 
-          if panel.runModal() == .OK {
-            action.value = panel.url?.path ?? ""
+            if panel.runModal() == .OK {
+              action.value = panel.url?.path ?? ""
+            }
           }
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
       case .folder:
         Button("Choose…") {
-          let panel = NSOpenPanel()
-          panel.allowsMultipleSelection = false
-          panel.canChooseDirectories = true
-          panel.canChooseFiles = false
-          panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+          DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
 
-          if panel.runModal() == .OK {
-            action.value = panel.url?.path ?? ""
+            if panel.runModal() == .OK {
+              action.value = panel.url?.path ?? ""
+            }
           }
         }
         Text(action.value).truncationMode(.middle).lineLimit(1)
+      case .shortcut:
+        Button {
+          state.isShortcutEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "keyboard")
+            Text(state.valueInputValue.isEmpty ? "Set shortcut…" : (state.valueInputValue.count > 25 ? "\(state.valueInputValue.prefix(25))…" : state.valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $state.isShortcutEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Shortcut")
+              .font(.title2)
+            TextEditor(text: $state.valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
+              .font(.footnote)
+              .foregroundColor(.secondary)
+            
+            DisclosureGroup("Key Reference", isExpanded: $state.showingKeyReference) {
+              ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                  ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text(category)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                      
+                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                        ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
+                          Text(key)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+                      }
+                    }
+                  }
+                }
+                .padding(.top, 8)
+              }
+              .frame(maxHeight: 200)
+            }
+            .font(.footnote)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                // Revert local changes
+                state.valueInputValue = action.value
+                state.isShortcutEditorPresented = false
+              }
+              Button("Save") {
+                action.value = state.valueInputValue
+                state.isShortcutEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 380)
+        }
+      case .url:
+        Button {
+          state.isUrlEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "link")
+            Text(state.valueInputValue.isEmpty ? "Edit URL…" : (state.valueInputValue.count > 30 ? "\(state.valueInputValue.prefix(30))…" : state.valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $state.isUrlEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit URL")
+              .font(.title2)
+            TextEditor(text: $state.valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Toggle("Activate after open", isOn: Binding(
+              get: { action.activates ?? true },
+              set: { action.activates = $0 }
+            ))
+            .toggleStyle(.checkbox)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                state.valueInputValue = action.value
+                state.isUrlEditorPresented = false
+              }
+              Button("Save") {
+                action.value = state.valueInputValue
+                state.isUrlEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      case .text:
+        Button {
+          state.isTextEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "square.and.pencil")
+            Text(state.valueInputValue.isEmpty ? "Edit text…" : (state.valueInputValue.count > 20 ? "\(state.valueInputValue.prefix(20))…" : state.valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $state.isTextEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Text to Type")
+              .font(.title2)
+            TextEditor(text: $state.valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 180)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                state.valueInputValue = action.value
+                state.isTextEditorPresented = false
+              }
+              Button("Save") {
+                action.value = state.valueInputValue
+                state.isTextEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 480, height: 300)
+        }
+      case .toggleStickyMode:
+        Text("No value required")
+          .foregroundColor(.secondary)
+          .font(.caption)
+      case .macro:
+        MacroEditorView(action: $action, path: path)
       default:
-        TextField("Value", text: $action.value)
+        Button {
+          state.isCommandEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "terminal")
+            Text(state.valueInputValue.isEmpty ? "Edit command…" : (state.valueInputValue.count > 30 ? "\(state.valueInputValue.prefix(30))…" : state.valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $state.isCommandEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Command")
+              .font(.title2)
+            TextEditor(text: $state.valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                state.valueInputValue = action.value
+                state.isCommandEditorPresented = false
+              }
+              Button("Save") {
+                action.value = state.valueInputValue
+                state.isCommandEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      }
+
+      // Add sticky mode checkbox for all action types except Toggle Sticky Mode
+      if action.type != .toggleStickyMode {
+        Toggle("SM", isOn: Binding(
+          get: { action.stickyMode ?? false },
+          set: { action.stickyMode = $0 }
+        ))
+        .toggleStyle(.checkbox)
+        .frame(width: 40)
+        .help("Sticky Mode: Keep window open after executing this action")
       }
 
       Spacer()
 
-      TextField(action.bestGuessDisplayName, text: $action.label ?? "").frame(
-        width: 120
-      )
+      TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
+        action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
+      })
+      .frame(width: 120)
       .padding(.trailing, generalPadding)
+
+      Button(role: .none, action: {
+        ClipboardManager.shared.copyItem(.action(action), fromConfig: userConfig.selectedConfigKeyForEditing)
+      }) {
+        Image(systemName: "doc.on.clipboard")
+      }
+      .buttonStyle(.plain)
 
       Button(role: .none, action: onDuplicate) {
         Image(systemName: "document.on.document")
@@ -287,6 +634,30 @@ struct ActionRow: View {
       .buttonStyle(.plain)
       .padding(.trailing, generalPadding)
     }
+    .onAppear {
+      state.keyInputValue = action.key ?? ""
+      state.valueInputValue = action.value
+      if action.label == nil {
+        let guessedLabel = action.bestGuessDisplayName
+        state.labelInputValue = guessedLabel
+      } else {
+        state.labelInputValue = action.label ?? ""
+      }
+      state.selectedType = action.type 
+    }
+    // Consolidated onChange handler for better performance
+    .onChange(of: state.valueInputValue) { newValue in
+        if !state.isAnyEditorPresented && action.value != newValue {
+            action.value = newValue
+        }
+    }
+    .onChange(of: state.labelInputValue) { newValue in
+        let effectiveNewLabel = newValue.isEmpty ? nil : newValue
+        if action.label != effectiveNewLabel {
+            action.label = effectiveNewLabel
+        }
+    }
+    ) // Close AnyView
   }
 
   private var validationErrorForKey: ValidationErrorType? {
@@ -314,6 +685,11 @@ struct GroupRow: View {
   let onDuplicate: () -> Void
   @EnvironmentObject var userConfig: UserConfig
 
+  @State private var keyInputValue: String = ""
+  @State private var labelInputValue: String = ""
+  @State private var isListening: Bool = false
+  @State private var wasPreviouslyListening: Bool = false
+
   private var isExpanded: Bool {
     expandedGroups.contains(path)
   }
@@ -329,15 +705,33 @@ struct GroupRow: View {
   var body: some View {
     VStack(spacing: generalPadding) {
       HStack(spacing: generalPadding) {
+        // --- Add simple debug text --- START
+        /* Text("DBG:[\(path.map(String.init).joined(separator: ","))] Key:\(group.key ?? "?")")
+             .font(.caption)
+             .foregroundColor(.red)
+             .padding(.leading, 5) // Indent slightly based on path depth
+             .opacity(0.7) */
+        // --- Add simple debug text --- END
+        
         KeyButton(
-          text: Binding(
-            get: { group.key ?? "" },
-            set: { group.key = $0 }
-          ),
+          text: $keyInputValue,
           placeholder: "Group Key",
           validationError: validationErrorForKey,
-          onKeyChanged: { userConfig.finishEditingKey() }
+          path: path,
+          onKeyChanged: { keyButtonPath, capturedKey in
+            keyInputValue = capturedKey
+            userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
+          }
         )
+        .onChange(of: isListening) { isNowListening in
+            if wasPreviouslyListening && !isNowListening {
+                let modelKey = group.key ?? ""
+                if keyInputValue != modelKey {
+                    userConfig.updateKey(at: path, newKey: keyInputValue)
+                }
+            }
+            wasPreviouslyListening = isNowListening
+        }
 
         IconPickerMenu(
           item: Binding(
@@ -358,15 +752,38 @@ struct GroupRow: View {
 
           }
         ) {
-          Image(systemName: "chevron.right")
-            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            .padding(.leading, generalPadding / 3)
+          HStack {
+            Image(systemName: "chevron.right")
+              .rotationEffect(.degrees(isExpanded ? 90 : 0))
+              .padding(.leading, generalPadding / 3)
+            Spacer()
+          }
+          .frame(width: 30, height: 16)
+          .background(Color.blue.opacity(0.2))
+          .cornerRadius(4)
+          .contentShape(Rectangle())
         }.buttonStyle(.plain)
 
         Spacer(minLength: 0)
 
-        TextField("Label", text: $group.label ?? "").frame(width: 120)
+        // Add sticky mode checkbox for groups
+        Toggle("SM", isOn: Binding(
+          get: { group.stickyMode ?? false },
+          set: { group.stickyMode = $0 }
+        ))
+        .toggleStyle(.checkbox)
+        .frame(width: 40)
+        .help("Sticky Mode: Automatically activate sticky mode when entering this group")
+
+        TextField("Label", text: $labelInputValue).frame(width: 120)
           .padding(.trailing, generalPadding)
+
+        Button(role: .none, action: {
+          ClipboardManager.shared.copyItem(.group(group), fromConfig: userConfig.selectedConfigKeyForEditing)
+        }) {
+          Image(systemName: "doc.on.clipboard")
+        }
+        .buttonStyle(.plain)
 
         Button(role: .none, action: onDuplicate) {
           Image(systemName: "document.on.document")
@@ -393,6 +810,25 @@ struct GroupRow: View {
         }
       }
     }
+    .onAppear {
+      keyInputValue = group.key ?? ""
+      labelInputValue = group.label ?? ""
+    }
+    .onChange(of: group.key) { newValue in
+        let newKeyValue = newValue ?? ""
+        if keyInputValue != newKeyValue {
+            keyInputValue = newKeyValue
+        }
+    }
+    .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
+    
+    .onChange(of: labelInputValue) { newValue in
+        // Update label immediately when local state changes
+        let effectiveNewLabel = newValue.isEmpty ? nil : newValue
+        if group.label != effectiveNewLabel {
+            group.label = effectiveNewLabel
+        }
+    }
     .padding(.horizontal, 0)
   }
 
@@ -415,6 +851,7 @@ struct GroupRow: View {
 #Preview {
   let group = Group(
     key: "",
+    stickyMode: nil,
     actions: [
       // Level 1 actions
       .action(
@@ -437,6 +874,7 @@ struct GroupRow: View {
       .group(
         Group(
           key: "b",
+          stickyMode: nil,
           actions: [
             .action(
               Action(
@@ -452,6 +890,7 @@ struct GroupRow: View {
       .group(
         Group(
           key: "r",
+          stickyMode: nil,
           actions: [
             .action(
               Action(
@@ -462,6 +901,7 @@ struct GroupRow: View {
             .group(
               Group(
                 key: "w",
+                stickyMode: nil,
                 actions: [
                   .action(
                     Action(
@@ -480,4 +920,381 @@ struct GroupRow: View {
   return ConfigEditorView(group: .constant(group), expandedGroups: .constant(Set<[Int]>()))
     .frame(width: 600, height: 500)
     .environmentObject(userConfig)
+}
+
+struct MacroEditorView: View {
+  @Binding var action: Action
+  var path: [Int]
+  @State private var isMacroEditorPresented = false
+  
+  var body: some View {
+    Button {
+      isMacroEditorPresented = true
+    } label: {
+      HStack(spacing: 4) {
+        Image(systemName: "play.rectangle.on.rectangle")
+        Text(macroButtonText)
+      }
+    }
+    .buttonStyle(.plain)
+    .sheet(isPresented: $isMacroEditorPresented) {
+      MacroEditorSheet(action: $action, path: path, isPresented: $isMacroEditorPresented)
+    }
+  }
+  
+  private var macroButtonText: String {
+    let stepCount = action.macroSteps?.count ?? 0
+    if stepCount == 0 {
+      return "Create macro…"
+    } else {
+      return "Edit macro (\(stepCount) steps)"
+    }
+  }
+}
+
+struct MacroEditorSheet: View {
+  @Binding var action: Action
+  var path: [Int]
+  @Binding var isPresented: Bool
+  @State private var macroSteps: [MacroStep] = []
+  
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Edit Macro")
+        .font(.title2)
+      
+      Text("Create a sequence of actions that will be executed in order with configurable delays.")
+        .font(.body)
+        .foregroundColor(.secondary)
+      
+      List {
+        ForEach($macroSteps) { $step in
+          MacroStepRow(step: $step, onDelete: {
+            if let index = macroSteps.firstIndex(where: { $0.id == step.id }),
+               index >= 0 && index < macroSteps.count {
+              macroSteps.remove(at: index)
+            }
+          })
+        }
+        .onMove(perform: moveMacroStep)
+      }
+      .frame(minHeight: 200)
+      .border(Color.gray.opacity(0.2))
+      
+      Button("Add Step") {
+        let newStep = MacroStep(
+          action: Action(key: "", type: .shortcut, value: ""),
+          delay: 0.0,
+          enabled: true
+        )
+        macroSteps.append(newStep)
+      }
+      
+      HStack {
+        Spacer()
+        Button("Cancel") {
+          // Revert changes
+          macroSteps = action.macroSteps ?? []
+          isPresented = false
+        }
+        Button("Save") {
+          action.macroSteps = macroSteps
+          isPresented = false
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(24)
+    .frame(width: 600, height: 500)
+    .onAppear {
+      macroSteps = action.macroSteps ?? []
+    }
+  }
+  
+  private func moveMacroStep(from source: IndexSet, to destination: Int) {
+    macroSteps.move(fromOffsets: source, toOffset: destination)
+  }
+}
+
+struct MacroStepRow: View {
+  @Binding var step: MacroStep
+  let onDelete: () -> Void
+  @State private var valueInputValue: String = ""
+  @State private var isShortcutEditorPresented = false
+  @State private var isTextEditorPresented = false
+  @State private var isUrlEditorPresented = false
+  @State private var isCommandEditorPresented = false
+  @State private var showingKeyReference = false
+  
+  var body: some View {
+    HStack(spacing: 12) {
+      // Drag handle
+      Image(systemName: "line.3.horizontal")
+        .foregroundColor(.secondary)
+        .frame(width: 20)
+      
+      // Enable/disable toggle
+      Toggle("", isOn: $step.enabled)
+        .toggleStyle(.checkbox)
+        .frame(width: 20)
+      
+      // Delay field
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Delay (s)")
+          .font(.caption)
+          .foregroundColor(.secondary)
+        TextField("0.0", text: Binding(
+          get: { String(step.delay) },
+          set: { newValue in
+            if let doubleValue = Double(newValue) {
+              step.delay = doubleValue
+            }
+          }
+        ))
+          .frame(width: 60)
+          .textFieldStyle(.roundedBorder)
+      }
+      
+      // Action type picker
+      Picker("Type", selection: $step.action.type) {
+        Text("Shortcut").tag(Type.shortcut)
+        Text("Application").tag(Type.application)
+        Text("URL").tag(Type.url)
+        Text("Command").tag(Type.command)
+        Text("Folder").tag(Type.folder)
+        Text("Type Text").tag(Type.text)
+      }
+      .frame(width: 100)
+      .labelsHidden()
+      
+      // Action value field - now with popup editors similar to ActionRow, made wider
+      HStack(spacing: 8) {
+        switch step.action.type {
+      case .application:
+        Button("Choose…") {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+          if panel.runModal() == .OK {
+            step.action.value = panel.url?.path ?? ""
+          }
+        }
+        .buttonStyle(.plain)
+        Text(step.action.value).truncationMode(.middle).lineLimit(1)
+      case .folder:
+        Button("Choose…") {
+          let panel = NSOpenPanel()
+          panel.allowsMultipleSelection = false
+          panel.canChooseDirectories = true
+          panel.canChooseFiles = false
+          panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+
+          if panel.runModal() == .OK {
+            step.action.value = panel.url?.path ?? ""
+          }
+        }
+        .buttonStyle(.plain)
+        Text(step.action.value).truncationMode(.middle).lineLimit(1)
+      case .shortcut:
+        Button {
+          isShortcutEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "keyboard")
+            Text(valueInputValue.isEmpty ? "Set shortcut…" : (valueInputValue.count > 25 ? "\(valueInputValue.prefix(25))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isShortcutEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Shortcut")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
+              .font(.footnote)
+              .foregroundColor(.secondary)
+            
+            DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
+              ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                  ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text(category)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                      
+                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                        ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
+                          Text(key)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(4)
+                        }
+                      }
+                    }
+                  }
+                }
+                .padding(.top, 8)
+              }
+              .frame(maxHeight: 200)
+            }
+            .font(.footnote)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isShortcutEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isShortcutEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 380)
+        }
+      case .url:
+        Button {
+          isUrlEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "link")
+            Text(valueInputValue.isEmpty ? "Edit URL…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isUrlEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit URL")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            Toggle("Activate after open", isOn: Binding(
+              get: { step.action.activates ?? true },
+              set: { step.action.activates = $0 }
+            ))
+            .toggleStyle(.checkbox)
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isUrlEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isUrlEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      case .text:
+        Button {
+          isTextEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "square.and.pencil")
+            Text(valueInputValue.isEmpty ? "Edit text…" : (valueInputValue.count > 20 ? "\(valueInputValue.prefix(20))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isTextEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Text to Type")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 180)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isTextEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isTextEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 480, height: 300)
+        }
+      case .toggleStickyMode:
+        Text("No value required")
+          .foregroundColor(.secondary)
+          .font(.caption)
+      default:
+        Button {
+          isCommandEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "terminal")
+            Text(valueInputValue.isEmpty ? "Edit command…" : (valueInputValue.count > 30 ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+          }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isCommandEditorPresented) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Edit Command")
+              .font(.title2)
+            TextEditor(text: $valueInputValue)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 120)
+              .border(Color.gray.opacity(0.2))
+            HStack {
+              Spacer()
+              Button("Cancel") {
+                valueInputValue = step.action.value
+                isCommandEditorPresented = false
+              }
+              Button("Save") {
+                step.action.value = valueInputValue
+                isCommandEditorPresented = false
+              }
+              .keyboardShortcut(.defaultAction)
+            }
+          }
+          .padding(24)
+          .frame(width: 420)
+        }
+      }
+        
+        Spacer()
+      }
+      
+      // Delete button
+      Button(role: .destructive, action: onDelete) {
+        Image(systemName: "trash")
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(8)
+    .background(Color.gray.opacity(0.1))
+    .cornerRadius(4)
+    .onAppear {
+      valueInputValue = step.action.value
+    }
+    .onChange(of: step.action.value) { newValue in
+      valueInputValue = newValue
+    }
+  }
 }

@@ -12,7 +12,7 @@ enum ForTheHorde {
       super.init(
         controller: controller,
         contentRect: NSRect(
-          x: 0, y: 0, width: MysteryBox.size, height: MysteryBox.size))
+          x: 0, y: 0, width: ForTheHorde.size, height: ForTheHorde.size))
       center()
 
       backgroundColor = .clear
@@ -25,31 +25,27 @@ enum ForTheHorde {
       contentView = NSHostingView(rootView: view)
     }
 
-    override func show(after: (() -> Void)? = nil) {
-      center()
-
-      // Trigger animation by updating the shared state
+    override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
       animationState.isShowing = true
+      
+      if let explicitOrigin = origin {
+        print("[ForTheHordeWindow show(at:)] Using provided origin: \(explicitOrigin)")
+        self.setFrameOrigin(explicitOrigin)
+        self.setContentSize(NSSize(width: ForTheHorde.size, height: ForTheHorde.size))
+      } else {
+        print("[ForTheHordeWindow show(at:)] Origin not provided, centering.")
+        self.setContentSize(NSSize(width: ForTheHorde.size, height: ForTheHorde.size))
+        self.center()
+      }
 
+      self.displayIfNeeded()
       makeKeyAndOrderFront(nil)
-      alphaValue = 0
-
-      NSAnimationContext.runAnimationGroup(
-        { context in
-          context.duration = ForTheHorde.rotationDuration
-          context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-          animator().alphaValue = 1.0
-        },
-        completionHandler: {
-          after?()
-        })
+      after?()
     }
 
     override func hide(after: (() -> Void)? = nil) {
-      // Reset animation state when hiding
       animationState.isShowing = false
 
-      // Custom fade out animation to match the show animation
       NSAnimationContext.runAnimationGroup(
         { context in
           context.duration = ForTheHorde.rotationDuration
@@ -113,14 +109,12 @@ enum ForTheHorde {
       .scaleEffect(scale)
       .onChange(of: animationState.isShowing) { newValue in
         if newValue {
-          // Animate rotations and scale to 100% when showing
           withAnimation(.easeOut(duration: ForTheHorde.rotationDuration)) {
             bgRotation = 0
             fgRotation = 0
             scale = 1.0
           }
         } else {
-          // Animate rotations the other way and scale down when hiding
           withAnimation(.easeIn(duration: ForTheHorde.rotationDuration)) {
             bgRotation = 15
             fgRotation = -15
@@ -137,7 +131,7 @@ enum ForTheHorde {
   }
 }
 
-struct Legacy_MainView_Previews: PreviewProvider {
+struct ForTheHordeMainViewPreviews: PreviewProvider {
   static var previews: some View {
     ForTheHorde.MainView()
       .environmentObject(UserState(userConfig: UserConfig()))

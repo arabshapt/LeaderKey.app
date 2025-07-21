@@ -1,9 +1,70 @@
 import Cocoa
 import Combine
 import Defaults
+import Foundation
+import AppKit
 
-let emptyRoot = Group(key: "🚫", label: "Config error", actions: [])
-let defaultEditKey = "Default"
+// MARK: - ClipboardManager
+class ClipboardManager: ObservableObject {
+    static let shared = ClipboardManager()
+    
+    @Published var copiedItem: ActionOrGroup?
+    @Published var clipboardType: ClipboardType = .none
+    @Published var sourceConfig: String? // Track which config the item was copied from
+    
+    enum ClipboardType {
+        case none
+        case action
+        case group
+    }
+    
+    private init() {}
+    
+    func copyItem(_ item: ActionOrGroup, fromConfig: String? = nil) {
+        let duplicatedItem = item.makeTrueDuplicate()
+        
+        do {
+            let jsonData = try JSONEncoder().encode(duplicatedItem)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setData(jsonData, forType: .string)
+            
+            copiedItem = duplicatedItem
+            clipboardType = getCopyType(for: duplicatedItem)
+            sourceConfig = fromConfig
+        } catch {
+            print("Failed to copy item to clipboard: \(error)")
+        }
+    }
+    
+    func pasteItem() -> ActionOrGroup? {
+        guard let copiedItem = copiedItem else { return nil }
+        return copiedItem.makeTrueDuplicate()
+    }
+    
+    func canPaste() -> Bool {
+        return copiedItem != nil
+    }
+    
+    func clear() {
+        copiedItem = nil
+        clipboardType = .none
+        sourceConfig = nil
+    }
+    
+    private func getCopyType(for item: ActionOrGroup) -> ClipboardType {
+        switch item {
+        case .action:
+            return .action
+        case .group:
+            return .group
+        }
+    }
+}
+
+let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
+let globalDefaultDisplayName = "Global"
+let defaultAppConfigDisplayName = "Default App Config"
 
 class UserConfig: ObservableObject {
   // Root for the default config (config.json)
@@ -11,16 +72,16 @@ class UserConfig: ObservableObject {
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
   @Published var validationErrors: [ValidationError] = [] // Errors specific to the default config
-  @Published var discoveredConfigFiles: [String: String] = [:] // Key -> File Path
-  @Published var selectedConfigKeyForEditing: String = defaultEditKey // "Default" or Bundle ID
+  @Published var discoveredConfigFiles: [String: String] = [:] // Display Name -> File Path
+  @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName // Initialize with the new default key
 
   let fileName = "config.json"
   let appConfigPrefix = "app."
   let defaultAppConfigFileName = "app.default.json" // Added default app config filename
-  private var appConfigs: [String: Group?] = [:] // Cache for app-specific configs
-  private let alertHandler: AlertHandler
-  private let fileManager: FileManager
-  private var suppressValidationAlerts = false
+  var appConfigs: [String: Group?] = [:] // Cache for app-specific configs
+  let alertHandler: AlertHandler
+  let fileManager: FileManager
+  var suppressValidationAlerts = false // Internal flag
 
   init(
     alertHandler: AlertHandler = DefaultAlertHandler(),
@@ -30,435 +91,405 @@ class UserConfig: ObservableObject {
     self.fileManager = fileManager
   }
 
-  // MARK: - Group Path Handling
-  
-  // Get a unique identifier for a group based on its path in the tree
-  func getGroupPath(for group: Group) -> String {
-    var path = ""
-    // This should operate on the default config structure
-    findGroupPathRecursive(root, [], group, &path)
-    return path.isEmpty ? "root" : path
-  }
-  
-  private func findGroupPathRecursive(_ current: Group, _ currentPath: [String], _ target: Group, _ result: inout String) {
-    if current.key == target.key && current.label == target.label {
-      result = currentPath.joined(separator: "/")
-      return
-    }
-    
-    for (index, item) in current.actions.enumerated() {
-      if case .group(let subgroup) = item {
-        var newPath = currentPath
-        newPath.append("\(index)_\(subgroup.key ?? "")")
-        findGroupPathRecursive(subgroup, newPath, target, &result)
-      }
-    }
-  }
-  
-  // Find a group by its path
-  func findGroupByPath(_ path: String) -> Group? {
-    // This should operate on the default config structure
-    if path == "root" {
-      return root
-    }
-
-    let components = path.components(separatedBy: "/")
-    // Start search from default root
-    var currentGroup = root
-
-    for component in components {
-      let parts = component.components(separatedBy: "_")
-      guard parts.count >= 2, let index = Int(parts[0]) else { return nil }
-      
-      if index < currentGroup.actions.count {
-        if case .group(let subgroup) = currentGroup.actions[index] {
-          currentGroup = subgroup
-        } else {
-          return nil
-        }
-      } else {
-        return nil
-      }
-    }
-    
-    return currentGroup
-  }
-
   // MARK: - Public Interface
 
   func ensureAndLoad() {
-    ensureValidConfigDirectory()
-    discoverConfigFiles() // Discover before ensuring/loading
-    ensureConfigFileExists() // Ensures default config.json exists
-    loadConfig() // Loads the default config into 'root'
+    self.ensureValidConfigDirectory()
+    self.ensureConfigFileExists() // Ensures default config.json exists
+    self.ensureDefaultAppConfigExists() // Ensures default app.default.json exists
+    self.discoverConfigFiles() // Discover after ensuring both files exist
+    self.loadConfig() // Loads the default config into 'root'
     // Initially, load the default config for editing
-    if let defaultPath = discoveredConfigFiles[defaultEditKey] {
-        currentlyEditingGroup = decodeConfig(from: defaultPath, suppressAlerts: false, isDefaultConfig: true) ?? emptyRoot
-        selectedConfigKeyForEditing = defaultEditKey
+    if let defaultPath = discoveredConfigFiles[globalDefaultDisplayName] {
+        currentlyEditingGroup = self.decodeConfig(from: defaultPath, suppressAlerts: false, isDefaultConfig: true) ?? emptyRoot
+        selectedConfigKeyForEditing = globalDefaultDisplayName
         // Set initial validation errors based on default config
         validationErrors = ConfigValidator.validate(group: root)
     } else {
         // If default doesn't exist somehow, ensure editor has empty root
         currentlyEditingGroup = emptyRoot
-        selectedConfigKeyForEditing = defaultEditKey
+        selectedConfigKeyForEditing = globalDefaultDisplayName
     }
   }
 
   func reloadConfig() {
     Events.send(.willReload)
+    
+    // Clear caches and reset state
     appConfigs = [:] // Clear app-specific cache
-    discoverConfigFiles() // Re-discover files
-    loadConfig(suppressAlerts: true) // Reload default config into 'root'
-    // Reload the currently selected config for editing
-    loadConfigForEditing(key: selectedConfigKeyForEditing)
-    Events.send(.didReload)
-  }
-
-  // Saves the configuration currently being edited in the Settings window
-  func saveCurrentlyEditingConfig() {
-    guard let filePath = discoveredConfigFiles[selectedConfigKeyForEditing] else {
-        handleError(NSError(domain: "UserConfig", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not find file path for selected config key: \(selectedConfigKeyForEditing)"]), critical: true)
-        return
-    }
-
-    // Validate the group being saved
-    let errors = ConfigValidator.validate(group: currentlyEditingGroup)
-    if !errors.isEmpty {
-      // We might want a specific alert here, distinct from the default config validation alert
-      let errorCount = errors.count
-      alertHandler.showAlert(
-        style: .warning,
-        message:
-          "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in the \'\(selectedConfigKeyForEditing)\' configuration. It will still be saved, but some keys may not work as expected."
-      )
-      // Update main validationErrors state only if we are saving the default config
-      if selectedConfigKeyForEditing == defaultEditKey {
-          self.validationErrors = errors
+    
+    // Re-discover available config files
+    self.discoverConfigFiles()
+    
+    // First reload default config with caution
+    self.loadConfig(suppressAlerts: true) // Reload default config into 'root'
+    
+    // Then safely reload the currently selected config for editing 
+    // Using a dispatch async to separate the state updates
+    DispatchQueue.main.async {
+      // Check if current selection is still valid
+      if self.discoveredConfigFiles[self.selectedConfigKeyForEditing] != nil {
+        self.loadConfigForEditing(key: self.selectedConfigKeyForEditing)
       } else {
-          // Maybe store app-specific errors separately if needed?
-          print("Validation issues found in \(selectedConfigKeyForEditing) config, but not setting main validationErrors.")
+        // If current selection is no longer valid, fallback to default
+        self.loadConfigForEditing(key: globalDefaultDisplayName)
       }
-    } else if selectedConfigKeyForEditing == defaultEditKey {
-        // Clear errors if default config is now valid
-        self.validationErrors = []
-    }
-
-    do {
-      let encoder = JSONEncoder()
-      encoder.outputFormatting = [
-        .prettyPrinted, .withoutEscapingSlashes, .sortedKeys,
-      ]
-      let jsonData = try encoder.encode(currentlyEditingGroup)
-      try jsonData.write(to: URL(fileURLWithPath: filePath)) // Write to the specific file path
-
-      // If the saved config was the default one, update the main 'root' property as well
-      if selectedConfigKeyForEditing == defaultEditKey {
-          self.root = currentlyEditingGroup
-      }
-      // If the saved config was an app-specific one, clear its cache entry
-      // so it gets reloaded fresh next time getConfig(for:) is called.
-      if selectedConfigKeyForEditing != defaultEditKey {
-          appConfigs[selectedConfigKeyForEditing] = nil
-      }
-
-    } catch {
-      handleError(error, critical: true)
-    }
-
-    // No full reloadConfig() here to avoid resetting the UI state unnecessarily,
-    // but we might need to signal that a save happened.
-    Events.send(.didSaveConfig) // Send a specific event if needed elsewhere
-  }
-
-  // MARK: - Directory Management
-
-  static func defaultDirectory() -> String {
-    let appSupportDir = FileManager.default.urls(
-      for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let path = (appSupportDir.path as NSString).appendingPathComponent(
-      "Leader Key")
-    do {
-      try FileManager.default.createDirectory(
-        atPath: path, withIntermediateDirectories: true)
-    } catch {
-      fatalError("Failed to create config directory")
-    }
-    return path
-  }
-
-  private func ensureValidConfigDirectory() {
-    let dir = Defaults[.configDir]
-    let defaultDir = Self.defaultDirectory()
-
-    if !fileManager.fileExists(atPath: dir) {
-      alertHandler.showAlert(
-        style: .warning,
-        message:
-          "Config directory does not exist: \(dir)\nResetting to default location."
-      )
-      Defaults[.configDir] = defaultDir
+      
+      // Notify that reload is complete
+      Events.send(.didReload)
     }
   }
 
-  // MARK: - File Operations
-
-  var path: String {
-    (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
-  }
-
-  var url: URL {
-    URL(fileURLWithPath: path)
-  }
-
-  var exists: Bool {
-    fileManager.fileExists(atPath: path)
-  }
-
-  private func ensureConfigFileExists() {
-    guard !exists else { return }
-
-    do {
-      try bootstrapConfig()
-    } catch {
-      handleError(error, critical: true)
-    }
-  }
-
-  private func bootstrapConfig() throws {
-    guard let data = defaultConfig.data(using: .utf8) else {
-      throw NSError(
-        domain: "UserConfig",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to encode default config"]
-      )
-    }
-    try writeFile(data: data)
-  }
-
-  private func writeFile(data: Data) throws {
-    try data.write(to: url)
-  }
-
-  private func readFile() throws -> String {
-    try String(contentsOfFile: path, encoding: .utf8)
-  }
-
-  // MARK: - Config Loading
-
-  private func loadConfig(suppressAlerts: Bool = false) {
-    let defaultPath = (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
-    // Use decodeConfig, indicating it's the default config
-    if let loadedRoot = decodeConfig(from: defaultPath, suppressAlerts: suppressAlerts, isDefaultConfig: true) {
-        self.root = loadedRoot
-        // Update validationErrors state specifically for the default root
-        self.validationErrors = ConfigValidator.validate(group: self.root)
-        if !validationErrors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
-          showValidationAlert()
-        }
-    } else {
-        // If default config fails to load, reset root to emptyRoot
-        self.root = emptyRoot
-        self.validationErrors = []
-        // Critical error shown by decodeConfig/handleError
-    }
-  }
-
-  // Gets the config for a specific app bundle ID, falling back to app.default.json, then default config.json
-  func getConfig(for bundleId: String?) -> Group {
-      // 1. Try specific app config
-      if let bundleId = bundleId, !bundleId.isEmpty {
-          // Check cache first
-          if let cachedConfig = appConfigs[bundleId] {
-              return cachedConfig ?? root // Return cached config or default if cache entry is nil (load failed previously)
-          }
-
-          // Construct app-specific config path
-          let appFileName = "\(appConfigPrefix)\(bundleId).json"
-          let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
-
-          if fileManager.fileExists(atPath: appConfigPath) {
-              // Attempt to load and decode app-specific config
-              if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true, isDefaultConfig: false) {
-                  appConfigs[bundleId] = appRoot // Cache successful load
-                  return appRoot
-              } else {
-                  appConfigs[bundleId] = nil // Cache failed load explicitly as nil
-                  // Fall through to try app.default.json
-              }
-          } else {
-              // File doesn't exist, cache this fact by storing nil
-              appConfigs[bundleId] = nil
-              // Fall through to try app.default.json
-          }
-      }
-
-      // 2. Try default app config (app.default.json)
-      let defaultAppKey = "app.default"
-      // Check cache first
-      if let cachedDefaultAppConfig = appConfigs[defaultAppKey] {
-          return cachedDefaultAppConfig ?? root // Return cached or default if nil
-      }
-
-      let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
-      if fileManager.fileExists(atPath: defaultAppConfigPath) {
-          // Attempt to load and decode app.default.json
-          if let defaultAppRoot = decodeConfig(from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false) {
-              appConfigs[defaultAppKey] = defaultAppRoot // Cache successful load
-              return defaultAppRoot
-          } else {
-              appConfigs[defaultAppKey] = nil // Cache failed load as nil
-              // Fall through to default config.json
-          }
-      } else {
-          // File doesn't exist, cache this fact
-          appConfigs[defaultAppKey] = nil
-      }
-
-      // 3. Fallback to default config.json (already loaded into self.root)
-      return root
-  }
-
-  // Helper to decode a config file from a given path
-  // isDefaultConfig flag helps manage validation errors and critical error handling
-  private func decodeConfig(from filePath: String, suppressAlerts: Bool = false, isDefaultConfig: Bool) -> Group? {
-    guard fileManager.fileExists(atPath: filePath) else {
-      // Only treat missing default config as potentially critical (handled by caller)
-      if isDefaultConfig {
-          print("Warning: Default config file not found at: \(filePath)")
-      } // Don't show error for missing app-specific file here
-      return nil
-    }
-
-    do {
-      let configString = try String(contentsOfFile: filePath, encoding: .utf8)
-
-      guard let jsonData = configString.data(using: .utf8) else {
-        throw NSError(
-          domain: "UserConfig",
-          code: 1,
-          userInfo: [
-            NSLocalizedDescriptionKey: "Failed to encode config file as UTF-8: \(filePath)"
-          ]
-        )
-      }
-
-      let decoder = JSONDecoder()
-      let decodedRoot = try decoder.decode(Group.self, from: jsonData)
-
-      // Perform validation regardless, but only show alerts/update main state for default config
-      let errors = ConfigValidator.validate(group: decodedRoot)
-      if !errors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
-           if isDefaultConfig {
-              // Store errors only if it's the default config being decoded in a context
-              // where we should update the main validationErrors state (e.g., initial load)
-              // This assignment might be redundant if caller updates validationErrors anyway.
-              // validationErrors = errors
-              showValidationAlert() // Show alert only for default config
-           } else {
-              // Log validation issues for app-specific configs, but don't trigger primary alert/state
-              print("Validation issues found in app-specific config: \(filePath)")
-           }
-      }
-      return decodedRoot
-    } catch {
-      // Handle critical errors only for the default config.json
-      handleError(error, critical: isDefaultConfig)
-      return nil // Return nil on any decoding error
-    }
-  }
-
-  private func showValidationAlert() {
-      let errorCount = validationErrors.count
-      alertHandler.showAlert(
-        style: .warning,
-        message:
-          "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your default configuration (config.json). Some keys may not work as expected."
-      )
-  }
-
-  // MARK: - Config Loading
-
-  // Loads the config identified by the key ("Default" or bundle ID) into currentlyEditingGroup
-  func loadConfigForEditing(key: String) {
-    guard let filePath = discoveredConfigFiles[key] else {
-      print("Error: Config file path not found for key: \(key)")
-      currentlyEditingGroup = emptyRoot
-      selectedConfigKeyForEditing = defaultEditKey // Revert selection
-      return
-    }
-    // Load and decode. Suppress validation alerts for non-default configs during this specific load.
-    let isDefault = (key == defaultEditKey)
-    if let loadedGroup = decodeConfig(from: filePath, suppressAlerts: !isDefault, isDefaultConfig: isDefault) {
-        currentlyEditingGroup = loadedGroup
-        selectedConfigKeyForEditing = key
-        // Main validationErrors state is only updated when loading/saving the default config itself
-    } else {
-        handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to load config \'\(key)\' for editing from path: \(filePath)"]), critical: false)
-        currentlyEditingGroup = emptyRoot
-        // Consider reverting selectedConfigKeyForEditing? Or let UI show load failed?
-        // For now, keep selection but show empty editor
-    }
-  }
-
-  // MARK: - File Discovery
-
-  private func discoverConfigFiles() {
-      var discovered: [String: String] = [:]
-      let configDir = Defaults[.configDir]
-      let configDirUrl = URL(fileURLWithPath: configDir)
-
-      // Add default config first
-      let defaultPath = (configDir as NSString).appendingPathComponent(fileName)
-      if fileManager.fileExists(atPath: defaultPath) {
-          discovered[defaultEditKey] = defaultPath
-      }
-
-      do {
-          let fileURLs = try fileManager.contentsOfDirectory(at: configDirUrl, includingPropertiesForKeys: nil)
-          for fileURL in fileURLs {
-              let fileName = fileURL.lastPathComponent
-              if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
-                  // Extract bundle ID
-                  let bundleId = String(fileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
-                  if !bundleId.isEmpty {
-                      discovered[bundleId] = fileURL.path
-                  }
-              }
-          }
-      } catch {
-          handleError(NSError(domain: "UserConfig", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to list contents of config directory: \(configDir)"]), critical: false)
-      }
-      // Update the published property
-      self.discoveredConfigFiles = discovered
-  }
-
-  // MARK: - Validation
-
-  func validateWithoutAlerts() {
-    validationErrors = ConfigValidator.validate(group: root)
-  }
-
-  func finishEditingKey() {
-    validateWithoutAlerts()
-  }
-
-  // MARK: - Error Handling
-
-  private func handleError(_ error: Error, critical: Bool) {
-    alertHandler.showAlert(
-      style: critical ? .critical : .warning, message: "\(error)")
-    // Resetting root/currentlyEditingGroup on critical errors needs care
-    if critical {
-      root = emptyRoot
-      currentlyEditingGroup = emptyRoot
-      validationErrors = []
-      // Maybe reset selection?
-      selectedConfigKeyForEditing = defaultEditKey
-      // Re-discover files? Might be problematic if dir access is the issue.
-      discoverConfigFiles()
-    }
-  }
+  // Placeholder for methods moved to extensions
 }
+
+// MARK: - Key Update Logic (Add this new extension)
+extension UserConfig {
+    // Public method to initiate key update
+    func updateKey(at path: [Int], newKey: String) {
+        let updateLogic = {
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                let effectiveKey = newKey.isEmpty ? nil : newKey
+                
+                switch item {
+                case .action(var action):
+                    let oldKey = action.key
+                    if oldKey != effectiveKey {
+                        action.key = effectiveKey
+                        item = .action(action)
+                    }
+                case .group(var subGroup):
+                    let oldKey = subGroup.key
+                    if oldKey != effectiveKey {
+                        subGroup.key = effectiveKey
+                        item = .group(subGroup)
+                    }
+                @unknown default:
+                   break
+                }
+            }
+            self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update
+        }
+
+        updateLogic()
+    }
+
+    private func modifyItem(in group: inout Group, at path: [Int], update: (inout ActionOrGroup) -> Void) {
+        guard !path.isEmpty else {
+            return
+        }
+
+        var currentPath = path
+        let index = currentPath.removeFirst()
+
+        guard index >= 0 && index < group.actions.count else {
+            return
+        }
+
+        if currentPath.isEmpty {
+            var itemToUpdate = group.actions[index]
+            update(&itemToUpdate)
+            group.actions[index] = itemToUpdate
+        } else {
+            guard case .group(var subgroup) = group.actions[index] else {
+                return
+            }
+            modifyItem(in: &subgroup, at: currentPath, update: update)
+            group.actions[index] = .group(subgroup)
+        }
+    }
+    
+    // Remove the now unused finishEditingKey method if it exists
+    // func finishEditingKey() { ... }
+}
+
+// MARK: - Action Type Update Logic (New Extension)
+extension UserConfig {
+    // Public method to update an action's type and reset its value
+    func updateActionType(at path: [Int], newType: Type) {
+        let updateLogic = { 
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                guard case .action(var action) = item else {
+                    return
+                }
+                
+                if action.type != newType {
+                    action.type = newType
+                    action.value = "" // Reset value when type changes
+                    item = .action(action)
+                }
+            }
+            self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update if needed
+        }
+
+        updateLogic()
+    }
+}
+
+// MARK: - Copy/Paste Logic (New Extension)
+extension UserConfig {
+    func pasteItem(at path: [Int]) {
+        guard let pastedItem = ClipboardManager.shared.pasteItem() else { return }
+        
+        let validatedItem = validateAndCleanItem(pastedItem, at: path)
+        insertItem(validatedItem, at: path)
+    }
+    
+    func insertItem(_ item: ActionOrGroup, at path: [Int]) {
+        let insertLogic = {
+            self.insertItemInGroup(item, in: &self.currentlyEditingGroup, at: path)
+            self.currentlyEditingGroup = self.currentlyEditingGroup // Force SwiftUI update
+        }
+        
+        insertLogic()
+    }
+    
+    private func validateAndCleanItem(_ item: ActionOrGroup, at path: [Int]) -> ActionOrGroup {
+        var cleanedItem = item
+        
+        // Check for duplicate keys at the same level
+        let parentGroup = getParentGroup(at: path)
+        let existingKeys = parentGroup.actions.compactMap { $0.item.key }
+        
+        switch cleanedItem {
+        case .action(var action):
+            if let key = action.key, existingKeys.contains(key) {
+                action.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+            }
+            cleanedItem = .action(action)
+        case .group(var group):
+            if let key = group.key, existingKeys.contains(key) {
+                group.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+            }
+            cleanedItem = .group(group)
+        }
+        
+        return cleanedItem
+    }
+    
+    private func getParentGroup(at path: [Int]) -> Group {
+        var currentGroup = currentlyEditingGroup
+        var pathCopy = path
+        
+        // Navigate to parent group
+        if !pathCopy.isEmpty {
+            pathCopy.removeLast() // Remove the insertion index
+            
+            for index in pathCopy {
+                guard index >= 0 && index < currentGroup.actions.count,
+                      case .group(let subgroup) = currentGroup.actions[index] else {
+                    break
+                }
+                currentGroup = subgroup
+            }
+        }
+        
+        return currentGroup
+    }
+    
+    private func generateUniqueKey(base: String, existingKeys: [String]) -> String {
+        let baseKey = base.isEmpty ? "key" : base
+        var counter = 1
+        var newKey = baseKey
+        
+        while existingKeys.contains(newKey) {
+            newKey = "\(baseKey)_\(counter)"
+            counter += 1
+        }
+        
+        return newKey
+    }
+    
+    private func insertItemInGroup(_ item: ActionOrGroup, in group: inout Group, at path: [Int]) {
+        guard !path.isEmpty else {
+            group.actions.append(item)
+            return
+        }
+        
+        var currentPath = path
+        let index = currentPath.removeFirst()
+        
+        guard index >= 0 && index <= group.actions.count else {
+            return
+        }
+        
+        if currentPath.isEmpty {
+            group.actions.insert(item, at: index)
+        } else {
+            guard index < group.actions.count,
+                  case .group(var subgroup) = group.actions[index] else {
+                return
+            }
+            insertItemInGroup(item, in: &subgroup, at: currentPath)
+            group.actions[index] = .group(subgroup)
+        }
+    }
+}
+
+// MARK: - Search Data Structures
+enum SearchMatchType: String, Hashable, CaseIterable {
+    case all = "All"
+    case key = "Key"
+    case label = "Label"
+    case value = "Value"
+    case appName = "App Name"
+}
+
+struct SearchResult: Identifiable, Hashable {
+    let id = UUID()
+    let keySequence: String  // e.g., "o → s" or "r → w → f"
+    let item: ActionOrGroup
+    let path: [Int]
+    let configName: String
+    let matchType: SearchMatchType
+    let matchReason: String
+    
+    var displayName: String {
+        return item.item.displayName
+    }
+    
+    var typeDescription: String {
+        switch item {
+        case .action(let action):
+            return action.type.rawValue.capitalized
+        case .group:
+            return "Group"
+        }
+    }
+    
+    var valueDescription: String {
+        switch item {
+        case .action(let action):
+            switch action.type {
+            case .application:
+                return (action.value as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
+            case .url:
+                return action.value
+            case .command:
+                return action.value
+            case .folder:
+                return (action.value as NSString).lastPathComponent
+            case .text:
+                let snippet = action.value.prefix(30)
+                return snippet.count < action.value.count ? "\(snippet)..." : String(snippet)
+            default:
+                return action.value
+            }
+        case .group(let group):
+            return "Contains \(group.actions.count) items"
+        }
+    }
+    
+    static func == (lhs: SearchResult, rhs: SearchResult) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+extension UserConfig {
+    // Public method to initiate a search across all configurations
+    func searchSequences(query: String, matchType: SearchMatchType, includeGroups: Bool) -> [SearchResult] {
+        let lowercasedQuery = query.lowercased()
+        var results: [SearchResult] = []
+
+        // Search in the default config (config.json)
+        let defaultResults = search(in: root, query: lowercasedQuery, configName: globalDefaultDisplayName, matchType: matchType, includeGroups: includeGroups)
+        results.append(contentsOf: defaultResults)
+
+        // Search in all discovered app-specific configs
+        for (configName, configPath) in discoveredConfigFiles where configName != globalDefaultDisplayName {
+            if let configGroup = decodeConfig(from: configPath, suppressAlerts: true, isDefaultConfig: false) {
+                let appResults = search(in: configGroup, query: lowercasedQuery, configName: configName, matchType: matchType, includeGroups: includeGroups)
+                results.append(contentsOf: appResults)
+            }
+        }
+        
+        return results.sorted { $0.keySequence < $1.keySequence } // Sort alphabetically by key sequence
+    }
+
+    // Recursive helper function to search within a specific group
+    private func search(
+        in group: Group,
+        query: String,
+        configName: String,
+        matchType: SearchMatchType,
+        includeGroups: Bool,
+        currentPath: [Int] = [],
+        keySequence: [String] = []
+    ) -> [SearchResult] {
+        var findings: [SearchResult] = []
+
+        for (index, actionOrGroup) in group.actions.enumerated() {
+            let newPath = currentPath + [index]
+            let newKeySequence = keySequence + [actionOrGroup.item.key ?? ""]
+            let keySequenceString = newKeySequence.filter { !$0.isEmpty }.joined(separator: " → ")
+
+            var matchReason: String?
+            let item = actionOrGroup.item
+
+            // Determine if the item matches the query
+            if matchType == .all || matchType == .key {
+                if let key = item.key, key.lowercased().contains(query) {
+                    matchReason = "Matched key: '\(key)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .label) {
+                if let label = item.label, label.lowercased().contains(query) {
+                    matchReason = "Matched label: '\(label)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .value) {
+                if case .action(let action) = actionOrGroup, action.value.lowercased().contains(query) {
+                    matchReason = "Matched value: '\(action.value)'"
+                }
+            }
+            if matchReason == nil && (matchType == .all || matchType == .appName) {
+                 if case .action(let action) = actionOrGroup, action.type == .application {
+                    let appName = (action.value as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "").lowercased()
+                    if appName.contains(query) {
+                        matchReason = "Matched app name: '\(appName.capitalized)'"
+                    }
+                }
+            }
+
+            // If a match is found, create a SearchResult
+            if let reason = matchReason {
+                let result = SearchResult(
+                    keySequence: keySequenceString,
+                    item: actionOrGroup,
+                    path: newPath,
+                    configName: configName,
+                    matchType: .key, // This should be more specific based on what matched
+                    matchReason: reason
+                )
+                findings.append(result)
+            }
+
+            // Recurse into subgroups if necessary
+            if case .group(let subGroup) = actionOrGroup {
+                if includeGroups || matchReason == nil { // Also search inside if the group itself didn't match
+                    let subGroupFindings = search(
+                        in: subGroup,
+                        query: query,
+                        configName: configName,
+                        matchType: matchType,
+                        includeGroups: includeGroups,
+                        currentPath: newPath,
+                        keySequence: newKeySequence
+                    )
+                    findings.append(contentsOf: subGroupFindings)
+                }
+            }
+        }
+
+        return findings
+    }
+}
+
+    
 
 let defaultConfig = """
   {
@@ -494,6 +525,21 @@ enum Type: String, Codable {
   case url
   case command
   case folder
+  case shortcut
+  case text
+  case toggleStickyMode
+  case macro
+}
+
+struct MacroStep: Codable, Equatable, Identifiable {
+  let id = UUID()
+  var action: Action
+  var delay: Double // Delay in seconds before executing this step
+  var enabled: Bool = true
+  
+  private enum CodingKeys: String, CodingKey {
+    case action, delay, enabled
+  }
 }
 
 protocol Item {
@@ -504,12 +550,16 @@ protocol Item {
   var iconPath: String? { get set }
 }
 
-struct Action: Item, Codable, Equatable {
+struct Action: Item, Codable, Equatable, Identifiable {
+  let id = UUID()
   var key: String?
   var type: Type
   var label: String?
   var value: String
   var iconPath: String?
+  var activates: Bool?
+  var stickyMode: Bool?
+  var macroSteps: [MacroStep]?
 
   var displayName: String {
     guard let labelValue = label else { return bestGuessDisplayName }
@@ -528,17 +578,28 @@ struct Action: Item, Codable, Equatable {
       return (value as NSString).lastPathComponent
     case .url:
       return "URL"
+    case .shortcut:
+      return "Shortcut: \(value)"
+    case .text:
+      let snippet = value.prefix(20)
+      let suffix = value.count > 20 ? "..." : ""
+      return "Type: '\(snippet)\(suffix)'"
+    case .macro:
+      let stepCount = macroSteps?.count ?? 0
+      return "Macro: \(stepCount) steps"
     default:
       return value
     }
   }
 }
 
-struct Group: Item, Codable, Equatable {
+struct Group: Item, Codable, Equatable, Identifiable {
+  let id = UUID()
   var key: String?
   var type: Type = .group
   var label: String?
   var iconPath: String?
+  var stickyMode: Bool?
   var actions: [ActionOrGroup]
 
   var displayName: String {
@@ -549,11 +610,18 @@ struct Group: Item, Codable, Equatable {
 
   static func == (lhs: Group, rhs: Group) -> Bool {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
-      && lhs.actions == rhs.actions
+      && lhs.iconPath == rhs.iconPath && lhs.stickyMode == rhs.stickyMode && lhs.actions == rhs.actions
   }
 }
 
-enum ActionOrGroup: Codable, Equatable {
+enum ActionOrGroup: Codable, Equatable, Identifiable {
+  var id: UUID {
+    switch self {
+      case .action(let action): return action.id
+      case .group(let group): return group.id
+    }
+  }
+
   case action(Action)
   case group(Group)
 
@@ -565,7 +633,7 @@ enum ActionOrGroup: Codable, Equatable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, iconPath
+    case key, type, value, actions, label, iconPath, activates, stickyMode, macroSteps
   }
 
   init(from decoder: Decoder) throws {
@@ -574,14 +642,17 @@ enum ActionOrGroup: Codable, Equatable {
     let type = try container.decode(Type.self, forKey: .type)
     let label = try container.decodeIfPresent(String.self, forKey: .label)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
+    let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
+    let stickyMode = try container.decodeIfPresent(Bool.self, forKey: .stickyMode)
 
     switch type {
     case .group:
       let actions = try container.decode([ActionOrGroup].self, forKey: .actions)
-      self = .group(Group(key: key, label: label, iconPath: iconPath, actions: actions))
+      self = .group(Group(key: key, label: label, iconPath: iconPath, stickyMode: stickyMode, actions: actions))
     default:
       let value = try container.decode(String.self, forKey: .value)
-      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath))
+      let macroSteps = try container.decodeIfPresent([MacroStep].self, forKey: .macroSteps)
+      self = .action(Action(key: key, type: type, label: label, value: value, iconPath: iconPath, activates: activates, stickyMode: stickyMode, macroSteps: macroSteps))
     }
   }
 
@@ -596,6 +667,9 @@ enum ActionOrGroup: Codable, Equatable {
         try container.encodeIfPresent(action.label, forKey: .label)
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
+      try container.encodeIfPresent(action.activates, forKey: .activates)
+      try container.encodeIfPresent(action.stickyMode, forKey: .stickyMode)
+      try container.encodeIfPresent(action.macroSteps, forKey: .macroSteps)
     case .group(let group):
       try container.encode(group.key, forKey: .key)
       try container.encode(Type.group, forKey: .type)
@@ -604,6 +678,40 @@ enum ActionOrGroup: Codable, Equatable {
         try container.encodeIfPresent(group.label, forKey: .label)
       }
       try container.encodeIfPresent(group.iconPath, forKey: .iconPath)
+      try container.encodeIfPresent(group.stickyMode, forKey: .stickyMode)
     }
   }
+}
+
+// MARK: - ActionOrGroup Extensions
+extension ActionOrGroup {
+    func makeTrueDuplicate() -> ActionOrGroup {
+        switch self {
+        case .action(let action):
+            return .action(Action(
+                key: action.key,
+                type: action.type,
+                label: action.label,
+                value: action.value,
+                iconPath: action.iconPath,
+                activates: action.activates,
+                stickyMode: action.stickyMode,
+                macroSteps: action.macroSteps?.map { step in
+                    MacroStep(
+                        action: step.action,
+                        delay: step.delay,
+                        enabled: step.enabled
+                    )
+                }
+            ))
+        case .group(let group):
+            return .group(Group(
+                key: group.key,
+                label: group.label,
+                iconPath: group.iconPath,
+                stickyMode: group.stickyMode,
+                actions: group.actions.map { $0.makeTrueDuplicate() }
+            ))
+        }
+    }
 }
