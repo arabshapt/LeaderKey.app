@@ -8,22 +8,32 @@ struct KeyButton: View {
   var validationError: ValidationErrorType?
   var path: [Int]
   var onKeyChanged: (([Int], String) -> Void)?
+  var showFallbackIndicator: Bool = false
 
   var body: some View {
     Button(action: {
       isListening = true
     }) {
-      Text(text.isEmpty ? placeholder : text)
-        .frame(width: 32, height: 24)
-        .background(
-          RoundedRectangle(cornerRadius: 5)
-            .fill(backgroundColor)
-            .overlay(
-              RoundedRectangle(cornerRadius: 5)
-                .stroke(borderColor, lineWidth: 1)
-            )
-        )
-        .foregroundColor(text.isEmpty ? .gray : .primary)
+      ZStack(alignment: .bottomTrailing) {
+        Text(text.isEmpty ? placeholder : text)
+          .frame(width: 32, height: 24)
+          .background(
+            RoundedRectangle(cornerRadius: 5)
+              .fill(backgroundColor)
+              .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                  .stroke(borderColor, lineWidth: 1)
+              )
+          )
+          .foregroundColor(text.isEmpty ? .gray : .primary)
+        
+        if showFallbackIndicator {
+          Image(systemName: "circle.fill")
+            .foregroundColor(.white.opacity(0.2))
+            .font(.system(size: 4))
+            .offset(x: -2, y: -2)
+        }
+      }
     }
     .buttonStyle(PlainButtonStyle())
     .background(

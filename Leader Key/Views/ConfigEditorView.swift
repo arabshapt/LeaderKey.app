@@ -425,7 +425,8 @@ struct ActionRow: View {
         onKeyChanged: { keyButtonPath, capturedKey in
           state.keyInputValue = capturedKey
           userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
-        }
+        },
+        showFallbackIndicator: action.isFromFallback
       )
       .onChange(of: state.isListening) { isNowListening in
           if state.wasPreviouslyListening && !isNowListening {
@@ -705,7 +706,7 @@ struct ActionRow: View {
         if action.isFromFallback {
           HStack(spacing: 2) {
             Image(systemName: "arrow.down.circle.fill")
-              .foregroundColor(.blue.opacity(0.6))
+              .foregroundColor(.white.opacity(0.2))
               .font(.system(size: 10))
               .help("From \(action.fallbackSource ?? "Fallback App Config")")
 
@@ -840,7 +841,8 @@ struct GroupRow: View {
           onKeyChanged: { keyButtonPath, capturedKey in
             keyInputValue = capturedKey
             userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
-          }
+          },
+          showFallbackIndicator: group.isFromFallback
         )
         .onChange(of: isListening) { isNowListening in
             if wasPreviouslyListening && !isNowListening {
@@ -901,7 +903,7 @@ struct GroupRow: View {
           if group.isFromFallback {
             HStack(spacing: 2) {
               Image(systemName: "arrow.down.circle.fill")
-                .foregroundColor(.blue.opacity(0.6))
+                .foregroundColor(.white.opacity(0.2))
                 .font(.system(size: 10))
                 .help("From \(group.fallbackSource ?? "Fallback App Config")")
 
@@ -1430,7 +1432,7 @@ struct MacroStepRow: View {
       // Fallback indicator for macro steps
       if step.action.isFromFallback {
         Image(systemName: "circle.fill")
-          .foregroundColor(.blue)
+          .foregroundColor(.white.opacity(0.2))
           .font(.system(size: 4))
           .help("From \(step.action.fallbackSource ?? "Fallback App Config")")
       }

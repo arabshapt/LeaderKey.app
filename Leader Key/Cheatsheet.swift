@@ -7,16 +7,31 @@ enum Cheatsheet {
 
   struct KeyBadge: SwiftUI.View {
     let key: String
+    let showFallbackIndicator: Bool
+
+    init(key: String, showFallbackIndicator: Bool = false) {
+      self.key = key
+      self.showFallbackIndicator = showFallbackIndicator
+    }
 
     var body: some SwiftUI.View {
-      Text(key)
-        .font(.system(.body, design: .rounded))
-        .multilineTextAlignment(.center)
-        .fontWeight(.bold)
-        .padding(.vertical, 4)
-        .frame(width: 24)
-        .background(.white.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 5.0, style: .continuous))
+      ZStack(alignment: .bottomTrailing) {
+        Text(key)
+          .font(.system(.body, design: .rounded))
+          .multilineTextAlignment(.center)
+          .fontWeight(.bold)
+          .padding(.vertical, 4)
+          .frame(width: 24)
+          .background(.white.opacity(0.1))
+          .clipShape(RoundedRectangle(cornerRadius: 5.0, style: .continuous))
+        
+        if showFallbackIndicator {
+          Image(systemName: "circle.fill")
+            .foregroundColor(.white.opacity(0.2))
+            .font(.system(size: 4))
+            .offset(x: -2, y: -2)
+        }
+      }
     }
   }
 
@@ -33,7 +48,8 @@ enum Cheatsheet {
           ForEach(0..<indent, id: \.self) { _ in
             Text("  ")
           }
-          KeyBadge(key: action.key ?? "●")
+          KeyBadge(key: action.key ?? "●", showFallbackIndicator: action.isFromFallback)
+            .help(action.isFromFallback ? "From \(action.fallbackSource ?? "Fallback App Config")" : "")
 
           if showIcons {
             actionIcon(item: ActionOrGroup.action(action), iconSize: iconSize)
@@ -43,13 +59,6 @@ enum Cheatsheet {
             .lineLimit(1)
             .truncationMode(.middle)
             .opacity(action.isFromFallback ? 0.7 : 1.0)
-
-          if action.isFromFallback {
-            Image(systemName: "circle.fill")
-              .foregroundColor(.blue)
-              .font(.system(size: 4))
-              .help("From \(action.fallbackSource ?? "Fallback App Config")")
-          }
         }
         Spacer()
         if showDetails {
@@ -110,7 +119,8 @@ enum Cheatsheet {
           ForEach(0..<indent, id: \.self) { _ in
             Text("  ")
           }
-          KeyBadge(key: group.key ?? "")
+          KeyBadge(key: group.key ?? "", showFallbackIndicator: group.isFromFallback)
+            .help(group.isFromFallback ? "From \(group.fallbackSource ?? "Fallback App Config")" : "")
 
           if showIcons {
             actionIcon(item: ActionOrGroup.group(group), iconSize: iconSize)
@@ -121,13 +131,6 @@ enum Cheatsheet {
 
           Text(group.displayName)
             .opacity(group.isFromFallback ? 0.7 : 1.0)
-
-          if group.isFromFallback {
-            Image(systemName: "circle.fill")
-              .foregroundColor(.blue)
-              .font(.system(size: 4))
-              .help("From \(group.fallbackSource ?? "Fallback App Config")")
-          }
 
           Spacer()
           if showDetails {
