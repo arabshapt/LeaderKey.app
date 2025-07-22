@@ -385,12 +385,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func hide() {
       print("[AppDelegate] hide() called.") // Log entry into hide()
       
-      // Start timeout timer for state reset fallback
-      startHideTimeoutTimer()
-      
       controller.hide(afterClose: { [weak self] in
         // Reset sequence AFTER the window is fully closed to avoid visual flash
-        self?.cancelHideTimeoutTimer() // Cancel timeout since hide completed successfully
         self?.resetSequenceState()
       })
     }
@@ -756,18 +752,6 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
         set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
     }
-    private var eventTapHealthTimer: Timer? {
-        get { getAssociatedObject(self, &AssociatedKeys.eventTapHealthTimer) }
-        set { setAssociatedObject(self, &AssociatedKeys.eventTapHealthTimer, newValue) }
-    }
-    private var lastEventTapActivity: Date? {
-        get { getAssociatedObject(self, &AssociatedKeys.lastEventTapActivity) }
-        set { setAssociatedObject(self, &AssociatedKeys.lastEventTapActivity, newValue) }
-    }
-    private var hideTimeoutTimer: Timer? {
-        get { getAssociatedObject(self, &AssociatedKeys.hideTimeoutTimer) }
-        set { setAssociatedObject(self, &AssociatedKeys.hideTimeoutTimer, newValue) }
-    }
     private var cpuMonitorTimer: Timer? {
         get { getAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer) }
         set { setAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer, newValue) }
@@ -786,9 +770,6 @@ extension AppDelegate {
         static var stickyModeToggled = "stickyModeToggled"
         static var lastModifierFlags = "lastModifierFlags"
         static var activeActivationShortcut = "activeActivationShortcut"
-        static var eventTapHealthTimer = "eventTapHealthTimer"
-        static var lastEventTapActivity = "lastEventTapActivity"
-        static var hideTimeoutTimer = "hideTimeoutTimer"
         static var cpuMonitorTimer = "cpuMonitorTimer"
         static var isHighCpuMode = "isHighCpuMode"
     }
@@ -848,7 +829,6 @@ extension AppDelegate {
         self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
         
         // Start event tap health monitoring
-        startEventTapHealthMonitoring()
         
         // Start CPU monitoring for adaptive behavior
         startCPUMonitoring()
@@ -864,7 +844,6 @@ extension AppDelegate {
         print("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
         
         // Stop health monitoring and CPU monitoring
-        stopEventTapHealthMonitoring()
         stopCPUMonitoring()
         
         resetSequenceState() // Ensure sequence state is cleared
@@ -883,97 +862,6 @@ extension AppDelegate {
         print("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
 
-    // --- Event Tap Health Monitoring Methods ---
-    
-    private func startEventTapHealthMonitoring() {
-        stopEventTapHealthMonitoring() // Stop any existing timer
-        
-        self.lastEventTapActivity = Date()
-        
-        // Check event tap health every 5 seconds
-        self.eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.checkEventTapHealth()
-        }
-        
-        print("[AppDelegate] Event tap health monitoring started.")
-    }
-    
-    private func stopEventTapHealthMonitoring() {
-        eventTapHealthTimer?.invalidate()
-        eventTapHealthTimer = nil
-        print("[AppDelegate] Event tap health monitoring stopped.")
-    }
-    
-    private func checkEventTapHealth() {
-        guard isMonitoring else { return }
-        
-        let now = Date()
-        let lastActivity = lastEventTapActivity ?? Date.distantPast
-        let timeSinceLastActivity = now.timeIntervalSince(lastActivity)
-        
-        // Use adaptive threshold based on CPU load
-        let healthThreshold: TimeInterval = isHighCpuMode ? 20.0 : 10.0
-        
-        if timeSinceLastActivity > healthThreshold {
-            print("[AppDelegate] Event tap appears unhealthy (no activity for \(Int(timeSinceLastActivity))s). Attempting recovery.")
-            recoverEventTap()
-        }
-    }
-    
-    private func recoverEventTap() {
-        print("[AppDelegate] Attempting event tap recovery...")
-        
-        // Force stop and restart monitoring
-        let wasMonitoring = isMonitoring
-        stopEventTapMonitoring()
-        
-        if wasMonitoring {
-            // Brief delay before restart to allow system cleanup
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.startEventTapMonitoring()
-            }
-        }
-    }
-    
-    private func updateEventTapActivity() {
-        lastEventTapActivity = Date()
-    }
-    
-    // --- Timeout-Based State Reset Methods ---
-    
-    private func startHideTimeoutTimer() {
-        // Cancel any existing timeout timer
-        cancelHideTimeoutTimer()
-        
-        // Use adaptive timeout based on CPU load
-        let timeoutDuration: TimeInterval = isHighCpuMode ? 6.0 : 3.0
-        
-        self.hideTimeoutTimer = Timer.scheduledTimer(withTimeInterval: timeoutDuration, repeats: false) { [weak self] _ in
-            self?.handleHideTimeout()
-        }
-        
-        let mode = isHighCpuMode ? " (high CPU mode)" : ""
-        print("[AppDelegate] Hide timeout timer started (\(Int(timeoutDuration)) seconds\(mode)).")
-    }
-    
-    private func cancelHideTimeoutTimer() {
-        hideTimeoutTimer?.invalidate()
-        hideTimeoutTimer = nil
-    }
-    
-    private func handleHideTimeout() {
-        print("[AppDelegate] Hide timeout triggered - forcing state reset.")
-        
-        // Force reset state if we still have an active sequence
-        if currentSequenceGroup != nil {
-            print("[AppDelegate] Hide timeout: Current sequence still active, forcing reset.")
-            forceResetState()
-        } else {
-            print("[AppDelegate] Hide timeout: No active sequence, timeout was unnecessary.")
-        }
-        
-        cancelHideTimeoutTimer()
-    }
     
     // --- Force Reset Mechanism ---
     
@@ -981,8 +869,6 @@ extension AppDelegate {
         print("[AppDelegate] forceResetState: Performing nuclear state reset.")
         
         // Cancel all timers immediately
-        cancelHideTimeoutTimer()
-        stopEventTapHealthMonitoring()
         
         // Force clear all state variables immediately (no delays, no callbacks)
         self.currentSequenceGroup = nil
@@ -1089,7 +975,6 @@ extension AppDelegate {
     // This is the entry point called by the C callback `eventTapCallback`
     func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         // Update event tap activity tracking
-        updateEventTapActivity()
         
         // Handle different event types
         switch event.type {
