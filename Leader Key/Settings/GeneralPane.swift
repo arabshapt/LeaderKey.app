@@ -10,6 +10,7 @@ struct GeneralPane: View {
   @EnvironmentObject private var config: UserConfig
   @Default(.configDir) var configDir
   @Default(.theme) var theme
+  @Default(.showFallbackItems) var showFallbackItems
   @State private var expandedGroups = Set<[Int]>()
   @State private var showingRenameAlert = false
   @State private var showingDeleteAlert = false
@@ -211,6 +212,13 @@ struct GeneralPane: View {
             Text(Theme.name(value)).tag(value)
           }
         }.frame(maxWidth: 170).labelsHidden()
+      }
+
+      Settings.Section(title: "FB") {
+        Toggle("Show fallback items", isOn: $showFallbackItems)
+        Text("Show items inherited from Default App Config in both the settings editor and Leader Key panels. Fallback items appear with visual indicators and can be overridden to create app-specific versions.")
+          .font(.caption)
+          .foregroundColor(.secondary)
       }
 
       Settings.Section(title: "App") {

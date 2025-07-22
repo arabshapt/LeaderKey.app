@@ -18,9 +18,22 @@ extension UserConfig {
         }
         print("[SAVE LOG] saveCurrentlyEditingConfig: File path to save to: \(filePath)")
 
+        // --- FALLBACK STRIPPING (for app-specific configs only) ---
+        var groupToProcess = currentlyEditingGroup
+        let isAppSpecificConfig = selectedConfigKeyForEditing != globalDefaultDisplayName
+        
+        if isAppSpecificConfig {
+            print("[SAVE LOG] saveCurrentlyEditingConfig: Stripping fallback items from app-specific config.")
+            groupToProcess = stripFallbackItems(from: currentlyEditingGroup)
+            print("[SAVE LOG] saveCurrentlyEditingConfig: State after stripping fallbacks: \(groupToProcess)")
+        } else {
+            print("[SAVE LOG] saveCurrentlyEditingConfig: Saving global default config, keeping all items.")
+        }
+        // -----------------
+
         // --- SORTING --- 
         print("[SAVE LOG] saveCurrentlyEditingConfig: About to sort group.")
-        let sortedGroup = sortGroupRecursively(group: currentlyEditingGroup)
+        let sortedGroup = sortGroupRecursively(group: groupToProcess)
         print("[SAVE LOG] saveCurrentlyEditingConfig: State of group AFTER sort (sortedGroup): \(sortedGroup)")
         // -----------------
 
@@ -71,6 +84,67 @@ extension UserConfig {
         } catch {
             handleError(error, critical: true)
         }
+    }
+
+    // Recursively removes all fallback items from a group, keeping only app-specific items
+    private func stripFallbackItems(from group: Group) -> Group {
+        var appSpecificActions: [ActionOrGroup] = []
+        
+        for item in group.actions {
+            switch item {
+            case .action(let action):
+                // Only keep actions that are NOT from fallback
+                if !action.isFromFallback {
+                    var cleanAction = action
+                    // Clean macro steps too - only keep non-fallback macro steps
+                    if let macroSteps = cleanAction.macroSteps {
+                        cleanAction.macroSteps = macroSteps.filter { !$0.action.isFromFallback }
+                    }
+                    appSpecificActions.append(.action(cleanAction))
+                }
+            case .group(let subgroup):
+                // Only keep groups that are NOT from fallback
+                if !subgroup.isFromFallback {
+                    // Recursively clean nested groups
+                    let cleanedSubgroup = stripFallbackItems(from: subgroup)
+                    appSpecificActions.append(.group(cleanedSubgroup))
+                } else {
+                    // If the group itself is from fallback, but it might contain app-specific items
+                    // we need to extract any app-specific children and promote them to the parent level
+                    let cleanedSubgroup = stripFallbackItems(from: subgroup)
+                    // Only add if there are any app-specific items inside
+                    if !cleanedSubgroup.actions.isEmpty {
+                        // Create a new non-fallback group with the same structure but only app-specific content
+                        var promotedGroup = Group(
+                            key: cleanedSubgroup.key,
+                            label: cleanedSubgroup.label,
+                            iconPath: cleanedSubgroup.iconPath,
+                            stickyMode: cleanedSubgroup.stickyMode,
+                            actions: cleanedSubgroup.actions
+                        )
+                        // Ensure the promoted group is not marked as fallback
+                        promotedGroup.isFromFallback = false
+                        promotedGroup.fallbackSource = nil
+                        appSpecificActions.append(.group(promotedGroup))
+                    }
+                }
+            }
+        }
+        
+        // Return a new group with only app-specific items
+        var cleanGroup = Group(
+            key: group.key,
+            label: group.label,
+            iconPath: group.iconPath,
+            stickyMode: group.stickyMode,
+            actions: appSpecificActions
+        )
+        
+        // Preserve the group's metadata if it's not from fallback
+        cleanGroup.isFromFallback = group.isFromFallback
+        cleanGroup.fallbackSource = group.fallbackSource
+        
+        return cleanGroup
     }
 
     // Recursively sorts actions and groups within a group alphabetically by key

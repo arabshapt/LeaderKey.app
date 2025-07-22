@@ -25,6 +25,7 @@ enum Cheatsheet {
     let indent: Int
     @Default(.showDetailsInCheatsheet) var showDetails
     @Default(.showAppIconsInCheatsheet) var showIcons
+    @Default(.showFallbackItems) var showFallbackItems
 
     var body: some SwiftUI.View {
       HStack {
@@ -41,6 +42,14 @@ enum Cheatsheet {
           Text(action.displayName)
             .lineLimit(1)
             .truncationMode(.middle)
+            .opacity(action.isFromFallback ? 0.7 : 1.0)
+          
+          if action.isFromFallback {
+            Image(systemName: "circle.fill")
+              .foregroundColor(.blue)
+              .font(.system(size: 4))
+              .help("From \(action.fallbackSource ?? "Default App Config")")
+          }
         }
         Spacer()
         if showDetails {
@@ -73,9 +82,27 @@ enum Cheatsheet {
     @Default(.expandGroupsInCheatsheet) var expand
     @Default(.showDetailsInCheatsheet) var showDetails
     @Default(.showAppIconsInCheatsheet) var showIcons
+    @Default(.showFallbackItems) var showFallbackItems
 
     let group: Group
     let indent: Int
+
+    // Sort group actions alphabetically and conditionally show/hide fallback items
+    var visibleGroupActions: [ActionOrGroup] {
+      let sortedActions = group.actions.sortedAlphabetically()
+      if showFallbackItems {
+        return sortedActions
+      } else {
+        return sortedActions.filter { item in
+          switch item {
+          case .action(let action):
+            return !action.isFromFallback
+          case .group(let subgroup):
+            return !subgroup.isFromFallback
+          }
+        }
+      }
+    }
 
     var body: some SwiftUI.View {
       VStack(alignment: .leading, spacing: 4) {
@@ -93,6 +120,14 @@ enum Cheatsheet {
             .foregroundStyle(.secondary)
 
           Text(group.displayName)
+            .opacity(group.isFromFallback ? 0.7 : 1.0)
+          
+          if group.isFromFallback {
+            Image(systemName: "circle.fill")
+              .foregroundColor(.blue)
+              .font(.system(size: 4))
+              .help("From \(group.fallbackSource ?? "Default App Config")")
+          }
 
           Spacer()
           if showDetails {
@@ -103,7 +138,7 @@ enum Cheatsheet {
           }
         }
         if expand {
-          ForEach(Array(group.actions.enumerated()), id: \.offset) { _, item in
+          ForEach(Array(visibleGroupActions.enumerated()), id: \.offset) { _, item in
             switch item {
             case .action(let action):
               Cheatsheet.ActionRow(action: action, indent: indent + 1)
@@ -119,6 +154,7 @@ enum Cheatsheet {
   struct CheatsheetView: SwiftUI.View {
     @EnvironmentObject var userState: UserState
     @State private var contentHeight: CGFloat = 0
+    @Default(.showFallbackItems) var showFallbackItems
 
     var maxHeight: CGFloat {
       if let screen = NSScreen.main {
@@ -140,8 +176,23 @@ enum Cheatsheet {
 
     var actions: [ActionOrGroup] {
       let baseActions = userState.activeRoot?.actions ?? []
-      return (userState.currentGroup != nil)
+      let currentActions = (userState.currentGroup != nil)
         ? userState.currentGroup!.actions : baseActions
+      
+      // Sort actions alphabetically and conditionally show/hide fallback items
+      let sortedActions = currentActions.sortedAlphabetically()
+      if showFallbackItems {
+        return sortedActions
+      } else {
+        return sortedActions.filter { item in
+          switch item {
+          case .action(let action):
+            return !action.isFromFallback
+          case .group(let group):
+            return !group.isFromFallback
+          }
+        }
+      }
     }
 
     var body: some SwiftUI.View {

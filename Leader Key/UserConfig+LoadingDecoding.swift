@@ -38,8 +38,10 @@ extension UserConfig {
             if fileManager.fileExists(atPath: appConfigPath) {
                 // Attempt to load and decode app-specific config
                 if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true, isDefaultConfig: false) {
-                    appConfigs[bundleId] = appRoot // Cache successful load
-                    return appRoot
+                    // Try to merge with fallback if available
+                    let mergedConfig = mergeConfigWithFallback(appSpecificConfig: appRoot, bundleId: bundleId)
+                    appConfigs[bundleId] = mergedConfig // Cache merged result
+                    return mergedConfig
                 } else {
                     appConfigs[bundleId] = nil // Cache failed load explicitly as nil
                     // Fall through to try app.default.json
@@ -176,6 +178,108 @@ extension UserConfig {
             style: .warning,
             message:
                 "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your default configuration (config.json). Some keys may not work as expected."
+        )
+    }
+
+    // Recursively marks all nested actions and groups as fallback items
+    private func markAsFromFallback(_ item: ActionOrGroup, fallbackSource: String) -> ActionOrGroup {
+        switch item {
+        case .action(var action):
+            action.isFromFallback = true
+            action.fallbackSource = fallbackSource
+            // Mark any macro steps as fallback too
+            if let macroSteps = action.macroSteps {
+                action.macroSteps = macroSteps.map { step in
+                    var newStep = step
+                    newStep.action = markAsFromFallback(.action(newStep.action), fallbackSource: fallbackSource).item as! Action
+                    return newStep
+                }
+            }
+            return .action(action)
+        case .group(var group):
+            group.isFromFallback = true
+            group.fallbackSource = fallbackSource
+            // Recursively mark all nested items
+            group.actions = group.actions.map { markAsFromFallback($0, fallbackSource: fallbackSource) }
+            return .group(group)
+        }
+    }
+
+    // Merges fallback config into app-specific config, marking fallback items with metadata
+    private func mergeWithFallback(appSpecificGroup: Group, fallbackGroup: Group, fallbackSource: String) -> Group {
+        print("[UserConfig] mergeWithFallback: Merging app-specific '\(appSpecificGroup.displayName)' with fallback '\(fallbackGroup.displayName)'")
+        
+        var mergedActions: [ActionOrGroup] = []
+        
+        // First, add all app-specific items (they take priority)
+        for appItem in appSpecificGroup.actions {
+            mergedActions.append(appItem)
+        }
+        
+        // Then, add fallback items that don't conflict with app-specific items
+        for fallbackItem in fallbackGroup.actions {
+            let fallbackKey = fallbackItem.item.key
+            
+            // Check if an app-specific item with the same key already exists
+            let hasConflict = appSpecificGroup.actions.contains { appItem in
+                appItem.item.key == fallbackKey && fallbackKey != nil
+            }
+            
+            if !hasConflict {
+                // No conflict, add the fallback item with metadata, marking all nested items too
+                let fallbackCopy = markAsFromFallback(fallbackItem, fallbackSource: fallbackSource)
+                mergedActions.append(fallbackCopy)
+            } else if let fallbackKey = fallbackKey,
+                      case .group(let fallbackNestedGroup) = fallbackItem,
+                      let appItemIndex = mergedActions.firstIndex(where: { 
+                          if case .group(let g) = $0, g.key == fallbackKey { return true }
+                          return false
+                      }) {
+                // Both have groups with the same key - merge them recursively
+                if case .group(let appNestedGroup) = mergedActions[appItemIndex] {
+                    let mergedNestedGroup = mergeWithFallback(
+                        appSpecificGroup: appNestedGroup, 
+                        fallbackGroup: fallbackNestedGroup, 
+                        fallbackSource: fallbackSource
+                    )
+                    mergedActions[appItemIndex] = .group(mergedNestedGroup)
+                }
+            }
+        }
+        
+        // Create merged group with the same properties as app-specific group
+        var mergedGroup = Group(
+            key: appSpecificGroup.key,
+            label: appSpecificGroup.label,
+            iconPath: appSpecificGroup.iconPath,
+            stickyMode: appSpecificGroup.stickyMode,
+            actions: mergedActions
+        )
+        
+        // Preserve app-specific group metadata
+        mergedGroup.isFromFallback = appSpecificGroup.isFromFallback
+        mergedGroup.fallbackSource = appSpecificGroup.fallbackSource
+        
+        print("[UserConfig] mergeWithFallback: Merged group has \(mergedActions.count) items")
+        return mergedGroup
+    }
+
+    // Merges app-specific config with Default App Config if available
+    internal func mergeConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
+        // Get the default app config
+        let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
+        
+        guard fileManager.fileExists(atPath: defaultAppConfigPath),
+              let defaultAppConfig = decodeConfig(from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false) else {
+            print("[UserConfig] mergeConfigWithFallback: No default app config available, returning app-specific config as-is")
+            return appSpecificConfig
+        }
+        
+        print("[UserConfig] mergeConfigWithFallback: Merging app-specific config for '\(bundleId)' with default app config")
+        return mergeWithFallback(
+            appSpecificGroup: appSpecificConfig,
+            fallbackGroup: defaultAppConfig,
+            fallbackSource: defaultAppConfigDisplayName
         )
     }
 } 

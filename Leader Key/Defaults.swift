@@ -47,6 +47,8 @@ extension Defaults.Keys {
     "panelTopOffsetPercent", default: 0.3, suite: defaultsSuite)
   static let panelClickThrough = Key<Bool>(
     "panelClickThrough", default: false, suite: defaultsSuite)
+  static let showFallbackItems = Key<Bool>(
+    "showFallbackItems", default: true, suite: defaultsSuite)
     
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)

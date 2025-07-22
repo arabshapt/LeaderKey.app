@@ -17,18 +17,85 @@ struct KeyReference {
     ]
 }
 
+// Helper function to recursively convert fallback items to app-specific
+func convertNestedFallbacksToAppSpecific(_ items: [ActionOrGroup]) -> [ActionOrGroup] {
+    return items.map { item in
+        switch item {
+        case .action(var action):
+            // Only convert if this action is actually from fallback
+            if action.isFromFallback {
+                action.isFromFallback = false
+                action.fallbackSource = nil
+            }
+            // Convert macro steps if any are from fallback
+            if let macroSteps = action.macroSteps {
+                action.macroSteps = macroSteps.map { step in
+                    var newStep = step
+                    if newStep.action.isFromFallback {
+                        newStep.action.isFromFallback = false
+                        newStep.action.fallbackSource = nil
+                    }
+                    return newStep
+                }
+            }
+            return .action(action)
+        case .group(var group):
+            // Only convert if this group is actually from fallback
+            if group.isFromFallback {
+                group.isFromFallback = false
+                group.fallbackSource = nil
+            }
+            // Recursively convert nested items (only fallback ones)
+            group.actions = convertNestedFallbacksToAppSpecific(group.actions)
+            return .group(group)
+        }
+    }
+}
+
 // Helper function to create a deep duplicate with a new UUID
 func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     switch item {
     case .action(let action):
         // Create a new Action instance, which will get a new UUID
-        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps))
+        var newAction = Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps)
+        // Preserve metadata properties
+        newAction.isFromFallback = action.isFromFallback
+        newAction.fallbackSource = action.fallbackSource
+        // Preserve macro step fallback metadata if any
+        if let macroSteps = action.macroSteps {
+            newAction.macroSteps = macroSteps.map { step in
+                var newStep = step
+                // Preserve fallback metadata for macro step actions
+                newStep.action.isFromFallback = step.action.isFromFallback
+                newStep.action.fallbackSource = step.action.fallbackSource
+                return newStep
+            }
+        }
+        return .action(newAction)
     case .group(let group):
         // Recursively duplicate actions within the group
         let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
         // Create a new Group instance, which will get a new UUID
-        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions))
+        var newGroup = Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions)
+        // Preserve metadata properties
+        newGroup.isFromFallback = group.isFromFallback
+        newGroup.fallbackSource = group.fallbackSource
+        return .group(newGroup)
     }
+}
+
+// Helper function to sort actions alphabetically for display
+extension Array where Element == ActionOrGroup {
+  func sortedAlphabetically() -> [ActionOrGroup] {
+    return self.sorted { item1, item2 in
+      let key1 = item1.item.key?.lowercased() ?? "zzz" // Treat nil/empty keys as last
+      let key2 = item2.item.key?.lowercased() ?? "zzz"
+      // Ensure empty/nil keys are always after non-empty keys
+      if key1 == "zzz" && key2 != "zzz" { return false }
+      if key1 != "zzz" && key2 == "zzz" { return true }
+      return key1 < key2
+    }
+  }
 }
 
 let generalPadding: CGFloat = 8
@@ -74,21 +141,40 @@ struct GroupContentView: View {
   var isRoot: Bool = false
   var parentPath: [Int] = []
   @Binding var expandedGroups: Set<[Int]>
+  @Default(.showFallbackItems) var showFallbackItems
+
+  // Sort actions alphabetically and conditionally show/hide fallback items
+  var visibleActions: [ActionOrGroup] {
+    let sortedActions = group.actions.sortedAlphabetically()
+    if showFallbackItems {
+      return sortedActions
+    } else {
+      return sortedActions.filter { item in
+        switch item {
+        case .action(let action):
+          return !action.isFromFallback
+        case .group(let subgroup):
+          return !subgroup.isFromFallback
+        }
+      }
+    }
+  }
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(Array(group.actions.enumerated()), id: \.element.id) { index, item in
-        if index >= 0 && index < group.actions.count {
-          let currentPath = parentPath + [index]
+      ForEach(Array(visibleActions.enumerated()), id: \.element.id) { visibleIndex, item in
+        // Find the original index in the unfiltered array
+        if let originalIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
+          let currentPath = parentPath + [originalIndex]
           ActionOrGroupRow(
             item: Binding(
               get: { 
-                guard index < group.actions.count else { return item }
-                return group.actions[index]
+                guard originalIndex < group.actions.count else { return item }
+                return group.actions[originalIndex]
               },
               set: { newValue in
-                guard index < group.actions.count else { return }
-                group.actions[index] = newValue
+                guard originalIndex < group.actions.count else { return }
+                group.actions[originalIndex] = newValue
               }
             ),
             path: currentPath,
@@ -610,9 +696,42 @@ struct ActionRow: View {
 
       Spacer()
 
-      TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
-        action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
-      })
+      HStack(spacing: 4) {
+        TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
+          action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
+        })
+        .frame(width: action.isFromFallback ? 70 : 120)
+        
+        if action.isFromFallback {
+          HStack(spacing: 2) {
+            Image(systemName: "arrow.down.circle.fill")
+              .foregroundColor(.blue.opacity(0.6))
+              .font(.system(size: 10))
+              .help("From \(action.fallbackSource ?? "Default App Config")")
+            
+            Button("Override") {
+              // Convert fallback item to app-specific item, including macro steps
+              var newAction = action
+              newAction.isFromFallback = false
+              newAction.fallbackSource = nil
+              // Convert macro steps if any
+              if let macroSteps = newAction.macroSteps {
+                newAction.macroSteps = macroSteps.map { step in
+                  var newStep = step
+                  newStep.action.isFromFallback = false
+                  newStep.action.fallbackSource = nil
+                  return newStep
+                }
+              }
+              userConfig.updateAction(at: path, newAction: newAction)
+            }
+            .font(.system(size: 9))
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .help("Convert to app-specific item")
+          }
+        }
+      }
       .frame(width: 120)
       .padding(.trailing, generalPadding)
 
@@ -775,8 +894,35 @@ struct GroupRow: View {
         .frame(width: 40)
         .help("Sticky Mode: Automatically activate sticky mode when entering this group")
 
-        TextField("Label", text: $labelInputValue).frame(width: 120)
-          .padding(.trailing, generalPadding)
+        HStack(spacing: 4) {
+          TextField("Label", text: $labelInputValue)
+            .frame(width: group.isFromFallback ? 70 : 120)
+          
+          if group.isFromFallback {
+            HStack(spacing: 2) {
+              Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.blue.opacity(0.6))
+                .font(.system(size: 10))
+                .help("From \(group.fallbackSource ?? "Default App Config")")
+              
+              Button("Override") {
+                // Convert fallback item to app-specific item, including all nested items
+                var newGroup = group
+                newGroup.isFromFallback = false
+                newGroup.fallbackSource = nil
+                // Recursively convert all nested items from fallback to app-specific
+                newGroup.actions = convertNestedFallbacksToAppSpecific(newGroup.actions)
+                userConfig.updateGroup(at: path, newGroup: newGroup)
+              }
+              .font(.system(size: 9))
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .help("Convert to app-specific item")
+            }
+          }
+        }
+        .frame(width: 120)
+        .padding(.trailing, generalPadding)
 
         Button(role: .none, action: {
           ClipboardManager.shared.copyItem(.group(group), fromConfig: userConfig.selectedConfigKeyForEditing)
@@ -1279,6 +1425,14 @@ struct MacroStepRow: View {
       }
         
         Spacer()
+      }
+      
+      // Fallback indicator for macro steps
+      if step.action.isFromFallback {
+        Image(systemName: "circle.fill")
+          .foregroundColor(.blue)
+          .font(.system(size: 4))
+          .help("From \(step.action.fallbackSource ?? "Default App Config")")
       }
       
       // Delete button

@@ -205,6 +205,50 @@ extension UserConfig {
 
 // MARK: - Action Type Update Logic (New Extension)
 extension UserConfig {
+    // Public method to update an entire action
+    func updateAction(at path: [Int], newAction: Action) {
+        let updateLogic = {
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                guard case .action(_) = item else {
+                    return
+                }
+                item = .action(newAction)
+            }
+        }
+
+        if Thread.isMainThread {
+            updateLogic()
+            saveCurrentlyEditingConfig()
+        } else {
+            DispatchQueue.main.async {
+                updateLogic()
+                self.saveCurrentlyEditingConfig()
+            }
+        }
+    }
+
+    // Public method to update an entire group
+    func updateGroup(at path: [Int], newGroup: Group) {
+        let updateLogic = {
+            self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+                guard case .group(_) = item else {
+                    return
+                }
+                item = .group(newGroup)
+            }
+        }
+
+        if Thread.isMainThread {
+            updateLogic()
+            saveCurrentlyEditingConfig()
+        } else {
+            DispatchQueue.main.async {
+                updateLogic()
+                self.saveCurrentlyEditingConfig()
+            }
+        }
+    }
+
     // Public method to update an action's type and reset its value
     func updateActionType(at path: [Int], newType: Type) {
         let updateLogic = { 
@@ -560,11 +604,27 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var activates: Bool?
   var stickyMode: Bool?
   var macroSteps: [MacroStep]?
+  
+  // Metadata for fallback system (not persisted to JSON)
+  var isFromFallback: Bool = false
+  var fallbackSource: String?
+
+  enum CodingKeys: String, CodingKey {
+    case key, type, label, value, iconPath, activates, stickyMode, macroSteps
+    // Exclude isFromFallback and fallbackSource from JSON persistence
+  }
 
   var displayName: String {
     guard let labelValue = label else { return bestGuessDisplayName }
     guard !labelValue.isEmpty else { return bestGuessDisplayName }
     return labelValue
+  }
+
+  static func == (lhs: Action, rhs: Action) -> Bool {
+    return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
+      && lhs.value == rhs.value && lhs.iconPath == rhs.iconPath && lhs.activates == rhs.activates
+      && lhs.stickyMode == rhs.stickyMode && lhs.macroSteps == rhs.macroSteps
+    // Intentionally exclude isFromFallback and fallbackSource from equality comparison
   }
 
   var bestGuessDisplayName: String {
@@ -601,6 +661,15 @@ struct Group: Item, Codable, Equatable, Identifiable {
   var iconPath: String?
   var stickyMode: Bool?
   var actions: [ActionOrGroup]
+  
+  // Metadata for fallback system (not persisted to JSON)
+  var isFromFallback: Bool = false
+  var fallbackSource: String?
+
+  enum CodingKeys: String, CodingKey {
+    case key, type, label, iconPath, stickyMode, actions
+    // Exclude isFromFallback and fallbackSource from JSON persistence
+  }
 
   var displayName: String {
     guard let labelValue = label else { return "Group" }
@@ -611,6 +680,7 @@ struct Group: Item, Codable, Equatable, Identifiable {
   static func == (lhs: Group, rhs: Group) -> Bool {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
       && lhs.iconPath == rhs.iconPath && lhs.stickyMode == rhs.stickyMode && lhs.actions == rhs.actions
+    // Intentionally exclude isFromFallback and fallbackSource from equality comparison
   }
 }
 
