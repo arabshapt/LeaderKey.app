@@ -21,7 +21,7 @@ extension UserConfig {
         // --- FALLBACK STRIPPING (for app-specific configs only) ---
         var groupToProcess = currentlyEditingGroup
         let isAppSpecificConfig = selectedConfigKeyForEditing != globalDefaultDisplayName
-        
+
         if isAppSpecificConfig {
             print("[SAVE LOG] saveCurrentlyEditingConfig: Stripping fallback items from app-specific config.")
             groupToProcess = stripFallbackItems(from: currentlyEditingGroup)
@@ -89,7 +89,7 @@ extension UserConfig {
     // Recursively removes all fallback items from a group, keeping only app-specific items
     private func stripFallbackItems(from group: Group) -> Group {
         var appSpecificActions: [ActionOrGroup] = []
-        
+
         for item in group.actions {
             switch item {
             case .action(let action):
@@ -130,7 +130,7 @@ extension UserConfig {
                 }
             }
         }
-        
+
         // Return a new group with only app-specific items
         var cleanGroup = Group(
             key: group.key,
@@ -139,11 +139,11 @@ extension UserConfig {
             stickyMode: group.stickyMode,
             actions: appSpecificActions
         )
-        
+
         // Preserve the group's metadata if it's not from fallback
         cleanGroup.isFromFallback = group.isFromFallback
         cleanGroup.fallbackSource = group.fallbackSource
-        
+
         return cleanGroup
     }
 
@@ -183,4 +183,4 @@ extension UserConfig {
             actions: sortedActions
         )
     }
-} 
+}

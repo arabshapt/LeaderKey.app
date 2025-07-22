@@ -162,13 +162,13 @@ struct GroupContentView: View {
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(Array(visibleActions.enumerated()), id: \.element.id) { visibleIndex, item in
+      ForEach(Array(visibleActions.enumerated()), id: \.element.id) { _, item in
         // Find the original index in the unfiltered array
         if let originalIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
           let currentPath = parentPath + [originalIndex]
           ActionOrGroupRow(
             item: Binding(
-              get: { 
+              get: {
                 guard originalIndex < group.actions.count else { return item }
                 return group.actions[originalIndex]
               },
@@ -279,18 +279,18 @@ struct ActionOrGroupRow: View {
       Button("Copy") {
         ClipboardManager.shared.copyItem(item, fromConfig: userConfig.selectedConfigKeyForEditing)
       }
-      
+
       Button("Paste") {
         userConfig.pasteItem(at: path)
       }
       .disabled(!clipboardManager.canPaste())
-      
+
       Divider()
-      
+
       Button("Duplicate") {
         onDuplicate()
       }
-      
+
       Button("Delete") {
         onDelete()
       }
@@ -379,11 +379,11 @@ struct ActionRowState {
   var isUrlEditorPresented: Bool
   var isCommandEditorPresented: Bool
   var showingKeyReference: Bool
-  
+
   var isAnyEditorPresented: Bool {
     isShortcutEditorPresented || isTextEditorPresented || isUrlEditorPresented || isCommandEditorPresented
   }
-  
+
   init() {
     self.keyInputValue = ""
     self.valueInputValue = ""
@@ -406,7 +406,7 @@ struct ActionRow: View {
   let onDuplicate: () -> Void
   @FocusState private var isKeyFocused: Bool
   @EnvironmentObject var userConfig: UserConfig
-  
+
   @State private var state = ActionRowState()
 
   var body: some View {
@@ -414,12 +414,12 @@ struct ActionRow: View {
     guard !path.isEmpty && path.allSatisfy({ $0 >= 0 }) else {
       return AnyView(Text("Invalid path: empty or negative indices").foregroundColor(.red))
     }
-    
+
     return AnyView(
     HStack(spacing: generalPadding) {
       KeyButton(
         text: $state.keyInputValue,
-        placeholder: "Key", 
+        placeholder: "Key",
         validationError: validationErrorForKey,
         path: path,
         onKeyChanged: { keyButtonPath, capturedKey in
@@ -522,7 +522,7 @@ struct ActionRow: View {
             Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
               .font(.footnote)
               .foregroundColor(.secondary)
-            
+
             DisclosureGroup("Key Reference", isExpanded: $state.showingKeyReference) {
               ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -531,7 +531,7 @@ struct ActionRow: View {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
-                      
+
                       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
@@ -701,14 +701,14 @@ struct ActionRow: View {
           action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
         })
         .frame(width: action.isFromFallback ? 70 : 120)
-        
+
         if action.isFromFallback {
           HStack(spacing: 2) {
             Image(systemName: "arrow.down.circle.fill")
               .foregroundColor(.blue.opacity(0.6))
               .font(.system(size: 10))
-              .help("From \(action.fallbackSource ?? "Default App Config")")
-            
+              .help("From \(action.fallbackSource ?? "Fallback App Config")")
+
             Button("Override") {
               // Convert fallback item to app-specific item, including macro steps
               var newAction = action
@@ -762,7 +762,7 @@ struct ActionRow: View {
       } else {
         state.labelInputValue = action.label ?? ""
       }
-      state.selectedType = action.type 
+      state.selectedType = action.type
     }
     // Consolidated onChange handler for better performance
     .onChange(of: state.valueInputValue) { newValue in
@@ -831,7 +831,7 @@ struct GroupRow: View {
              .padding(.leading, 5) // Indent slightly based on path depth
              .opacity(0.7) */
         // --- Add simple debug text --- END
-        
+
         KeyButton(
           text: $keyInputValue,
           placeholder: "Group Key",
@@ -897,14 +897,14 @@ struct GroupRow: View {
         HStack(spacing: 4) {
           TextField("Label", text: $labelInputValue)
             .frame(width: group.isFromFallback ? 70 : 120)
-          
+
           if group.isFromFallback {
             HStack(spacing: 2) {
               Image(systemName: "arrow.down.circle.fill")
                 .foregroundColor(.blue.opacity(0.6))
                 .font(.system(size: 10))
-                .help("From \(group.fallbackSource ?? "Default App Config")")
-              
+                .help("From \(group.fallbackSource ?? "Fallback App Config")")
+
               Button("Override") {
                 // Convert fallback item to app-specific item, including all nested items
                 var newGroup = group
@@ -967,7 +967,7 @@ struct GroupRow: View {
         }
     }
     .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
-    
+
     .onChange(of: labelInputValue) { newValue in
         // Update label immediately when local state changes
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue
@@ -1029,7 +1029,7 @@ struct GroupRow: View {
             .action(
               Action(
                 key: "s", type: .application, value: "/Applications/Safari.app")
-            ),
+            )
           ])),
 
       // Level 1 group with subgroups
@@ -1056,9 +1056,9 @@ struct GroupRow: View {
                   .action(
                     Action(
                       key: "h", type: .url,
-                      value: "raycast://window-management/left-half")),
-                ])),
-          ])),
+                      value: "raycast://window-management/left-half"))
+                ]))
+          ]))
     ])
 
   let userConfig = UserConfig()
@@ -1072,7 +1072,7 @@ struct MacroEditorView: View {
   @Binding var action: Action
   var path: [Int]
   @State private var isMacroEditorPresented = false
-  
+
   var body: some View {
     Button {
       isMacroEditorPresented = true
@@ -1087,7 +1087,7 @@ struct MacroEditorView: View {
       MacroEditorSheet(action: $action, path: path, isPresented: $isMacroEditorPresented)
     }
   }
-  
+
   private var macroButtonText: String {
     let stepCount = action.macroSteps?.count ?? 0
     if stepCount == 0 {
@@ -1103,16 +1103,16 @@ struct MacroEditorSheet: View {
   var path: [Int]
   @Binding var isPresented: Bool
   @State private var macroSteps: [MacroStep] = []
-  
+
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Edit Macro")
         .font(.title2)
-      
+
       Text("Create a sequence of actions that will be executed in order with configurable delays.")
         .font(.body)
         .foregroundColor(.secondary)
-      
+
       List {
         ForEach($macroSteps) { $step in
           MacroStepRow(step: $step, onDelete: {
@@ -1126,7 +1126,7 @@ struct MacroEditorSheet: View {
       }
       .frame(minHeight: 200)
       .border(Color.gray.opacity(0.2))
-      
+
       Button("Add Step") {
         let newStep = MacroStep(
           action: Action(key: "", type: .shortcut, value: ""),
@@ -1135,7 +1135,7 @@ struct MacroEditorSheet: View {
         )
         macroSteps.append(newStep)
       }
-      
+
       HStack {
         Spacer()
         Button("Cancel") {
@@ -1156,7 +1156,7 @@ struct MacroEditorSheet: View {
       macroSteps = action.macroSteps ?? []
     }
   }
-  
+
   private func moveMacroStep(from source: IndexSet, to destination: Int) {
     macroSteps.move(fromOffsets: source, toOffset: destination)
   }
@@ -1171,19 +1171,19 @@ struct MacroStepRow: View {
   @State private var isUrlEditorPresented = false
   @State private var isCommandEditorPresented = false
   @State private var showingKeyReference = false
-  
+
   var body: some View {
     HStack(spacing: 12) {
       // Drag handle
       Image(systemName: "line.3.horizontal")
         .foregroundColor(.secondary)
         .frame(width: 20)
-      
+
       // Enable/disable toggle
       Toggle("", isOn: $step.enabled)
         .toggleStyle(.checkbox)
         .frame(width: 20)
-      
+
       // Delay field
       VStack(alignment: .leading, spacing: 2) {
         Text("Delay (s)")
@@ -1200,7 +1200,7 @@ struct MacroStepRow: View {
           .frame(width: 60)
           .textFieldStyle(.roundedBorder)
       }
-      
+
       // Action type picker
       Picker("Type", selection: $step.action.type) {
         Text("Shortcut").tag(Type.shortcut)
@@ -1212,7 +1212,7 @@ struct MacroStepRow: View {
       }
       .frame(width: 100)
       .labelsHidden()
-      
+
       // Action value field - now with popup editors similar to ActionRow, made wider
       HStack(spacing: 8) {
         switch step.action.type {
@@ -1266,7 +1266,7 @@ struct MacroStepRow: View {
             Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
               .font(.footnote)
               .foregroundColor(.secondary)
-            
+
             DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
               ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -1275,7 +1275,7 @@ struct MacroStepRow: View {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
-                      
+
                       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
@@ -1423,18 +1423,18 @@ struct MacroStepRow: View {
           .frame(width: 420)
         }
       }
-        
+
         Spacer()
       }
-      
+
       // Fallback indicator for macro steps
       if step.action.isFromFallback {
         Image(systemName: "circle.fill")
           .foregroundColor(.blue)
           .font(.system(size: 4))
-          .help("From \(step.action.fallbackSource ?? "Default App Config")")
+          .help("From \(step.action.fallbackSource ?? "Fallback App Config")")
       }
-      
+
       // Delete button
       Button(role: .destructive, action: onDelete) {
         Image(systemName: "trash")

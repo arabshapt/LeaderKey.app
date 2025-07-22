@@ -19,7 +19,7 @@ enum Mini {
       let contentSize = contentView?.fittingSize ?? NSSize(width: 100, height: Mini.size)
       let width = max(contentSize.width + (Mini.margin * 2), 60)
       let height = Mini.size
-      
+
       if let explicitOrigin = origin {
           print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
           self.setFrameOrigin(explicitOrigin)

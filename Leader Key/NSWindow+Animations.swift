@@ -43,16 +43,16 @@ extension NSWindow {
     let shakeAnimation = CAKeyframeAnimation()
 
     let shakePath = CGMutablePath()
-    shakePath.move(to: CGPoint(x: NSMinX(frame), y: NSMinY(frame)))
+    shakePath.move(to: CGPoint(x: frame.minX, y: frame.minY))
 
     for _ in 0...numberOfShakes - 1 {
       shakePath.addLine(
         to: CGPoint(
-          x: NSMinX(frame) - frame.size.width * vigourOfShake, y: NSMinY(frame))
+          x: frame.minX - frame.size.width * vigourOfShake, y: frame.minY)
       )
       shakePath.addLine(
         to: CGPoint(
-          x: NSMinX(frame) + frame.size.width * vigourOfShake, y: NSMinY(frame))
+          x: frame.minX + frame.size.width * vigourOfShake, y: frame.minY)
       )
     }
 

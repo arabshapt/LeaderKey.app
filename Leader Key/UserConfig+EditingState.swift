@@ -53,16 +53,16 @@ extension UserConfig {
             // Apply fallback merging for app-specific configs, just like getConfig(for:) does
             let mergedGroup: Group
             if filePath.contains(appConfigPrefix) && !filePath.contains(defaultAppConfigFileName) {
-                // This is an app-specific config, merge with default app config fallback
+                // This is an app-specific config, merge with fallback app config fallback
                 // Extract bundle ID from the key or filename for merging
                 let bundleId = extractBundleIdFromKey(key: key)
                 mergedGroup = mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
                 print("[UserConfig loadConfigForEditing] Applied fallback merging for app config '\(key)'")
             } else {
-                // This is the default app config or other config, use as-is
+                // This is the fallback app config or other config, use as-is
                 mergedGroup = loadedGroup
             }
-            
+
             // Only update the state after successfully loading and merging the config
             currentlyEditingGroup = mergedGroup
             selectedConfigKeyForEditing = key
@@ -76,4 +76,4 @@ extension UserConfig {
             selectedConfigKeyForEditing = globalDefaultDisplayName
         }
     }
-} 
+}

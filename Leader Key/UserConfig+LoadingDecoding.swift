@@ -53,7 +53,7 @@ extension UserConfig {
             }
         }
 
-        // 2. Try default app config (app.default.json)
+        // 2. Try fallback app config (app.default.json)
         let defaultAppKey = "app.default"
         // Check cache first
         if let cachedDefaultAppConfig = appConfigs[defaultAppKey] {
@@ -84,7 +84,7 @@ extension UserConfig {
     internal func decodeConfig(from filePath: String, suppressAlerts: Bool = false, isDefaultConfig: Bool) -> Group? {
         let configName = (filePath as NSString).lastPathComponent
         print("[UserConfig] Attempting to decode config: \(configName)")
-        
+
         let data: Data
         do {
             data = try Data(contentsOf: URL(fileURLWithPath: filePath))
@@ -208,45 +208,45 @@ extension UserConfig {
     // Merges fallback config into app-specific config, marking fallback items with metadata
     private func mergeWithFallback(appSpecificGroup: Group, fallbackGroup: Group, fallbackSource: String) -> Group {
         print("[UserConfig] mergeWithFallback: Merging app-specific '\(appSpecificGroup.displayName)' with fallback '\(fallbackGroup.displayName)'")
-        
+
         var mergedActions: [ActionOrGroup] = []
-        
+
         // First, add all app-specific items (they take priority)
         for appItem in appSpecificGroup.actions {
             mergedActions.append(appItem)
         }
-        
+
         // Then, add fallback items that don't conflict with app-specific items
         for fallbackItem in fallbackGroup.actions {
             let fallbackKey = fallbackItem.item.key
-            
+
             // Check if an app-specific item with the same key already exists
             let hasConflict = appSpecificGroup.actions.contains { appItem in
                 appItem.item.key == fallbackKey && fallbackKey != nil
             }
-            
+
             if !hasConflict {
                 // No conflict, add the fallback item with metadata, marking all nested items too
                 let fallbackCopy = markAsFromFallback(fallbackItem, fallbackSource: fallbackSource)
                 mergedActions.append(fallbackCopy)
             } else if let fallbackKey = fallbackKey,
                       case .group(let fallbackNestedGroup) = fallbackItem,
-                      let appItemIndex = mergedActions.firstIndex(where: { 
+                      let appItemIndex = mergedActions.firstIndex(where: {
                           if case .group(let g) = $0, g.key == fallbackKey { return true }
                           return false
                       }) {
                 // Both have groups with the same key - merge them recursively
                 if case .group(let appNestedGroup) = mergedActions[appItemIndex] {
                     let mergedNestedGroup = mergeWithFallback(
-                        appSpecificGroup: appNestedGroup, 
-                        fallbackGroup: fallbackNestedGroup, 
+                        appSpecificGroup: appNestedGroup,
+                        fallbackGroup: fallbackNestedGroup,
                         fallbackSource: fallbackSource
                     )
                     mergedActions[appItemIndex] = .group(mergedNestedGroup)
                 }
             }
         }
-        
+
         // Create merged group with the same properties as app-specific group
         var mergedGroup = Group(
             key: appSpecificGroup.key,
@@ -255,31 +255,31 @@ extension UserConfig {
             stickyMode: appSpecificGroup.stickyMode,
             actions: mergedActions
         )
-        
+
         // Preserve app-specific group metadata
         mergedGroup.isFromFallback = appSpecificGroup.isFromFallback
         mergedGroup.fallbackSource = appSpecificGroup.fallbackSource
-        
+
         print("[UserConfig] mergeWithFallback: Merged group has \(mergedActions.count) items")
         return mergedGroup
     }
 
-    // Merges app-specific config with Default App Config if available
+    // Merges app-specific config with Fallback App Config if available
     internal func mergeConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
-        // Get the default app config
+        // Get the fallback app config
         let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
-        
+
         guard fileManager.fileExists(atPath: defaultAppConfigPath),
               let defaultAppConfig = decodeConfig(from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false) else {
-            print("[UserConfig] mergeConfigWithFallback: No default app config available, returning app-specific config as-is")
+            print("[UserConfig] mergeConfigWithFallback: No fallback app config available, returning app-specific config as-is")
             return appSpecificConfig
         }
-        
-        print("[UserConfig] mergeConfigWithFallback: Merging app-specific config for '\(bundleId)' with default app config")
+
+        print("[UserConfig] mergeConfigWithFallback: Merging app-specific config for '\(bundleId)' with fallback app config")
         return mergeWithFallback(
             appSpecificGroup: appSpecificConfig,
             fallbackGroup: defaultAppConfig,
             fallbackSource: defaultAppConfigDisplayName
         )
     }
-} 
+}

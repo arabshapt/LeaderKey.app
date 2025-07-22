@@ -43,12 +43,12 @@ enum Cheatsheet {
             .lineLimit(1)
             .truncationMode(.middle)
             .opacity(action.isFromFallback ? 0.7 : 1.0)
-          
+
           if action.isFromFallback {
             Image(systemName: "circle.fill")
               .foregroundColor(.blue)
               .font(.system(size: 4))
-              .help("From \(action.fallbackSource ?? "Default App Config")")
+              .help("From \(action.fallbackSource ?? "Fallback App Config")")
           }
         }
         Spacer()
@@ -121,12 +121,12 @@ enum Cheatsheet {
 
           Text(group.displayName)
             .opacity(group.isFromFallback ? 0.7 : 1.0)
-          
+
           if group.isFromFallback {
             Image(systemName: "circle.fill")
               .foregroundColor(.blue)
               .font(.system(size: 4))
-              .help("From \(group.fallbackSource ?? "Default App Config")")
+              .help("From \(group.fallbackSource ?? "Fallback App Config")")
           }
 
           Spacer()
@@ -178,7 +178,7 @@ enum Cheatsheet {
       let baseActions = userState.activeRoot?.actions ?? []
       let currentActions = (userState.currentGroup != nil)
         ? userState.currentGroup!.actions : baseActions
-      
+
       // Sort actions alphabetically and conditionally show/hide fallback items
       let sortedActions = currentActions.sortedAlphabetically()
       if showFallbackItems {
