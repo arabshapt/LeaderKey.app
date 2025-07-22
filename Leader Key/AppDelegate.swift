@@ -64,8 +64,9 @@ fileprivate struct KeyboardShortcutsView: View {
                 Form {
                     KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
                     KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
+                    KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
                 }
-                Text("Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.")
+                Text("Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.\nForce Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
@@ -383,8 +384,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Convenience method to hide the main Leader Key window
     func hide() {
       print("[AppDelegate] hide() called.") // Log entry into hide()
+      
+      // Start timeout timer for state reset fallback
+      startHideTimeoutTimer()
+      
       controller.hide(afterClose: { [weak self] in
         // Reset sequence AFTER the window is fully closed to avoid visual flash
+        self?.cancelHideTimeoutTimer() // Cancel timeout since hide completed successfully
         self?.resetSequenceState()
       })
     }
@@ -574,6 +580,10 @@ private extension AppDelegate {
             print("[StatusItem] Check for Updates clicked.")
             self.updaterController.checkForUpdates(nil)
         }
+        statusItem.handleForceReset = {
+            print("[StatusItem] Force Reset clicked.")
+            self.forceResetState()
+        }
         // Observe changes to the preference for showing the menu bar icon
         Task {
             for await value in Defaults.updates(.showMenuBarIcon) {
@@ -746,6 +756,26 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
         set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
     }
+    private var eventTapHealthTimer: Timer? {
+        get { getAssociatedObject(self, &AssociatedKeys.eventTapHealthTimer) }
+        set { setAssociatedObject(self, &AssociatedKeys.eventTapHealthTimer, newValue) }
+    }
+    private var lastEventTapActivity: Date? {
+        get { getAssociatedObject(self, &AssociatedKeys.lastEventTapActivity) }
+        set { setAssociatedObject(self, &AssociatedKeys.lastEventTapActivity, newValue) }
+    }
+    private var hideTimeoutTimer: Timer? {
+        get { getAssociatedObject(self, &AssociatedKeys.hideTimeoutTimer) }
+        set { setAssociatedObject(self, &AssociatedKeys.hideTimeoutTimer, newValue) }
+    }
+    private var cpuMonitorTimer: Timer? {
+        get { getAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer) }
+        set { setAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer, newValue) }
+    }
+    private var isHighCpuMode: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isHighCpuMode) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isHighCpuMode, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
@@ -756,6 +786,11 @@ extension AppDelegate {
         static var stickyModeToggled = "stickyModeToggled"
         static var lastModifierFlags = "lastModifierFlags"
         static var activeActivationShortcut = "activeActivationShortcut"
+        static var eventTapHealthTimer = "eventTapHealthTimer"
+        static var lastEventTapActivity = "lastEventTapActivity"
+        static var hideTimeoutTimer = "hideTimeoutTimer"
+        static var cpuMonitorTimer = "cpuMonitorTimer"
+        static var isHighCpuMode = "isHighCpuMode"
     }
 
     // --- Event Tap Logic Methods ---
@@ -811,6 +846,13 @@ extension AppDelegate {
         CGEvent.tapEnable(tap: tap, enable: true)
         self.isMonitoring = true // Set monitoring state
         self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
+        
+        // Start event tap health monitoring
+        startEventTapHealthMonitoring()
+        
+        // Start CPU monitoring for adaptive behavior
+        startCPUMonitoring()
+        
         print("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
     }
 
@@ -820,6 +862,11 @@ extension AppDelegate {
              return
         }
         print("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
+        
+        // Stop health monitoring and CPU monitoring
+        stopEventTapHealthMonitoring()
+        stopCPUMonitoring()
+        
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
         if let source = runLoopSource {
@@ -836,8 +883,214 @@ extension AppDelegate {
         print("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
 
+    // --- Event Tap Health Monitoring Methods ---
+    
+    private func startEventTapHealthMonitoring() {
+        stopEventTapHealthMonitoring() // Stop any existing timer
+        
+        self.lastEventTapActivity = Date()
+        
+        // Check event tap health every 5 seconds
+        self.eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.checkEventTapHealth()
+        }
+        
+        print("[AppDelegate] Event tap health monitoring started.")
+    }
+    
+    private func stopEventTapHealthMonitoring() {
+        eventTapHealthTimer?.invalidate()
+        eventTapHealthTimer = nil
+        print("[AppDelegate] Event tap health monitoring stopped.")
+    }
+    
+    private func checkEventTapHealth() {
+        guard isMonitoring else { return }
+        
+        let now = Date()
+        let lastActivity = lastEventTapActivity ?? Date.distantPast
+        let timeSinceLastActivity = now.timeIntervalSince(lastActivity)
+        
+        // Use adaptive threshold based on CPU load
+        let healthThreshold: TimeInterval = isHighCpuMode ? 20.0 : 10.0
+        
+        if timeSinceLastActivity > healthThreshold {
+            print("[AppDelegate] Event tap appears unhealthy (no activity for \(Int(timeSinceLastActivity))s). Attempting recovery.")
+            recoverEventTap()
+        }
+    }
+    
+    private func recoverEventTap() {
+        print("[AppDelegate] Attempting event tap recovery...")
+        
+        // Force stop and restart monitoring
+        let wasMonitoring = isMonitoring
+        stopEventTapMonitoring()
+        
+        if wasMonitoring {
+            // Brief delay before restart to allow system cleanup
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.startEventTapMonitoring()
+            }
+        }
+    }
+    
+    private func updateEventTapActivity() {
+        lastEventTapActivity = Date()
+    }
+    
+    // --- Timeout-Based State Reset Methods ---
+    
+    private func startHideTimeoutTimer() {
+        // Cancel any existing timeout timer
+        cancelHideTimeoutTimer()
+        
+        // Use adaptive timeout based on CPU load
+        let timeoutDuration: TimeInterval = isHighCpuMode ? 6.0 : 3.0
+        
+        self.hideTimeoutTimer = Timer.scheduledTimer(withTimeInterval: timeoutDuration, repeats: false) { [weak self] _ in
+            self?.handleHideTimeout()
+        }
+        
+        let mode = isHighCpuMode ? " (high CPU mode)" : ""
+        print("[AppDelegate] Hide timeout timer started (\(Int(timeoutDuration)) seconds\(mode)).")
+    }
+    
+    private func cancelHideTimeoutTimer() {
+        hideTimeoutTimer?.invalidate()
+        hideTimeoutTimer = nil
+    }
+    
+    private func handleHideTimeout() {
+        print("[AppDelegate] Hide timeout triggered - forcing state reset.")
+        
+        // Force reset state if we still have an active sequence
+        if currentSequenceGroup != nil {
+            print("[AppDelegate] Hide timeout: Current sequence still active, forcing reset.")
+            forceResetState()
+        } else {
+            print("[AppDelegate] Hide timeout: No active sequence, timeout was unnecessary.")
+        }
+        
+        cancelHideTimeoutTimer()
+    }
+    
+    // --- Force Reset Mechanism ---
+    
+    func forceResetState() {
+        print("[AppDelegate] forceResetState: Performing nuclear state reset.")
+        
+        // Cancel all timers immediately
+        cancelHideTimeoutTimer()
+        stopEventTapHealthMonitoring()
+        
+        // Force clear all state variables immediately (no delays, no callbacks)
+        self.currentSequenceGroup = nil
+        self.activeRootGroup = nil
+        self.stickyModeToggled = false
+        self.lastModifierFlags = []
+        self.activeActivationShortcut = nil
+        
+        // Force hide the window immediately if it's visible
+        if controller.window.isVisible {
+            print("[AppDelegate] forceResetState: Force hiding window.")
+            DispatchQueue.main.async {
+                self.controller.window.orderOut(nil)
+                self.controller.userState.clear()
+            }
+        }
+        
+        // Restart event tap monitoring to ensure clean state
+        if isMonitoring {
+            print("[AppDelegate] forceResetState: Restarting event monitoring for clean state.")
+            let wasMonitoring = true
+            stopEventTapMonitoring()
+            
+            // Brief delay to allow system cleanup before restart
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                if wasMonitoring {
+                    self.startEventTapMonitoring()
+                }
+            }
+        }
+        
+        print("[AppDelegate] forceResetState: Nuclear reset completed.")
+    }
+    
+    // --- CPU Load Monitoring Methods ---
+    
+    private func startCPUMonitoring() {
+        stopCPUMonitoring() // Stop any existing timer
+        
+        // Check CPU load every 10 seconds
+        self.cpuMonitorTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.checkCPULoad()
+        }
+        
+        print("[AppDelegate] CPU monitoring started.")
+    }
+    
+    private func stopCPUMonitoring() {
+        cpuMonitorTimer?.invalidate()
+        cpuMonitorTimer = nil
+        isHighCpuMode = false
+        print("[AppDelegate] CPU monitoring stopped.")
+    }
+    
+    private func checkCPULoad() {
+        let cpuUsage = getCurrentCPUUsage()
+        let highCpuThreshold: Double = 80.0 // 80% threshold
+        
+        let wasHighCpuMode = isHighCpuMode
+        isHighCpuMode = cpuUsage > highCpuThreshold
+        
+        if isHighCpuMode != wasHighCpuMode {
+            if isHighCpuMode {
+                print("[AppDelegate] High CPU mode activated (CPU: \(Int(cpuUsage))%). Adapting behavior.")
+                enterHighCpuMode()
+            } else {
+                print("[AppDelegate] High CPU mode deactivated (CPU: \(Int(cpuUsage))%). Returning to normal mode.")
+                exitHighCpuMode()
+            }
+        }
+    }
+    
+    private func getCurrentCPUUsage() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        
+        if result == KERN_SUCCESS {
+            // Get CPU usage percentage (simplified)
+            let cpuTime = Double(info.user_time.seconds + info.system_time.seconds)
+            let totalTime = Double(ProcessInfo.processInfo.systemUptime)
+            return (cpuTime / totalTime) * 100.0
+        }
+        
+        return 0.0 // Return 0 if we can't get CPU info
+    }
+    
+    private func enterHighCpuMode() {
+        // Increase timeout values for high CPU scenarios
+        // This is adaptive behavior to be more resilient during high load
+        print("[AppDelegate] Entering high CPU mode - increased timeout tolerance.")
+    }
+    
+    private func exitHighCpuMode() {
+        // Return to normal timeout values
+        print("[AppDelegate] Exiting high CPU mode - normal timeout tolerance.")
+    }
+
     // This is the entry point called by the C callback `eventTapCallback`
     func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        // Update event tap activity tracking
+        updateEventTapActivity()
+        
         // Handle different event types
         switch event.type {
         case .keyDown:
@@ -936,7 +1189,15 @@ extension AppDelegate {
     }
 
     private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        // 1. Check for activation shortcuts FIRST
+        // 1. Check for force reset shortcut FIRST (highest priority)
+        let shortcutForceReset = KeyboardShortcuts.getShortcut(for: .forceReset)
+        if let shortcut = shortcutForceReset, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
+            forceResetState()
+            return true // Consume the force reset shortcut press
+        }
+        
+        // 2. Check for activation shortcuts
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
         let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
         var matchedActivationType: Controller.ActivationType? = nil
@@ -955,13 +1216,13 @@ extension AppDelegate {
             matchedShortcut = shortcut
         }
 
-        // 2. If an activation shortcut was pressed, handle it
+        // 3. If an activation shortcut was pressed, handle it
         if let type = matchedActivationType {
             handleActivation(type: type, activationShortcut: matchedShortcut) // Pass the matched shortcut
             return true // Consume the activation shortcut press
         }
 
-        // 3. If NOT an activation shortcut, check for Escape
+        // 4. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let isWindowVisible = self.controller.window.isVisible
             print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)")
@@ -979,7 +1240,7 @@ extension AppDelegate {
             }
         }
 
-        // 4. If NOT activation, Escape, or Cmd+, check if we are in a sequence
+        // 5. If NOT activation, Escape, or Cmd+, check if we are in a sequence
         if currentSequenceGroup != nil {
             // --- SPECIAL CHECK WITHIN ACTIVE SEQUENCE ---
             // Check for Cmd+, specifically *before* normal sequence processing

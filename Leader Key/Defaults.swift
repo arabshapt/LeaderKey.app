@@ -97,6 +97,10 @@ extension KeyboardShortcuts.Name {
     "activateAppSpecific", 
     default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])
   )
+  static let forceReset = KeyboardShortcuts.Name(
+    "forceReset",
+    default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift, .control])
+  )
 
   // Helper for group-specific shortcuts
   // static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
