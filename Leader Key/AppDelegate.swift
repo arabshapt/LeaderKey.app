@@ -40,6 +40,15 @@ struct KeyCodes {
     // Add other key codes as needed
 }
 
+// MARK: - Key Event Queue Structure
+private struct QueuedKeyEvent {
+    let cgEvent: CGEvent
+    let keyCode: UInt16
+    let modifiers: NSEvent.ModifierFlags
+}
+
+private let maxQueueSize = 10 // Prevent memory issues with extremely fast typing
+
 // MARK: - Associated Object Helpers
 
 // Helper functions for associated objects (needed for storing properties in extensions)
@@ -735,6 +744,14 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
         set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
     }
+    private var isProcessingKey: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isProcessingKey) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isProcessingKey, newValue) }
+    }
+    private var keyEventQueue: [QueuedKeyEvent] {
+        get { getAssociatedObject(self, &AssociatedKeys.keyEventQueue) ?? [] }
+        set { setAssociatedObject(self, &AssociatedKeys.keyEventQueue, newValue) }
+    }
     private var didShowPermissionsAlertRecently: Bool {
         get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
@@ -759,18 +776,25 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.isHighCpuMode) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.isHighCpuMode, newValue) }
     }
+    private var lastNavigationTime: CFAbsoluteTime {
+        get { getAssociatedObject(self, &AssociatedKeys.lastNavigationTime) ?? 0 }
+        set { setAssociatedObject(self, &AssociatedKeys.lastNavigationTime, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
         static var isMonitoring = "isMonitoring"
         static var activeRootGroup = "activeRootGroup"
         static var currentSequenceGroup = "currentSequenceGroup"
+        static var isProcessingKey = "isProcessingKey"
+        static var keyEventQueue = "keyEventQueue"
         static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
         static var stickyModeToggled = "stickyModeToggled"
         static var lastModifierFlags = "lastModifierFlags"
         static var activeActivationShortcut = "activeActivationShortcut"
         static var cpuMonitorTimer = "cpuMonitorTimer"
         static var isHighCpuMode = "isHighCpuMode"
+        static var lastNavigationTime = "lastNavigationTime"
     }
 
     // --- Event Tap Logic Methods ---
@@ -995,6 +1019,32 @@ extension AppDelegate {
             return Unmanaged.passRetained(event) // Pass it through
         }
         // ----> End synthetic event check <----
+        
+        // Prevent concurrent key processing to avoid race conditions
+        if isProcessingKey {
+            // Buffer the event for later processing instead of passing it through
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                print("[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through.")
+                return Unmanaged.passRetained(event)
+            }
+            
+            // Check queue size limit to prevent memory issues
+            if keyEventQueue.count >= maxQueueSize {
+                print("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space.")
+                keyEventQueue.removeFirst()
+            }
+            
+            let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+            keyEventQueue.append(queuedEvent)
+            print("[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)")
+            return nil // Consume the event (don't pass through)
+        }
+        
+        isProcessingKey = true
+        defer { 
+            isProcessingKey = false
+            processQueuedEvents()
+        }
 
         // Try to convert CGEvent to NSEvent to easily access key code and modifiers
         guard let nsEvent = NSEvent(cgEvent: event) else {
@@ -1011,6 +1061,42 @@ extension AppDelegate {
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
          print("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
         return handled ? nil : Unmanaged.passRetained(event)
+    }
+    
+    private func processQueuedEvents() {
+        // Process queued events one by one in FIFO order
+        while !keyEventQueue.isEmpty && !isProcessingKey {
+            let queuedEvent = keyEventQueue.removeFirst()
+            
+            print("[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)")
+            
+            // Set processing flag to prevent new events from being processed
+            isProcessingKey = true
+            defer { 
+                isProcessingKey = false
+                // Allow a small delay for UI updates to process
+                if !keyEventQueue.isEmpty {
+                    DispatchQueue.main.async {
+                        self.processQueuedEvents()
+                    }
+                }
+            }
+            
+            // Process the queued event using the same logic as handleKeyDownEvent
+            let handled = processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
+            
+            print("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
+            
+            // Break the loop to allow UI updates, continuation handled in defer block
+            break
+        }
+    }
+    
+    private func clearKeyEventQueue() {
+        if !keyEventQueue.isEmpty {
+            print("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
+            keyEventQueue.removeAll()
+        }
     }
 
     private func handleKeyUpEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -1196,16 +1282,21 @@ extension AppDelegate {
 
             case .group(let subgroup):
                 print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                
+                // Update sequence state immediately to prevent race conditions
+                currentSequenceGroup = subgroup
+
+                // Update UI state first to ensure correct display
+                DispatchQueue.main.async {
+                    self.controller.userState.navigateToGroup(subgroup)
+                }
 
                 // Check if the group has sticky mode enabled
                 if subgroup.stickyMode == true {
                     print("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
                     activateStickyMode()
                 }
-
-                // Navigate into the subgroup
-                currentSequenceGroup = subgroup // Update sequence state
-                controller.userState.navigateToGroup(subgroup) // Update UI state
+                
                 return true // Event handled
             }
         } else {
@@ -1230,6 +1321,12 @@ extension AppDelegate {
     // It sets up the initial state for a new key sequence based on the loaded config.
     private func startSequence(activationType: Controller.ActivationType) {
         print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
+        
+        // Reset sticky mode when starting any new sequence
+        if stickyModeToggled {
+            print("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
+            stickyModeToggled = false
+        }
 
         // Get the root group determined by the show() method via the controller's UserState
         // UserState.activeRoot should have been set by Controller.show() just before this.
@@ -1274,6 +1371,9 @@ extension AppDelegate {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
+            
+            // Clear any queued key events when sequence ends
+            clearKeyEventQueue()
 
             // Reset sticky mode toggle state
             if stickyModeToggled {
