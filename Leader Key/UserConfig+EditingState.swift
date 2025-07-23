@@ -30,6 +30,7 @@ extension UserConfig {
             print("[UserConfig loadConfigForEditing] Loading Global Default (from root). Key: \(key)")
             currentlyEditingGroup = root
             selectedConfigKeyForEditing = key
+            isActivelyEditing = false // Start with sorted view when loading
             return // <- Exit after handling Global Default
         }
 
@@ -39,6 +40,7 @@ extension UserConfig {
             // If lookup fails, fall back to showing the Global Default
             currentlyEditingGroup = root
             selectedConfigKeyForEditing = globalDefaultDisplayName // Revert selection
+            isActivelyEditing = false // Start with sorted view when loading
             return
         }
 
@@ -56,8 +58,10 @@ extension UserConfig {
                 // This is an app-specific config, merge with fallback app config fallback
                 // Extract bundle ID from the key or filename for merging
                 let bundleId = extractBundleIdFromKey(key: key)
-                mergedGroup = mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
-                print("[UserConfig loadConfigForEditing] Applied fallback merging for app config '\(key)'")
+                let rawMergedGroup = mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
+                // Sort the merged result to ensure app-specific and fallback items are properly intermixed
+                mergedGroup = sortGroupRecursively(group: rawMergedGroup)
+                print("[UserConfig loadConfigForEditing] Applied fallback merging and sorting for app config '\(key)'")
             } else {
                 // This is the fallback app config or other config, use as-is
                 mergedGroup = loadedGroup
@@ -66,6 +70,7 @@ extension UserConfig {
             // Only update the state after successfully loading and merging the config
             currentlyEditingGroup = mergedGroup
             selectedConfigKeyForEditing = key
+            isActivelyEditing = false // Start with sorted view when loading
         } else {
             let errorDesc = "Failed to load config '\(key)' for editing from path: \(filePath)"
             handleError(NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: errorDesc]), critical: false)
@@ -74,6 +79,7 @@ extension UserConfig {
             print("[UserConfig loadConfigForEditing] Failed to load app config '\(key)', reverting selection to Global Default.")
             currentlyEditingGroup = root
             selectedConfigKeyForEditing = globalDefaultDisplayName
+            isActivelyEditing = false // Start with sorted view when loading
         }
     }
 }

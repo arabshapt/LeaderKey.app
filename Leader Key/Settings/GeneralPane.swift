@@ -100,6 +100,7 @@ struct GeneralPane: View {
                           if self.config.selectedConfigKeyForEditing != newKey {
                                print("[GeneralPane onChange(listSelection) async] Updating config.selectedConfigKeyForEditing = \(newKey)")
                               self.config.selectedConfigKeyForEditing = newKey
+                              // Config loading will set isActivelyEditing = false automatically
                           }
                       }
                   }
@@ -160,8 +161,13 @@ struct GeneralPane: View {
                       HStack {
                           // Left-aligned buttons
                           HStack(spacing: 8) {
-                              Button("Save Changes") { config.saveCurrentlyEditingConfig() }
-                              Button("Reload Current File") { config.reloadConfig() }
+                              Button("Save Changes") { 
+                                  config.saveAndFinalize() 
+                              }
+                              Button("Reload Current File") { 
+                                  config.reloadConfig() 
+                                  // Reload will set isActivelyEditing = false automatically
+                              }
                           }
 
                           Spacer()

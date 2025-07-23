@@ -143,13 +143,13 @@ struct GroupContentView: View {
   @Binding var expandedGroups: Set<[Int]>
   @Default(.showFallbackItems) var showFallbackItems
 
-  // Sort actions alphabetically and conditionally show/hide fallback items
+  // Conditionally sort actions and show/hide fallback items
   var visibleActions: [ActionOrGroup] {
-    let sortedActions = group.actions.sortedAlphabetically()
+    let actionsToShow = userConfig.isActivelyEditing ? group.actions : group.actions.sortedAlphabetically()
     if showFallbackItems {
-      return sortedActions
+      return actionsToShow
     } else {
-      return sortedActions.filter { item in
+      return actionsToShow.filter { item in
         switch item {
         case .action(let action):
           return !action.isFromFallback
@@ -197,12 +197,14 @@ struct GroupContentView: View {
       AddButtons(
         onAddAction: {
           withAnimation {
+            userConfig.isActivelyEditing = true // Mark as actively editing
             group.actions.append(
               .action(Action(key: "", type: .shortcut, value: "")))
           }
         },
         onAddGroup: {
           withAnimation {
+            userConfig.isActivelyEditing = true // Mark as actively editing
             group.actions.append(.group(Group(key: "", stickyMode: nil, actions: [])))
           }
         },

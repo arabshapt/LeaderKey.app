@@ -5,6 +5,12 @@ import Foundation
 // MARK: - Saving Configuration
 extension UserConfig {
 
+    /// Saves with final sorting - for when user explicitly wants to finalize their config
+    func saveAndFinalize() {
+        isActivelyEditing = false
+        saveCurrentlyEditingConfig()
+    }
+
     // Saves the configuration currently being edited in the Settings window
     func saveCurrentlyEditingConfig() {
         print("[SAVE LOG] saveCurrentlyEditingConfig: CALLED for config key: \(selectedConfigKeyForEditing)")
@@ -31,15 +37,21 @@ extension UserConfig {
         }
         // -----------------
 
-        // --- SORTING --- 
-        print("[SAVE LOG] saveCurrentlyEditingConfig: About to sort group.")
-        let sortedGroup = sortGroupRecursively(group: groupToProcess)
-        print("[SAVE LOG] saveCurrentlyEditingConfig: State of group AFTER sort (sortedGroup): \(sortedGroup)")
+        // --- CONDITIONAL SORTING --- 
+        let finalGroup: Group
+        if isActivelyEditing {
+            print("[SAVE LOG] saveCurrentlyEditingConfig: Skipping sort - user is actively editing.")
+            finalGroup = groupToProcess
+        } else {
+            print("[SAVE LOG] saveCurrentlyEditingConfig: About to sort group.")
+            finalGroup = sortGroupRecursively(group: groupToProcess)
+            print("[SAVE LOG] saveCurrentlyEditingConfig: State of group AFTER sort (finalGroup): \(finalGroup)")
+        }
         // -----------------
 
         // Validate the group being saved
-        print("[SAVE LOG] saveCurrentlyEditingConfig: About to validate sortedGroup.")
-        let errors = ConfigValidator.validate(group: sortedGroup)
+        print("[SAVE LOG] saveCurrentlyEditingConfig: About to validate finalGroup.")
+        let errors = ConfigValidator.validate(group: finalGroup)
         print("[SAVE LOG] saveCurrentlyEditingConfig: Validation completed. Number of errors: \(errors.count)")
         if !errors.isEmpty {
             errors.forEach { print("[SAVE LOG] saveCurrentlyEditingConfig: Validation Error - Path: \($0.path), Msg: \($0.message), Type: \($0.type)") }
@@ -72,8 +84,8 @@ extension UserConfig {
                 .withoutEscapingSlashes,
                 .sortedKeys // ensure deterministic key order in saved JSON
             ]
-            // Encode the SORTED group
-            let jsonData = try encoder.encode(sortedGroup)
+            // Encode the final group (sorted or unsorted based on editing state)
+            let jsonData = try encoder.encode(finalGroup)
             try jsonData.write(to: URL(fileURLWithPath: filePath)) // Write to the specific file path
             print("[UserConfig] Successfully saved sorted config to: \(filePath)")
 
@@ -148,7 +160,7 @@ extension UserConfig {
     }
 
     // Recursively sorts actions and groups within a group alphabetically by key
-    private func sortGroupRecursively(group: Group) -> Group {
+    internal func sortGroupRecursively(group: Group) -> Group {
         // Add a log at the beginning of this recursive sort function if deeper insight is needed
         // print("[SAVE LOG] sortGroupRecursively: Sorting group with key '\(group.key ?? "nil")', label '\(group.label ?? "no_label")'. \(group.actions.count) actions.")
         var sortedActions: [ActionOrGroup] = []

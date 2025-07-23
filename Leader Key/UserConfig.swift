@@ -74,6 +74,7 @@ class UserConfig: ObservableObject {
   @Published var validationErrors: [ValidationError] = [] // Errors specific to the default config
   @Published var discoveredConfigFiles: [String: String] = [:] // Display Name -> File Path
   @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName // Initialize with the new default key
+  @Published var isActivelyEditing: Bool = false // Track if user is actively editing vs ready to finalize
 
   let fileName = "config.json"
   let appConfigPrefix = "app."
@@ -105,10 +106,13 @@ class UserConfig: ObservableObject {
         selectedConfigKeyForEditing = globalDefaultDisplayName
         // Set initial validation errors based on default config
         validationErrors = ConfigValidator.validate(group: root)
+        // Start with sorted view when loading configs
+        isActivelyEditing = false
     } else {
         // If default doesn't exist somehow, ensure editor has empty root
         currentlyEditingGroup = emptyRoot
         selectedConfigKeyForEditing = globalDefaultDisplayName
+        isActivelyEditing = false
     }
   }
 
@@ -147,6 +151,9 @@ class UserConfig: ObservableObject {
 extension UserConfig {
     // Public method to initiate key update
     func updateKey(at path: [Int], newKey: String) {
+        // Mark as actively editing when user makes changes
+        isActivelyEditing = true
+        
         let updateLogic = {
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
                 let effectiveKey = newKey.isEmpty ? nil : newKey
@@ -207,6 +214,9 @@ extension UserConfig {
 extension UserConfig {
     // Public method to update an entire action
     func updateAction(at path: [Int], newAction: Action) {
+        // Mark as actively editing when user makes changes
+        isActivelyEditing = true
+        
         let updateLogic = {
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
                 guard case .action = item else {
@@ -229,6 +239,9 @@ extension UserConfig {
 
     // Public method to update an entire group
     func updateGroup(at path: [Int], newGroup: Group) {
+        // Mark as actively editing when user makes changes
+        isActivelyEditing = true
+        
         let updateLogic = {
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
                 guard case .group = item else {
@@ -251,6 +264,9 @@ extension UserConfig {
 
     // Public method to update an action's type and reset its value
     func updateActionType(at path: [Int], newType: Type) {
+        // Mark as actively editing when user makes changes
+        isActivelyEditing = true
+        
         let updateLogic = {
             self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
                 guard case .action(var action) = item else {

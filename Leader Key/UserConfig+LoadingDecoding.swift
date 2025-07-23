@@ -39,7 +39,9 @@ extension UserConfig {
                 // Attempt to load and decode app-specific config
                 if let appRoot = decodeConfig(from: appConfigPath, suppressAlerts: true, isDefaultConfig: false) {
                     // Try to merge with fallback if available
-                    let mergedConfig = mergeConfigWithFallback(appSpecificConfig: appRoot, bundleId: bundleId)
+                    let rawMergedConfig = mergeConfigWithFallback(appSpecificConfig: appRoot, bundleId: bundleId)
+                    // Sort the merged result to ensure app-specific and fallback items are properly intermixed
+                    let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
                     appConfigs[bundleId] = mergedConfig // Cache merged result
                     return mergedConfig
                 } else {
