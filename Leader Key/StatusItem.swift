@@ -21,6 +21,7 @@ class StatusItem {
   var handleReloadConfig: (() -> Void)?
   var handleRevealConfig: (() -> Void)?
   var handleCheckForUpdates: (() -> Void)?
+  var handleForceReset: (() -> Void)?
 
   func enable() {
     statusItem = NSStatusBar.system.statusItem(
@@ -68,6 +69,12 @@ class StatusItem {
     reloadConfigItem.target = self
     menu.addItem(reloadConfigItem)
 
+    let forceResetItem = NSMenuItem(
+      title: "Force reset", action: #selector(forceReset), keyEquivalent: ""
+    )
+    forceResetItem.target = self
+    menu.addItem(forceResetItem)
+
     menu.addItem(NSMenuItem.separator())
 
     menu.addItem(
@@ -84,10 +91,8 @@ class StatusItem {
       switch event {
       case .willActivate:
         self.appearance = .active
-        break
-      case .willDeactivate:
+        case .willDeactivate:
         self.appearance = .normal
-        break
       default:
         break
       }
@@ -117,6 +122,10 @@ class StatusItem {
 
   @objc func checkForUpdates() {
     handleCheckForUpdates?()
+  }
+
+  @objc func forceReset() {
+    handleForceReset?()
   }
 
   private func updateStatusItemAppearance() {

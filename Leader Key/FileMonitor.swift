@@ -49,10 +49,8 @@ class FileMonitor {
       switch event {
       case .delete, .rename:
         self.waitForFileRecreation(callback: callback)
-        break
-      default:
+        default:
         callback()
-        break
       }
 
       stopMonitoring()

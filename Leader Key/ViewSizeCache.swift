@@ -24,4 +24,4 @@ final class ViewSizeCache {
         lock.lock(); defer { lock.unlock() }
         cache.removeAll()
     }
-} 
+}

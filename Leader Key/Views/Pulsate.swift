@@ -34,8 +34,7 @@ public struct Pulsate: ViewModifier {
 
 extension View {
   func pulsate(duration: TimeInterval = Pulsate.singleDurationS, targetScale: CGFloat = 1.3)
-    -> some View
-  {
+    -> some View {
     self.modifier(Pulsate(duration: duration, targetScale: targetScale))
   }
 }

@@ -5,14 +5,14 @@ import SwiftUI
 struct SearchPane: View {
     private let contentWidth = SettingsConfig.contentWidth
     @EnvironmentObject private var config: UserConfig
-    
+
     @State private var searchQuery = ""
     @State private var selectedMatchType: SearchMatchType = .all
     @State private var includeGroups = true
     @State private var searchResults: [SearchResult] = []
     @State private var isSearching = false
-    @State private var selectedResult: SearchResult? = nil
-    
+    @State private var selectedResult: SearchResult?
+
     var body: some View {
         Settings.Container(contentWidth: contentWidth) {
             Settings.Section(title: "Search Your Leader Key Sequences") {
@@ -20,10 +20,10 @@ struct SearchPane: View {
                     // Search controls (fixed at the top)
                     searchControls
                         .padding(.bottom, 16)
-                    
+
                     Divider()
                         .padding(.bottom, 16)
-                    
+
                     // Dynamic content area
                     if isSearching {
                         HStack {
@@ -56,17 +56,17 @@ struct SearchPane: View {
             performSearch()
         }
     }
-    
+
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                
+
                 TextField("Search for sequences, descriptions, apps...", text: $searchQuery)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .default))
-                
+
                 if !searchQuery.isEmpty {
                     Button(action: { searchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
@@ -75,12 +75,12 @@ struct SearchPane: View {
                     .buttonStyle(.plain)
                 }
             }
-            
+
             HStack {
                 Text("Search in:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 Picker("Search Type", selection: $selectedMatchType) {
                     ForEach(SearchMatchType.allCases, id: \.self) { type in
                         Text(type.rawValue).tag(type)
@@ -88,30 +88,30 @@ struct SearchPane: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 300)
-                
+
                 Spacer()
-                
+
                 Toggle("Include Groups", isOn: $includeGroups)
                     .toggleStyle(.checkbox)
                     .font(.caption)
             }
         }
     }
-    
+
     private var searchPlaceholder: some View {
         VStack(spacing: 16) {
             Image(systemName: "magnifyingglass.circle")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            
+
             VStack(spacing: 8) {
                 Text("Search Your Key Sequences")
                     .font(.headline)
-                
+
                 Text("Find any shortcut by typing:")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
+
                 VStack(alignment: .leading, spacing: 4) {
                     searchExampleRow(icon: "keyboard", text: "Key sequences: \"o s\" or \"terminal\"")
                     searchExampleRow(icon: "tag", text: "Labels: \"Safari\" or \"Open Browser\"")
@@ -126,7 +126,7 @@ struct SearchPane: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
     }
-    
+
     private func searchExampleRow(icon: String, text: String) -> some View {
         HStack {
             Image(systemName: icon)
@@ -136,16 +136,16 @@ struct SearchPane: View {
                 .foregroundColor(.secondary)
         }
     }
-    
+
     private var noResultsView: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.magnifyingglass")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            
+
             Text("No sequences found")
                 .font(.headline)
-            
+
             Text("Try a different search term or change the search type")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -154,7 +154,7 @@ struct SearchPane: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
     }
-    
+
     private var searchResultsList: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Results header
@@ -162,9 +162,9 @@ struct SearchPane: View {
                 Text("\(searchResults.count) result\(searchResults.count == 1 ? "" : "s") found")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                
+
                 Spacer()
-                
+
                 if searchResults.count > 10 {
                     Text("Showing all results")
                         .font(.caption)
@@ -172,7 +172,7 @@ struct SearchPane: View {
                 }
             }
             .padding(.bottom, 8)
-            
+
             // Results list
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -182,7 +182,7 @@ struct SearchPane: View {
                             isSelected: selectedResult?.id == result.id,
                             onSelect: { selectedResult = result }
                         )
-                        
+
                         if result.id != searchResults.last?.id {
                             Divider()
                                 .padding(.leading, 16)
@@ -199,15 +199,15 @@ struct SearchPane: View {
             )
         }
     }
-    
+
     private func performSearch() {
         guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchResults = []
             return
         }
-        
+
         isSearching = true
-        
+
         // Perform search on background queue to avoid blocking UI
         DispatchQueue.global(qos: .userInitiated).async {
             let results = config.searchSequences(
@@ -215,7 +215,7 @@ struct SearchPane: View {
                 matchType: selectedMatchType,
                 includeGroups: includeGroups
             )
-            
+
             DispatchQueue.main.async {
                 self.searchResults = results
                 self.isSearching = false
@@ -228,22 +228,22 @@ struct SearchResultRow: View {
     let result: SearchResult
     let isSelected: Bool
     let onSelect: () -> Void
-    
+
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 12) {
                 // Icon
                 actionIcon(item: result.item, iconSize: NSSize(width: 24, height: 24))
-                
+
                 VStack(alignment: .leading, spacing: 4) {
                     // Key sequence
                     HStack {
                         Text(result.keySequence)
                             .font(.system(.body, design: .monospaced))
                             .fontWeight(.medium)
-                        
+
                         Spacer()
-                        
+
                         // Match type badge
                         Text(result.matchType.rawValue)
                             .font(.caption)
@@ -253,17 +253,17 @@ struct SearchResultRow: View {
                             .foregroundColor(.accentColor)
                             .cornerRadius(4)
                     }
-                    
+
                     // Display name and type
                     HStack {
                         Text(result.displayName)
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .lineLimit(1)
-                        
+
                         Text("•")
                             .foregroundColor(.secondary)
-                        
+
                         Text(result.typeDescription)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -271,10 +271,10 @@ struct SearchResultRow: View {
                             .padding(.vertical, 1)
                             .background(Color.secondary.opacity(0.15))
                             .cornerRadius(3)
-                        
+
                         Spacer()
                     }
-                    
+
                     // Value description
                     if !result.valueDescription.isEmpty {
                         Text(result.valueDescription)
@@ -282,7 +282,7 @@ struct SearchResultRow: View {
                             .foregroundColor(.secondary)
                             .lineLimit(2)
                     }
-                    
+
                     // Config name and match reason
                     HStack {
                         if result.configName != globalDefaultDisplayName {
@@ -295,18 +295,18 @@ struct SearchResultRow: View {
                                 .foregroundColor(.orange)
                                 .cornerRadius(3)
                         }
-                        
+
                         Spacer()
-                        
+
                         Text(result.matchReason)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .italic()
                     }
                 }
-                
+
                 Spacer()
-                
+
                 // Action button
                 Button(action: {
                     // TODO: Implement "Go to" functionality to open the item in General pane
@@ -326,7 +326,7 @@ struct SearchResultRow: View {
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
-    
+
     private func goToResult(_ result: SearchResult) {
         // This will be implemented to switch to General pane and highlight the item
         print("Go to result: \(result.keySequence) in \(result.configName)")
@@ -354,7 +354,7 @@ struct SearchPane_Previews: PreviewProvider {
                 ))
             ]
         )
-        
+
         return SearchPane()
             .environmentObject(config)
     }

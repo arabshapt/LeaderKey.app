@@ -5,25 +5,35 @@ struct KeyButton: View {
   @Binding var text: String
   let placeholder: String
   @State private var isListening = false
-  var validationError: ValidationErrorType? = nil
+  var validationError: ValidationErrorType?
   var path: [Int]
-  var onKeyChanged: (([Int], String) -> Void)? = nil
+  var onKeyChanged: (([Int], String) -> Void)?
+  var showFallbackIndicator: Bool = false
 
   var body: some View {
     Button(action: {
       isListening = true
     }) {
-      Text(text.isEmpty ? placeholder : text)
-        .frame(width: 32, height: 24)
-        .background(
-          RoundedRectangle(cornerRadius: 5)
-            .fill(backgroundColor)
-            .overlay(
-              RoundedRectangle(cornerRadius: 5)
-                .stroke(borderColor, lineWidth: 1)
-            )
-        )
-        .foregroundColor(text.isEmpty ? .gray : .primary)
+      ZStack(alignment: .bottomTrailing) {
+        Text(text.isEmpty ? placeholder : text)
+          .frame(width: 32, height: 24)
+          .background(
+            RoundedRectangle(cornerRadius: 5)
+              .fill(backgroundColor)
+              .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                  .stroke(borderColor, lineWidth: 1)
+              )
+          )
+          .foregroundColor(text.isEmpty ? .gray : .primary)
+        
+        if showFallbackIndicator {
+          Image(systemName: "circle.fill")
+            .foregroundColor(.white.opacity(0.2))
+            .font(.system(size: 4))
+            .offset(x: -2, y: -2)
+        }
+      }
     }
     .buttonStyle(PlainButtonStyle())
     .background(
@@ -86,18 +96,14 @@ struct KeyListenerView: NSViewRepresentable {
 
     override var acceptsFirstResponder: Bool { true }
 
-    override func viewDidMoveToWindow() {
-      super.viewDidMoveToWindow()
-    }
-
     override func keyDown(with event: NSEvent) {
       guard let isListeningBinding = isListening, isListeningBinding.wrappedValue else {
         super.keyDown(with: event)
         return
       }
-      
-      var capturedKey: String? = nil
-      
+
+      var capturedKey: String?
+
       // Simplified key capture logic (similar to AppDelegate but for single key)
       switch event.keyCode {
         case 53: capturedKey = nil // Escape cancels
@@ -113,7 +119,7 @@ struct KeyListenerView: NSViewRepresentable {
            // Use characters (respects shift) for other keys
            capturedKey = event.characters
       }
-      
+
       // Only proceed if a key was meaningfully captured
       if let finalKey = capturedKey {
           print("[KeyListenerNSView] KeyDown captured: '\(finalKey)'. Calling handler and stopping listening.")

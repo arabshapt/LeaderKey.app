@@ -80,7 +80,7 @@ extension UserConfig {
         } else {
             defaultDisplay = "App: \(trimmedId)"
         }
-        
+
         let finalDisplayName: String
         if let custom = customName, !custom.isEmpty {
             finalDisplayName = custom
@@ -94,4 +94,4 @@ extension UserConfig {
 
         return finalDisplayName
     }
-} 
+}

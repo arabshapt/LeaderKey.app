@@ -54,4 +54,4 @@ extension UserConfig {
 
         return currentGroup
     }
-} 
+}

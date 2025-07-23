@@ -27,7 +27,7 @@ enum ForTheHorde {
 
     override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
       animationState.isShowing = true
-      
+
       if let explicitOrigin = origin {
         print("[ForTheHordeWindow show(at:)] Using provided origin: \(explicitOrigin)")
         self.setFrameOrigin(explicitOrigin)

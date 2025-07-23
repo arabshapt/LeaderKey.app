@@ -91,7 +91,7 @@ class Controller {
     userState.activeRoot = configToLoad // Update UserState with the selected config
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
-    var calculatedOrigin: NSPoint? = nil // Store calculated origin
+    var calculatedOrigin: NSPoint? // Store calculated origin
 
     // Get the current mouse location
     let mouseLocation = NSEvent.mouseLocation
@@ -164,10 +164,10 @@ class Controller {
     window.hide {
       afterClose?()
       self.clear() // Clear UserState *after* external completion (e.g., AppDelegate reset) to avoid premature UI changes
-      
+
       // Invalidate overlay detection cache to ensure fresh detection on next activation
       OverlayDetector.shared.invalidateDetectionCache()
-      
+
       Events.send(.didDeactivate)
     }
 
@@ -199,9 +199,9 @@ class Controller {
          print("[Controller] Cmd+q detected. Terminating app.")
          NSApp.terminate(nil)
          return // Consume the event
-      default:
+         default:
         print("[Controller] Unhandled Cmd+Key: \(event.charactersIgnoringModifiers ?? "nil")")
-        break // Let other Cmd key combinations pass through if needed
+         // Let other Cmd key combinations pass through if needed
       }
     }
 
@@ -271,7 +271,7 @@ class Controller {
             print("[Controller] handleKey: Cannot activate sticky mode - appDelegate is nil")
           }
         }
-        
+
         userState.display = group.key
         userState.navigateToGroup(group)
       }
@@ -432,9 +432,9 @@ class Controller {
       print("[Controller] runMacro: No macro steps found for action")
       return
     }
-    
+
     print("[Controller] runMacro: Starting macro with \(macroSteps.count) steps")
-    
+
     // Execute macro steps asynchronously with delays
     DispatchQueue.global(qos: .userInitiated).async {
       for (index, step) in macroSteps.enumerated() {
@@ -442,21 +442,21 @@ class Controller {
           print("[Controller] runMacro: Step \(index + 1) is disabled, skipping")
           continue
         }
-        
+
         // Apply delay before executing the step
         if step.delay > 0 {
           print("[Controller] runMacro: Waiting \(step.delay) seconds before step \(index + 1)")
           Thread.sleep(forTimeInterval: step.delay)
         }
-        
+
         print("[Controller] runMacro: Executing step \(index + 1)/\(macroSteps.count)")
-        
+
         // Execute the step action on the main thread
         DispatchQueue.main.async {
           self.runAction(step.action)
         }
       }
-      
+
       print("[Controller] runMacro: Completed macro execution")
     }
   }
@@ -472,7 +472,7 @@ class Controller {
           return
       }
 
-      var calculatedOrigin: NSPoint? = nil
+      var calculatedOrigin: NSPoint?
       let mouseLocation = NSEvent.mouseLocation
       let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
 
@@ -557,7 +557,7 @@ class Controller {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         // runModal will still block this async block, but not the original event handler
-        let response = alert.runModal() 
+        let response = alert.runModal()
         print("[Controller showAlert async] Alert dismissed with response: \(response == .alertFirstButtonReturn ? "OK" : "Other")")
     }
   }
@@ -599,7 +599,7 @@ class Controller {
           }
           eventUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
           eventUp.post(tap: tapLocation)
-          
+
           // Add a small delay between characters (optional, makes typing feel more natural)
           // usleep(10000) // 10 milliseconds
       }
@@ -740,7 +740,7 @@ class Controller {
       "lang1": CGKeyCode(kVK_JIS_Eisu),  // Assuming Eisuu for Lang1 (e.g., Hangul/English)
       "lang2": CGKeyCode(kVK_JIS_Kana),  // Assuming Kana for Lang2 (e.g., Hanja)
       "japanese_eisuu": CGKeyCode(kVK_JIS_Eisu),
-      "japanese_kana": CGKeyCode(kVK_JIS_Kana),
+      "japanese_kana": CGKeyCode(kVK_JIS_Kana)
   ]
 
   private func parseCompactShortcutToCGEventData(_ shortcut: String) -> (keyCode: CGKeyCode, flags: CGEventFlags)? {

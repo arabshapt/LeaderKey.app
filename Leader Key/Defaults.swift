@@ -47,10 +47,12 @@ extension Defaults.Keys {
     "panelTopOffsetPercent", default: 0.3, suite: defaultsSuite)
   static let panelClickThrough = Key<Bool>(
     "panelClickThrough", default: false, suite: defaultsSuite)
-    
+  static let showFallbackItems = Key<Bool>(
+    "showFallbackItems", default: true, suite: defaultsSuite)
+
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)
-  
+
   // Overlay detection settings
   /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs
   static let overlayDetectionEnabled = Key<Bool>("overlayDetectionEnabled", default: false, suite: defaultsSuite)
@@ -90,12 +92,16 @@ enum ReactivateBehavior: String, Defaults.Serializable {
 extension KeyboardShortcuts.Name {
   static let activate = KeyboardShortcuts.Name("activate")
   static let activateDefaultOnly = KeyboardShortcuts.Name(
-    "activateDefaultOnly", 
+    "activateDefaultOnly",
     default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
   )
   static let activateAppSpecific = KeyboardShortcuts.Name(
-    "activateAppSpecific", 
+    "activateAppSpecific",
     default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])
+  )
+  static let forceReset = KeyboardShortcuts.Name(
+    "forceReset",
+    default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift, .control])
   )
 
   // Helper for group-specific shortcuts

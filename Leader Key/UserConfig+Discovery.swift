@@ -34,7 +34,7 @@ extension UserConfig {
                     continue
                 }
 
-                // Check for default app config
+                // Check for fallback app config
                 if currentFileName == defaultAppConfigFileName {
                     let displayName = getDisplayName(for: filePath, defaultName: defaultAppConfigDisplayName)
                     discovered[displayName] = filePath
@@ -57,7 +57,7 @@ extension UserConfig {
         }
 
         // Sort the discovered files by display name for consistent UI presentation
-        // Keep Global Default first, then Default App Config, then others alphabetically
+        // Keep Global Default first, then Fallback App Config, then others alphabetically
         let sortedDiscovered = discovered.sorted { (pair1, pair2) -> Bool in
             let (name1, _) = pair1
             let (name2, _) = pair2
@@ -112,4 +112,4 @@ extension UserConfig {
             }
         }
     }
-} 
+}

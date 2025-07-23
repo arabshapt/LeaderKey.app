@@ -20,7 +20,7 @@ class MainMenu: NSMenu {
       .separator(),
       NSMenuItem(
         title: "Quit Leader Key", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"
-      ),
+      )
     ]
 
     let editMenu = NSMenuItem()
@@ -32,7 +32,7 @@ class MainMenu: NSMenu {
       NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
       NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
       NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
-      NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
+      NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
     ]
 
     items = [appMenu, editMenu]

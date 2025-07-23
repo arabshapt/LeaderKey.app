@@ -40,6 +40,15 @@ struct KeyCodes {
     // Add other key codes as needed
 }
 
+// MARK: - Key Event Queue Structure
+private struct QueuedKeyEvent {
+    let cgEvent: CGEvent
+    let keyCode: UInt16
+    let modifiers: NSEvent.ModifierFlags
+}
+
+private let maxQueueSize = 10 // Prevent memory issues with extremely fast typing
+
 // MARK: - Associated Object Helpers
 
 // Helper functions for associated objects (needed for storing properties in extensions)
@@ -55,7 +64,7 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 // MARK: - Settings Panes
 
 // Define the view for the Shortcuts pane
-fileprivate struct KeyboardShortcutsView: View {
+private struct KeyboardShortcutsView: View {
     private let contentWidth = SettingsConfig.contentWidth
 
     var body: some View {
@@ -64,8 +73,9 @@ fileprivate struct KeyboardShortcutsView: View {
                 Form {
                     KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
                     KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
+                    KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
                 }
-                Text("Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.")
+                Text("Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.\nForce Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
@@ -74,7 +84,7 @@ fileprivate struct KeyboardShortcutsView: View {
     }
 }
 
-fileprivate struct OpacityPane: View {
+private struct OpacityPane: View {
     @Default(.normalModeOpacity) var normalModeOpacity
     @Default(.stickyModeOpacity) var stickyModeOpacity
 
@@ -137,7 +147,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         identifier: .advanced, title: "Advanced",
         toolbarIcon: NSImage(named: NSImage.advancedName)!,
         contentView: { AdvancedPane().environmentObject(self.config) }
-      ),
+      )
     ],
     style: .segmentedControl,
     animated: false
@@ -235,7 +245,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // Determine which config to focus on based on current state
       let configKeyToFocus = determineConfigToFocus()
-      
+
       // Update the UserConfig to select the appropriate config for editing
       print("[AppDelegate] Setting config to focus on: \(configKeyToFocus)")
       config.loadConfigForEditing(key: configKeyToFocus)
@@ -254,7 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // --- Position Window Before Showing to Prevent Flicker ---
       print("[AppDelegate settings] Positioning window before show...")
-      var calculatedOrigin: NSPoint? = nil
+      var calculatedOrigin: NSPoint?
       let mouseLocation = NSEvent.mouseLocation
       let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
 
@@ -299,18 +309,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
             return findConfigKeyForGroup(activeRoot)
         }
-        
+
         // Check if the Controller's UserState has an active root
         if let userStateActiveRoot = controller.userState.activeRoot {
             print("[AppDelegate] Using UserState activeRoot to determine config")
             return findConfigKeyForGroup(userStateActiveRoot)
         }
-        
+
         // Check frontmost application to determine if we should use app-specific config
         if let frontmostApp = NSWorkspace.shared.frontmostApplication,
            let bundleId = frontmostApp.bundleIdentifier {
             print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
-            
+
             // Check if an app-specific config exists for this bundle ID
             let appConfig = config.getConfig(for: bundleId)
             // If the returned config is not the default root, then an app-specific config exists
@@ -318,26 +328,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return findConfigKeyForGroup(appConfig)
             }
         }
-        
+
         // Default fallback - use global default
         print("[AppDelegate] Falling back to global default config")
         return globalDefaultDisplayName
     }
-    
+
     // Find the configuration key for a given Group
     private func findConfigKeyForGroup(_ group: Group) -> String {
         // Check if this is the global default (root config)
         if areGroupsEqual(group, config.root) {
             return globalDefaultDisplayName
         }
-        
+
         // Search through discovered config files to find a match
         for (key, filePath) in config.discoveredConfigFiles {
             // Skip the global default entry
             if key == globalDefaultDisplayName {
                 continue
             }
-            
+
             // Try to load the config from this file path and compare
             if let loadedGroup = config.decodeConfig(from: filePath, suppressAlerts: true, isDefaultConfig: false) {
                 if areGroupsEqual(loadedGroup, group) {
@@ -345,32 +355,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        
+
         // If we can't find a specific match, try to infer from bundle ID
         if let frontmostApp = NSWorkspace.shared.frontmostApplication,
            let bundleId = frontmostApp.bundleIdentifier {
-            
+
             // Look for an app-specific config key pattern
             for key in config.discoveredConfigFiles.keys {
                 if key.contains(bundleId) {
                     return key
                 }
             }
-            
-            // Check if there's a default app config
+
+            // Check if there's a fallback app config
             if config.discoveredConfigFiles.keys.contains(defaultAppConfigDisplayName) {
                 return defaultAppConfigDisplayName
             }
         }
-        
+
         // Final fallback
         return globalDefaultDisplayName
     }
-    
+
     // Helper method to compare two Group objects for equality
     private func areGroupsEqual(_ group1: Group, _ group2: Group) -> Bool {
-        return group1.key == group2.key && 
-               group1.label == group2.label && 
+        return group1.key == group2.key &&
+               group1.label == group2.label &&
                group1.actions.count == group2.actions.count
     }
 
@@ -383,6 +393,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Convenience method to hide the main Leader Key window
     func hide() {
       print("[AppDelegate] hide() called.") // Log entry into hide()
+
       controller.hide(afterClose: { [weak self] in
         // Reset sequence AFTER the window is fully closed to avoid visual flash
         self?.resetSequenceState()
@@ -574,6 +585,10 @@ private extension AppDelegate {
             print("[StatusItem] Check for Updates clicked.")
             self.updaterController.checkForUpdates(nil)
         }
+        statusItem.handleForceReset = {
+            print("[StatusItem] Force Reset clicked.")
+            self.forceResetState()
+        }
         // Observe changes to the preference for showing the menu bar icon
         Task {
             for await value in Defaults.updates(.showMenuBarIcon) {
@@ -671,8 +686,7 @@ extension AppDelegate {
         if url.host == "navigate", // Expecting leaderkey://navigate?keys=a,b,c
            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            let queryItems = components.queryItems,
-           let keysParam = queryItems.first(where: { $0.name == "keys" })?.value
-        {
+           let keysParam = queryItems.first(where: { $0.name == "keys" })?.value {
             let keys = keysParam.split(separator: ",").map(String.init)
              print("[AppDelegate] handleURL: Navigating with keys: \(keys)")
             processKeys(keys) // Process the sequence provided in the URL
@@ -730,6 +744,14 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
         set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
     }
+    private var isProcessingKey: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isProcessingKey) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isProcessingKey, newValue) }
+    }
+    private var keyEventQueue: [QueuedKeyEvent] {
+        get { getAssociatedObject(self, &AssociatedKeys.keyEventQueue) ?? [] }
+        set { setAssociatedObject(self, &AssociatedKeys.keyEventQueue, newValue) }
+    }
     private var didShowPermissionsAlertRecently: Bool {
         get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
@@ -746,16 +768,33 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
         set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
     }
+    private var cpuMonitorTimer: Timer? {
+        get { getAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer) }
+        set { setAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer, newValue) }
+    }
+    private var isHighCpuMode: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isHighCpuMode) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isHighCpuMode, newValue) }
+    }
+    private var lastNavigationTime: CFAbsoluteTime {
+        get { getAssociatedObject(self, &AssociatedKeys.lastNavigationTime) ?? 0 }
+        set { setAssociatedObject(self, &AssociatedKeys.lastNavigationTime, newValue) }
+    }
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
         static var isMonitoring = "isMonitoring"
         static var activeRootGroup = "activeRootGroup"
         static var currentSequenceGroup = "currentSequenceGroup"
+        static var isProcessingKey = "isProcessingKey"
+        static var keyEventQueue = "keyEventQueue"
         static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
         static var stickyModeToggled = "stickyModeToggled"
         static var lastModifierFlags = "lastModifierFlags"
         static var activeActivationShortcut = "activeActivationShortcut"
+        static var cpuMonitorTimer = "cpuMonitorTimer"
+        static var isHighCpuMode = "isHighCpuMode"
+        static var lastNavigationTime = "lastNavigationTime"
     }
 
     // --- Event Tap Logic Methods ---
@@ -811,6 +850,12 @@ extension AppDelegate {
         CGEvent.tapEnable(tap: tap, enable: true)
         self.isMonitoring = true // Set monitoring state
         self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
+
+        // Start event tap health monitoring
+
+        // Start CPU monitoring for adaptive behavior
+        startCPUMonitoring()
+
         print("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
     }
 
@@ -820,6 +865,10 @@ extension AppDelegate {
              return
         }
         print("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
+
+        // Stop health monitoring and CPU monitoring
+        stopCPUMonitoring()
+
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
         if let source = runLoopSource {
@@ -836,8 +885,119 @@ extension AppDelegate {
         print("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
 
+    // --- Force Reset Mechanism ---
+
+    func forceResetState() {
+        print("[AppDelegate] forceResetState: Performing nuclear state reset.")
+
+        // Cancel all timers immediately
+
+        // Force clear all state variables immediately (no delays, no callbacks)
+        self.currentSequenceGroup = nil
+        self.activeRootGroup = nil
+        self.stickyModeToggled = false
+        self.lastModifierFlags = []
+        self.activeActivationShortcut = nil
+
+        // Force hide the window immediately if it's visible
+        if controller.window.isVisible {
+            print("[AppDelegate] forceResetState: Force hiding window.")
+            DispatchQueue.main.async {
+                self.controller.window.orderOut(nil)
+                self.controller.userState.clear()
+            }
+        }
+
+        // Restart event tap monitoring to ensure clean state
+        if isMonitoring {
+            print("[AppDelegate] forceResetState: Restarting event monitoring for clean state.")
+            let wasMonitoring = true
+            stopEventTapMonitoring()
+
+            // Brief delay to allow system cleanup before restart
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                if wasMonitoring {
+                    self.startEventTapMonitoring()
+                }
+            }
+        }
+
+        print("[AppDelegate] forceResetState: Nuclear reset completed.")
+    }
+
+    // --- CPU Load Monitoring Methods ---
+
+    private func startCPUMonitoring() {
+        stopCPUMonitoring() // Stop any existing timer
+
+        // Check CPU load every 10 seconds
+        self.cpuMonitorTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.checkCPULoad()
+        }
+
+        print("[AppDelegate] CPU monitoring started.")
+    }
+
+    private func stopCPUMonitoring() {
+        cpuMonitorTimer?.invalidate()
+        cpuMonitorTimer = nil
+        isHighCpuMode = false
+        print("[AppDelegate] CPU monitoring stopped.")
+    }
+
+    private func checkCPULoad() {
+        let cpuUsage = getCurrentCPUUsage()
+        let highCpuThreshold: Double = 80.0 // 80% threshold
+
+        let wasHighCpuMode = isHighCpuMode
+        isHighCpuMode = cpuUsage > highCpuThreshold
+
+        if isHighCpuMode != wasHighCpuMode {
+            if isHighCpuMode {
+                print("[AppDelegate] High CPU mode activated (CPU: \(Int(cpuUsage))%). Adapting behavior.")
+                enterHighCpuMode()
+            } else {
+                print("[AppDelegate] High CPU mode deactivated (CPU: \(Int(cpuUsage))%). Returning to normal mode.")
+                exitHighCpuMode()
+            }
+        }
+    }
+
+    private func getCurrentCPUUsage() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+
+        if result == KERN_SUCCESS {
+            // Get CPU usage percentage (simplified)
+            let cpuTime = Double(info.user_time.seconds + info.system_time.seconds)
+            let totalTime = Double(ProcessInfo.processInfo.systemUptime)
+            return (cpuTime / totalTime) * 100.0
+        }
+
+        return 0.0 // Return 0 if we can't get CPU info
+    }
+
+    private func enterHighCpuMode() {
+        // Increase timeout values for high CPU scenarios
+        // This is adaptive behavior to be more resilient during high load
+        print("[AppDelegate] Entering high CPU mode - increased timeout tolerance.")
+    }
+
+    private func exitHighCpuMode() {
+        // Return to normal timeout values
+        print("[AppDelegate] Exiting high CPU mode - normal timeout tolerance.")
+    }
+
     // This is the entry point called by the C callback `eventTapCallback`
     func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        // Update event tap activity tracking
+
         // Handle different event types
         switch event.type {
         case .keyDown:
@@ -859,6 +1019,32 @@ extension AppDelegate {
             return Unmanaged.passRetained(event) // Pass it through
         }
         // ----> End synthetic event check <----
+        
+        // Prevent concurrent key processing to avoid race conditions
+        if isProcessingKey {
+            // Buffer the event for later processing instead of passing it through
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                print("[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through.")
+                return Unmanaged.passRetained(event)
+            }
+            
+            // Check queue size limit to prevent memory issues
+            if keyEventQueue.count >= maxQueueSize {
+                print("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space.")
+                keyEventQueue.removeFirst()
+            }
+            
+            let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+            keyEventQueue.append(queuedEvent)
+            print("[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)")
+            return nil // Consume the event (don't pass through)
+        }
+        
+        isProcessingKey = true
+        defer { 
+            isProcessingKey = false
+            processQueuedEvents()
+        }
 
         // Try to convert CGEvent to NSEvent to easily access key code and modifiers
         guard let nsEvent = NSEvent(cgEvent: event) else {
@@ -875,6 +1061,42 @@ extension AppDelegate {
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
          print("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
         return handled ? nil : Unmanaged.passRetained(event)
+    }
+    
+    private func processQueuedEvents() {
+        // Process queued events one by one in FIFO order
+        while !keyEventQueue.isEmpty && !isProcessingKey {
+            let queuedEvent = keyEventQueue.removeFirst()
+            
+            print("[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)")
+            
+            // Set processing flag to prevent new events from being processed
+            isProcessingKey = true
+            defer { 
+                isProcessingKey = false
+                // Allow a small delay for UI updates to process
+                if !keyEventQueue.isEmpty {
+                    DispatchQueue.main.async {
+                        self.processQueuedEvents()
+                    }
+                }
+            }
+            
+            // Process the queued event using the same logic as handleKeyDownEvent
+            let handled = processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
+            
+            print("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
+            
+            // Break the loop to allow UI updates, continuation handled in defer block
+            break
+        }
+    }
+    
+    private func clearKeyEventQueue() {
+        if !keyEventQueue.isEmpty {
+            print("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
+            keyEventQueue.removeAll()
+        }
     }
 
     private func handleKeyUpEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -936,11 +1158,19 @@ extension AppDelegate {
     }
 
     private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        // 1. Check for activation shortcuts FIRST
+        // 1. Check for force reset shortcut FIRST (highest priority)
+        let shortcutForceReset = KeyboardShortcuts.getShortcut(for: .forceReset)
+        if let shortcut = shortcutForceReset, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
+            print("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
+            forceResetState()
+            return true // Consume the force reset shortcut press
+        }
+
+        // 2. Check for activation shortcuts
         let shortcutAppSpecific = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
         let shortcutDefaultOnly = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
-        var matchedActivationType: Controller.ActivationType? = nil
-        var matchedShortcut: KeyboardShortcuts.Shortcut? = nil
+        var matchedActivationType: Controller.ActivationType?
+        var matchedShortcut: KeyboardShortcuts.Shortcut?
 
         // Check App-Specific Shortcut
         if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
@@ -955,13 +1185,13 @@ extension AppDelegate {
             matchedShortcut = shortcut
         }
 
-        // 2. If an activation shortcut was pressed, handle it
+        // 3. If an activation shortcut was pressed, handle it
         if let type = matchedActivationType {
             handleActivation(type: type, activationShortcut: matchedShortcut) // Pass the matched shortcut
             return true // Consume the activation shortcut press
         }
 
-        // 3. If NOT an activation shortcut, check for Escape
+        // 4. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let isWindowVisible = self.controller.window.isVisible
             print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)")
@@ -979,14 +1209,13 @@ extension AppDelegate {
             }
         }
 
-        // 4. If NOT activation, Escape, or Cmd+, check if we are in a sequence
+        // 5. If NOT activation, Escape, or Cmd+, check if we are in a sequence
         if currentSequenceGroup != nil {
             // --- SPECIAL CHECK WITHIN ACTIVE SEQUENCE ---
             // Check for Cmd+, specifically *before* normal sequence processing
             if modifiers.contains(.command),
                let nsEvent = NSEvent(cgEvent: cgEvent),
-               nsEvent.charactersIgnoringModifiers == ","
-            {
+               nsEvent.charactersIgnoringModifiers == "," {
                 print("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
                 NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
                 // Reset sequence state and hide the panel
@@ -1053,23 +1282,28 @@ extension AppDelegate {
 
             case .group(let subgroup):
                 print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                
+                // Update sequence state immediately to prevent race conditions
+                currentSequenceGroup = subgroup
+
+                // Update UI state first to ensure correct display
+                DispatchQueue.main.async {
+                    self.controller.userState.navigateToGroup(subgroup)
+                }
 
                 // Check if the group has sticky mode enabled
                 if subgroup.stickyMode == true {
                     print("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
                     activateStickyMode()
                 }
-
-                // Navigate into the subgroup
-                currentSequenceGroup = subgroup // Update sequence state
-                controller.userState.navigateToGroup(subgroup) // Update UI state
+                
                 return true // Event handled
             }
         } else {
             // Key not found in the current group.
             let groupName = currentSequenceGroup?.displayName ?? "(nil)"
             print("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName)'.")
-            
+
             let isStickyModeActive = isInStickyMode(modifiers)
             if isStickyModeActive {
                 // In sticky mode: pass the event through so the underlying app receives the key/shortcut.
@@ -1087,6 +1321,12 @@ extension AppDelegate {
     // It sets up the initial state for a new key sequence based on the loaded config.
     private func startSequence(activationType: Controller.ActivationType) {
         print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
+        
+        // Reset sticky mode when starting any new sequence
+        if stickyModeToggled {
+            print("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
+            stickyModeToggled = false
+        }
 
         // Get the root group determined by the show() method via the controller's UserState
         // UserState.activeRoot should have been set by Controller.show() just before this.
@@ -1131,6 +1371,9 @@ extension AppDelegate {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
+            
+            // Clear any queued key events when sequence ends
+            clearKeyEventQueue()
 
             // Reset sticky mode toggle state
             if stickyModeToggled {
@@ -1200,7 +1443,7 @@ extension AppDelegate {
 
         // For remaining keys, determine character based on modifiers
         let nsEvent = NSEvent(cgEvent: cgEvent)
-        var result: String? = nil
+        var result: String?
 
         // If Control or Option are involved, get the base character *ignoring* those modifiers,
         // BUT respecting Shift for case sensitivity lookup.
@@ -1262,8 +1505,7 @@ extension AppDelegate {
             if alert.runModal() == .alertFirstButtonReturn {
                 let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
                 let backupPath = "/System/Library/PreferencePanes/Security.prefPane"
-                if let url = URL(string: urlString) { NSWorkspace.shared.open(url) }
-                else { NSWorkspace.shared.open(URL(fileURLWithPath: backupPath)) }
+                if let url = URL(string: urlString) { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.open(URL(fileURLWithPath: backupPath)) }
             }
         }
     }

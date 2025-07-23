@@ -17,4 +17,4 @@ extension UserConfig {
             discoverConfigFiles()
         }
     }
-} 
+}

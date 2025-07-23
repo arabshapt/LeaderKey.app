@@ -4,6 +4,25 @@ import Dispatch
 // MARK: - Editing State Management
 extension UserConfig {
 
+    // Helper to extract bundle ID from a display key for merging purposes
+    private func extractBundleIdFromKey(key: String) -> String {
+        // If the key matches discovered config patterns, extract bundle ID from the file path
+        if let filePath = discoveredConfigFiles[key] {
+            let fileName = (filePath as NSString).lastPathComponent
+            if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
+                let withoutPrefix = String(fileName.dropFirst(appConfigPrefix.count))
+                let withoutSuffix = String(withoutPrefix.dropLast(".json".count))
+                return withoutSuffix
+            }
+        }
+        // Fallback: assume the key is the bundle ID if it contains dots
+        if key.contains(".") {
+            return key
+        }
+        // Last resort: return key as-is
+        return key
+    }
+
     // Loads the config identified by the key ("Default" or bundle ID) into currentlyEditingGroup
     func loadConfigForEditing(key: String) {
         // Handle Global Default separately first
@@ -31,8 +50,21 @@ extension UserConfig {
         // Load and decode. Suppress validation alerts for non-default configs during this specific load.
         let isDefault = false // We already handled the default case
         if let loadedGroup = decodeConfig(from: filePath, suppressAlerts: true, isDefaultConfig: isDefault) {
-            // Only update the state after successfully loading the config
-            currentlyEditingGroup = loadedGroup
+            // Apply fallback merging for app-specific configs, just like getConfig(for:) does
+            let mergedGroup: Group
+            if filePath.contains(appConfigPrefix) && !filePath.contains(defaultAppConfigFileName) {
+                // This is an app-specific config, merge with fallback app config fallback
+                // Extract bundle ID from the key or filename for merging
+                let bundleId = extractBundleIdFromKey(key: key)
+                mergedGroup = mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
+                print("[UserConfig loadConfigForEditing] Applied fallback merging for app config '\(key)'")
+            } else {
+                // This is the fallback app config or other config, use as-is
+                mergedGroup = loadedGroup
+            }
+
+            // Only update the state after successfully loading and merging the config
+            currentlyEditingGroup = mergedGroup
             selectedConfigKeyForEditing = key
         } else {
             let errorDesc = "Failed to load config '\(key)' for editing from path: \(filePath)"
@@ -44,4 +76,4 @@ extension UserConfig {
             selectedConfigKeyForEditing = globalDefaultDisplayName
         }
     }
-} 
+}

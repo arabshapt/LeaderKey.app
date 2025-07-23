@@ -10,15 +10,16 @@ struct GeneralPane: View {
   @EnvironmentObject private var config: UserConfig
   @Default(.configDir) var configDir
   @Default(.theme) var theme
+  @Default(.showFallbackItems) var showFallbackItems
   @State private var expandedGroups = Set<[Int]>()
   @State private var showingRenameAlert = false
   @State private var showingDeleteAlert = false
   @State private var newConfigNameInput = ""
-  @State private var filePathToRename: String? = nil
-  @State private var keyToLoad: String? = nil
-  @State private var listSelection: String? = nil
+  @State private var filePathToRename: String?
+  @State private var keyToLoad: String?
+  @State private var listSelection: String?
   @State private var showingAddConfigSheet = false
-  @State private var keyToDelete: String? = nil
+  @State private var keyToDelete: String?
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -26,7 +27,7 @@ struct GeneralPane: View {
           // Prioritize Global Default
           if key1 == globalDefaultDisplayName { return true }
           if key2 == globalDefaultDisplayName { return false }
-          // Prioritize Default App Config
+          // Prioritize Fallback App Config
           if key1 == defaultAppConfigDisplayName { return true }
           if key2 == defaultAppConfigDisplayName { return false }
           // Sort remaining app-specific keys alphabetically
@@ -115,7 +116,7 @@ struct GeneralPane: View {
                           listSelection = newSelectedKey
                       }
                   }
-                  
+
                   // --- Add Config Button ---
                   Button {
                       showingAddConfigSheet = true
@@ -195,12 +196,12 @@ struct GeneralPane: View {
           }
           .task(id: keyToLoad) {
               guard let key = keyToLoad else { return } // Only run if keyToLoad is set
-              
+
               print("[GeneralPane .task(id: keyToLoad)] Loading config for key: \(key)")
               self.expandedGroups.removeAll()
               self.config.loadConfigForEditing(key: key)
-              
-              self.keyToLoad = nil 
+
+              self.keyToLoad = nil
           }
       } // End of Settings.Section wrapping the HStack
 
@@ -211,6 +212,13 @@ struct GeneralPane: View {
             Text(Theme.name(value)).tag(value)
           }
         }.frame(maxWidth: 170).labelsHidden()
+      }
+
+      Settings.Section(title: "FB") {
+        Toggle("Show fallback items", isOn: $showFallbackItems)
+        Text("Show items inherited from Fallback App Config in both the settings editor and Leader Key panels. Fallback items appear with visual indicators and can be overridden to create app-specific versions.")
+          .font(.caption)
+          .foregroundColor(.secondary)
       }
 
       Settings.Section(title: "App") {
@@ -229,8 +237,7 @@ struct GeneralPane: View {
             // Now use if let for the dictionary lookup and combine other checks
             if !newConfigNameInput.isEmpty,
                newConfigNameInput != globalDefaultDisplayName,
-               newConfigNameInput != defaultAppConfigDisplayName 
-            {
+               newConfigNameInput != defaultAppConfigDisplayName {
                 var currentCustomNames = Defaults[.configFileCustomNames]
                 // Ensure the new name isn't already used (by a custom name or a default name)
                 // Note: Check against other values in currentCustomNames, EXCLUDING the current path itself
@@ -241,13 +248,13 @@ struct GeneralPane: View {
                     print("Saving new name '\(newConfigNameInput)' for path '\(path)'")
                     currentCustomNames[path] = newConfigNameInput
                     Defaults[.configFileCustomNames] = currentCustomNames
-                    
+
                     // Store the new name to select it after reload
                     let nameToSelect = newConfigNameInput
-                    
+
                     // Reload config FIRST to update the list source
                     config.reloadConfig()
-                    
+
                     // Update list selection AFTER reload starts (async)
                     DispatchQueue.main.async {
                         print("Setting listSelection to '\(nameToSelect)' after reload.")
@@ -277,7 +284,7 @@ struct GeneralPane: View {
                 messageText += "\n(Path: ...\(path.suffix(40)))"
             }
         } // Fallback is implicitly handled if path is nil
-        
+
         messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
         return Text(messageText)
     })
@@ -400,7 +407,7 @@ private struct AddConfigSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Start with:")
                     .font(.headline)
-                
+
                 Picker("Template", selection: $selectedTemplate) {
                     ForEach(templateOptions, id: \.self) { template in
                         Text(template).tag(template)
@@ -408,7 +415,7 @@ private struct AddConfigSheet: View {
                 }
                 .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                
+
                 Text("Choose a configuration to use as a starting point, or select 'Empty' to start from scratch.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -423,7 +430,7 @@ private struct AddConfigSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Overlay Configuration", isOn: $isOverlayConfig)
                     .font(.headline)
-                
+
                 Text("Overlay configurations are used when apps like Raycast or Alfred show overlay windows. They have a '.overlay' suffix in the filename.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -444,7 +451,7 @@ private struct AddConfigSheet: View {
 
     private func createConfig() {
         let templateKey = selectedTemplate == "Empty" ? "EMPTY_TEMPLATE" : selectedTemplate
-        let _ = config.createConfigForApp(
+        _ = config.createConfigForApp(
             bundleId: effectiveBundleId,
             templateKey: templateKey,
             customName: customDisplayName.isEmpty ? nil : customDisplayName,

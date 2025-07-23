@@ -82,7 +82,7 @@ extension UserConfig {
             throw NSError(
                 domain: "UserConfig",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to encode default app config"]
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode fallback app config"]
             )
         }
         let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(defaultAppConfigFileName)
@@ -96,4 +96,4 @@ extension UserConfig {
     private func readFile() throws -> String {
         try String(contentsOfFile: path, encoding: .utf8)
     }
-} 
+}

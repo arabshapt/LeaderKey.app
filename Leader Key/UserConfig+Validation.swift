@@ -10,4 +10,4 @@ extension UserConfig {
     func finishEditingKey() {
         validateWithoutAlerts()
     }
-} 
+}

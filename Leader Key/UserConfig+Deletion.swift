@@ -17,9 +17,9 @@ extension UserConfig {
             alertHandler.showAlert(style: .warning, message: "The Global Default configuration cannot be deleted.")
             return false
         }
-        // Additional protection for default app config
+        // Additional protection for fallback app config
         if displayKey == defaultAppConfigDisplayName {
-            alertHandler.showAlert(style: .warning, message: "The Default App configuration cannot be deleted.")
+            alertHandler.showAlert(style: .warning, message: "The Fallback App configuration cannot be deleted.")
             return false
         }
 
@@ -38,4 +38,4 @@ extension UserConfig {
         self.reloadConfig()
         return true
     }
-} 
+}

@@ -17,18 +17,85 @@ struct KeyReference {
     ]
 }
 
+// Helper function to recursively convert fallback items to app-specific
+func convertNestedFallbacksToAppSpecific(_ items: [ActionOrGroup]) -> [ActionOrGroup] {
+    return items.map { item in
+        switch item {
+        case .action(var action):
+            // Only convert if this action is actually from fallback
+            if action.isFromFallback {
+                action.isFromFallback = false
+                action.fallbackSource = nil
+            }
+            // Convert macro steps if any are from fallback
+            if let macroSteps = action.macroSteps {
+                action.macroSteps = macroSteps.map { step in
+                    var newStep = step
+                    if newStep.action.isFromFallback {
+                        newStep.action.isFromFallback = false
+                        newStep.action.fallbackSource = nil
+                    }
+                    return newStep
+                }
+            }
+            return .action(action)
+        case .group(var group):
+            // Only convert if this group is actually from fallback
+            if group.isFromFallback {
+                group.isFromFallback = false
+                group.fallbackSource = nil
+            }
+            // Recursively convert nested items (only fallback ones)
+            group.actions = convertNestedFallbacksToAppSpecific(group.actions)
+            return .group(group)
+        }
+    }
+}
+
 // Helper function to create a deep duplicate with a new UUID
 func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     switch item {
     case .action(let action):
         // Create a new Action instance, which will get a new UUID
-        return .action(Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps))
+        var newAction = Action(key: action.key, type: action.type, label: action.label, value: action.value, iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode, macroSteps: action.macroSteps)
+        // Preserve metadata properties
+        newAction.isFromFallback = action.isFromFallback
+        newAction.fallbackSource = action.fallbackSource
+        // Preserve macro step fallback metadata if any
+        if let macroSteps = action.macroSteps {
+            newAction.macroSteps = macroSteps.map { step in
+                var newStep = step
+                // Preserve fallback metadata for macro step actions
+                newStep.action.isFromFallback = step.action.isFromFallback
+                newStep.action.fallbackSource = step.action.fallbackSource
+                return newStep
+            }
+        }
+        return .action(newAction)
     case .group(let group):
         // Recursively duplicate actions within the group
         let newActions = group.actions.map { makeTrueDuplicate(item: $0) }
         // Create a new Group instance, which will get a new UUID
-        return .group(Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions))
+        var newGroup = Group(key: group.key, label: group.label, iconPath: group.iconPath, stickyMode: group.stickyMode, actions: newActions)
+        // Preserve metadata properties
+        newGroup.isFromFallback = group.isFromFallback
+        newGroup.fallbackSource = group.fallbackSource
+        return .group(newGroup)
     }
+}
+
+// Helper function to sort actions alphabetically for display
+extension Array where Element == ActionOrGroup {
+  func sortedAlphabetically() -> [ActionOrGroup] {
+    return self.sorted { item1, item2 in
+      let key1 = item1.item.key?.lowercased() ?? "zzz" // Treat nil/empty keys as last
+      let key2 = item2.item.key?.lowercased() ?? "zzz"
+      // Ensure empty/nil keys are always after non-empty keys
+      if key1 == "zzz" && key2 != "zzz" { return false }
+      if key1 != "zzz" && key2 == "zzz" { return true }
+      return key1 < key2
+    }
+  }
 }
 
 let generalPadding: CGFloat = 8
@@ -74,21 +141,40 @@ struct GroupContentView: View {
   var isRoot: Bool = false
   var parentPath: [Int] = []
   @Binding var expandedGroups: Set<[Int]>
+  @Default(.showFallbackItems) var showFallbackItems
+
+  // Sort actions alphabetically and conditionally show/hide fallback items
+  var visibleActions: [ActionOrGroup] {
+    let sortedActions = group.actions.sortedAlphabetically()
+    if showFallbackItems {
+      return sortedActions
+    } else {
+      return sortedActions.filter { item in
+        switch item {
+        case .action(let action):
+          return !action.isFromFallback
+        case .group(let subgroup):
+          return !subgroup.isFromFallback
+        }
+      }
+    }
+  }
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(Array(group.actions.enumerated()), id: \.element.id) { index, item in
-        if index >= 0 && index < group.actions.count {
-          let currentPath = parentPath + [index]
+      ForEach(Array(visibleActions.enumerated()), id: \.element.id) { _, item in
+        // Find the original index in the unfiltered array
+        if let originalIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
+          let currentPath = parentPath + [originalIndex]
           ActionOrGroupRow(
             item: Binding(
-              get: { 
-                guard index < group.actions.count else { return item }
-                return group.actions[index]
+              get: {
+                guard originalIndex < group.actions.count else { return item }
+                return group.actions[originalIndex]
               },
               set: { newValue in
-                guard index < group.actions.count else { return }
-                group.actions[index] = newValue
+                guard originalIndex < group.actions.count else { return }
+                group.actions[originalIndex] = newValue
               }
             ),
             path: currentPath,
@@ -193,18 +279,18 @@ struct ActionOrGroupRow: View {
       Button("Copy") {
         ClipboardManager.shared.copyItem(item, fromConfig: userConfig.selectedConfigKeyForEditing)
       }
-      
+
       Button("Paste") {
         userConfig.pasteItem(at: path)
       }
       .disabled(!clipboardManager.canPaste())
-      
+
       Divider()
-      
+
       Button("Duplicate") {
         onDuplicate()
       }
-      
+
       Button("Delete") {
         onDelete()
       }
@@ -293,11 +379,11 @@ struct ActionRowState {
   var isUrlEditorPresented: Bool
   var isCommandEditorPresented: Bool
   var showingKeyReference: Bool
-  
+
   var isAnyEditorPresented: Bool {
     isShortcutEditorPresented || isTextEditorPresented || isUrlEditorPresented || isCommandEditorPresented
   }
-  
+
   init() {
     self.keyInputValue = ""
     self.valueInputValue = ""
@@ -320,7 +406,7 @@ struct ActionRow: View {
   let onDuplicate: () -> Void
   @FocusState private var isKeyFocused: Bool
   @EnvironmentObject var userConfig: UserConfig
-  
+
   @State private var state = ActionRowState()
 
   var body: some View {
@@ -328,18 +414,19 @@ struct ActionRow: View {
     guard !path.isEmpty && path.allSatisfy({ $0 >= 0 }) else {
       return AnyView(Text("Invalid path: empty or negative indices").foregroundColor(.red))
     }
-    
+
     return AnyView(
     HStack(spacing: generalPadding) {
       KeyButton(
         text: $state.keyInputValue,
-        placeholder: "Key", 
+        placeholder: "Key",
         validationError: validationErrorForKey,
         path: path,
         onKeyChanged: { keyButtonPath, capturedKey in
           state.keyInputValue = capturedKey
           userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
-        }
+        },
+        showFallbackIndicator: action.isFromFallback
       )
       .onChange(of: state.isListening) { isNowListening in
           if state.wasPreviouslyListening && !isNowListening {
@@ -436,7 +523,7 @@ struct ActionRow: View {
             Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
               .font(.footnote)
               .foregroundColor(.secondary)
-            
+
             DisclosureGroup("Key Reference", isExpanded: $state.showingKeyReference) {
               ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -445,7 +532,7 @@ struct ActionRow: View {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
-                      
+
                       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
@@ -610,9 +697,42 @@ struct ActionRow: View {
 
       Spacer()
 
-      TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
-        action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
-      })
+      HStack(spacing: 4) {
+        TextField(action.bestGuessDisplayName, text: $state.labelInputValue, onCommit: {
+          action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
+        })
+        .frame(width: action.isFromFallback ? 70 : 120)
+
+        if action.isFromFallback {
+          HStack(spacing: 2) {
+            Image(systemName: "arrow.down.circle.fill")
+              .foregroundColor(.white.opacity(0.2))
+              .font(.system(size: 10))
+              .help("From \(action.fallbackSource ?? "Fallback App Config")")
+
+            Button("Override") {
+              // Convert fallback item to app-specific item, including macro steps
+              var newAction = action
+              newAction.isFromFallback = false
+              newAction.fallbackSource = nil
+              // Convert macro steps if any
+              if let macroSteps = newAction.macroSteps {
+                newAction.macroSteps = macroSteps.map { step in
+                  var newStep = step
+                  newStep.action.isFromFallback = false
+                  newStep.action.fallbackSource = nil
+                  return newStep
+                }
+              }
+              userConfig.updateAction(at: path, newAction: newAction)
+            }
+            .font(.system(size: 9))
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .help("Convert to app-specific item")
+          }
+        }
+      }
       .frame(width: 120)
       .padding(.trailing, generalPadding)
 
@@ -643,7 +763,7 @@ struct ActionRow: View {
       } else {
         state.labelInputValue = action.label ?? ""
       }
-      state.selectedType = action.type 
+      state.selectedType = action.type
     }
     // Consolidated onChange handler for better performance
     .onChange(of: state.valueInputValue) { newValue in
@@ -712,7 +832,7 @@ struct GroupRow: View {
              .padding(.leading, 5) // Indent slightly based on path depth
              .opacity(0.7) */
         // --- Add simple debug text --- END
-        
+
         KeyButton(
           text: $keyInputValue,
           placeholder: "Group Key",
@@ -721,7 +841,8 @@ struct GroupRow: View {
           onKeyChanged: { keyButtonPath, capturedKey in
             keyInputValue = capturedKey
             userConfig.updateKey(at: keyButtonPath, newKey: capturedKey)
-          }
+          },
+          showFallbackIndicator: group.isFromFallback
         )
         .onChange(of: isListening) { isNowListening in
             if wasPreviouslyListening && !isNowListening {
@@ -775,8 +896,35 @@ struct GroupRow: View {
         .frame(width: 40)
         .help("Sticky Mode: Automatically activate sticky mode when entering this group")
 
-        TextField("Label", text: $labelInputValue).frame(width: 120)
-          .padding(.trailing, generalPadding)
+        HStack(spacing: 4) {
+          TextField("Label", text: $labelInputValue)
+            .frame(width: group.isFromFallback ? 70 : 120)
+
+          if group.isFromFallback {
+            HStack(spacing: 2) {
+              Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.white.opacity(0.2))
+                .font(.system(size: 10))
+                .help("From \(group.fallbackSource ?? "Fallback App Config")")
+
+              Button("Override") {
+                // Convert fallback item to app-specific item, including all nested items
+                var newGroup = group
+                newGroup.isFromFallback = false
+                newGroup.fallbackSource = nil
+                // Recursively convert all nested items from fallback to app-specific
+                newGroup.actions = convertNestedFallbacksToAppSpecific(newGroup.actions)
+                userConfig.updateGroup(at: path, newGroup: newGroup)
+              }
+              .font(.system(size: 9))
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .help("Convert to app-specific item")
+            }
+          }
+        }
+        .frame(width: 120)
+        .padding(.trailing, generalPadding)
 
         Button(role: .none, action: {
           ClipboardManager.shared.copyItem(.group(group), fromConfig: userConfig.selectedConfigKeyForEditing)
@@ -821,7 +969,7 @@ struct GroupRow: View {
         }
     }
     .onChange(of: group.label) { newValue in labelInputValue = newValue ?? "" }
-    
+
     .onChange(of: labelInputValue) { newValue in
         // Update label immediately when local state changes
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue
@@ -883,7 +1031,7 @@ struct GroupRow: View {
             .action(
               Action(
                 key: "s", type: .application, value: "/Applications/Safari.app")
-            ),
+            )
           ])),
 
       // Level 1 group with subgroups
@@ -910,9 +1058,9 @@ struct GroupRow: View {
                   .action(
                     Action(
                       key: "h", type: .url,
-                      value: "raycast://window-management/left-half")),
-                ])),
-          ])),
+                      value: "raycast://window-management/left-half"))
+                ]))
+          ]))
     ])
 
   let userConfig = UserConfig()
@@ -926,7 +1074,7 @@ struct MacroEditorView: View {
   @Binding var action: Action
   var path: [Int]
   @State private var isMacroEditorPresented = false
-  
+
   var body: some View {
     Button {
       isMacroEditorPresented = true
@@ -941,7 +1089,7 @@ struct MacroEditorView: View {
       MacroEditorSheet(action: $action, path: path, isPresented: $isMacroEditorPresented)
     }
   }
-  
+
   private var macroButtonText: String {
     let stepCount = action.macroSteps?.count ?? 0
     if stepCount == 0 {
@@ -957,16 +1105,16 @@ struct MacroEditorSheet: View {
   var path: [Int]
   @Binding var isPresented: Bool
   @State private var macroSteps: [MacroStep] = []
-  
+
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Edit Macro")
         .font(.title2)
-      
+
       Text("Create a sequence of actions that will be executed in order with configurable delays.")
         .font(.body)
         .foregroundColor(.secondary)
-      
+
       List {
         ForEach($macroSteps) { $step in
           MacroStepRow(step: $step, onDelete: {
@@ -980,7 +1128,7 @@ struct MacroEditorSheet: View {
       }
       .frame(minHeight: 200)
       .border(Color.gray.opacity(0.2))
-      
+
       Button("Add Step") {
         let newStep = MacroStep(
           action: Action(key: "", type: .shortcut, value: ""),
@@ -989,7 +1137,7 @@ struct MacroEditorSheet: View {
         )
         macroSteps.append(newStep)
       }
-      
+
       HStack {
         Spacer()
         Button("Cancel") {
@@ -1010,7 +1158,7 @@ struct MacroEditorSheet: View {
       macroSteps = action.macroSteps ?? []
     }
   }
-  
+
   private func moveMacroStep(from source: IndexSet, to destination: Int) {
     macroSteps.move(fromOffsets: source, toOffset: destination)
   }
@@ -1025,19 +1173,19 @@ struct MacroStepRow: View {
   @State private var isUrlEditorPresented = false
   @State private var isCommandEditorPresented = false
   @State private var showingKeyReference = false
-  
+
   var body: some View {
     HStack(spacing: 12) {
       // Drag handle
       Image(systemName: "line.3.horizontal")
         .foregroundColor(.secondary)
         .frame(width: 20)
-      
+
       // Enable/disable toggle
       Toggle("", isOn: $step.enabled)
         .toggleStyle(.checkbox)
         .frame(width: 20)
-      
+
       // Delay field
       VStack(alignment: .leading, spacing: 2) {
         Text("Delay (s)")
@@ -1054,7 +1202,7 @@ struct MacroStepRow: View {
           .frame(width: 60)
           .textFieldStyle(.roundedBorder)
       }
-      
+
       // Action type picker
       Picker("Type", selection: $step.action.type) {
         Text("Shortcut").tag(Type.shortcut)
@@ -1066,7 +1214,7 @@ struct MacroStepRow: View {
       }
       .frame(width: 100)
       .labelsHidden()
-      
+
       // Action value field - now with popup editors similar to ActionRow, made wider
       HStack(spacing: 8) {
         switch step.action.type {
@@ -1120,7 +1268,7 @@ struct MacroStepRow: View {
             Text("Use letters for modifiers before the key: C=⌘, S=⇧, O=⌥, T=⌃. Example: CSb means ⌘⇧B.")
               .font(.footnote)
               .foregroundColor(.secondary)
-            
+
             DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
               ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -1129,7 +1277,7 @@ struct MacroStepRow: View {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
-                      
+
                       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
@@ -1277,10 +1425,18 @@ struct MacroStepRow: View {
           .frame(width: 420)
         }
       }
-        
+
         Spacer()
       }
-      
+
+      // Fallback indicator for macro steps
+      if step.action.isFromFallback {
+        Image(systemName: "circle.fill")
+          .foregroundColor(.white.opacity(0.2))
+          .font(.system(size: 4))
+          .help("From \(step.action.fallbackSource ?? "Fallback App Config")")
+      }
+
       // Delete button
       Button(role: .destructive, action: onDelete) {
         Image(systemName: "trash")
