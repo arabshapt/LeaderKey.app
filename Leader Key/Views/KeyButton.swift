@@ -28,10 +28,11 @@ struct KeyButton: View {
           .foregroundColor(text.isEmpty ? .gray : .primary)
         
         if showFallbackIndicator {
-          Image(systemName: "circle.fill")
-            .foregroundColor(.white.opacity(0.2))
-            .font(.system(size: 4))
+          Image(systemName: "arrow.down")
+            .foregroundColor(.blue.opacity(0.7))
+            .font(.system(size: 8, weight: .bold))
             .offset(x: -2, y: -2)
+            .help("This key is inherited from fallback configuration. Click 'Make Editable' to customize it.")
         }
       }
     }

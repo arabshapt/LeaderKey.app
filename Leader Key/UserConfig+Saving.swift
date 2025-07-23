@@ -187,12 +187,18 @@ extension UserConfig {
         }
 
         // Return a new Group instance with the sorted actions
-        return Group(
+        var sortedGroup = Group(
             key: group.key,
             label: group.label,
             iconPath: group.iconPath,
             stickyMode: group.stickyMode,
             actions: sortedActions
         )
+        
+        // Preserve fallback metadata
+        sortedGroup.isFromFallback = group.isFromFallback
+        sortedGroup.fallbackSource = group.fallbackSource
+        
+        return sortedGroup
     }
 }

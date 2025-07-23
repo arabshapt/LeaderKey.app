@@ -230,6 +230,7 @@ extension UserConfig {
             if !hasConflict {
                 // No conflict, add the fallback item with metadata, marking all nested items too
                 let fallbackCopy = markAsFromFallback(fallbackItem, fallbackSource: fallbackSource)
+// Debug logging removed
                 mergedActions.append(fallbackCopy)
             } else if let fallbackKey = fallbackKey,
                       case .group(let fallbackNestedGroup) = fallbackItem,

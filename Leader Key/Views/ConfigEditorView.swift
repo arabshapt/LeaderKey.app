@@ -706,13 +706,13 @@ struct ActionRow: View {
         .frame(width: action.isFromFallback ? 70 : 120)
 
         if action.isFromFallback {
-          HStack(spacing: 2) {
-            Image(systemName: "arrow.down.circle.fill")
-              .foregroundColor(.white.opacity(0.2))
-              .font(.system(size: 10))
-              .help("From \(action.fallbackSource ?? "Fallback App Config")")
+          HStack(spacing: 3) {
+            Image(systemName: "arrow.down")
+              .foregroundColor(.blue.opacity(0.6))
+              .font(.system(size: 11, weight: .medium))
+              .help("Inherited from \(action.fallbackSource ?? "Fallback App Config")")
 
-            Button("Override") {
+            Button("Make Editable") {
               // Convert fallback item to app-specific item, including macro steps
               var newAction = action
               newAction.isFromFallback = false
@@ -728,10 +728,10 @@ struct ActionRow: View {
               }
               userConfig.updateAction(at: path, newAction: newAction)
             }
-            .font(.system(size: 9))
+            .font(.system(size: 9, weight: .medium))
             .buttonStyle(.bordered)
             .controlSize(.mini)
-            .help("Convert to app-specific item")
+            .help("Create app-specific copy of this fallback item that you can modify")
           }
         }
       }
@@ -756,6 +756,12 @@ struct ActionRow: View {
       .buttonStyle(.plain)
       .padding(.trailing, generalPadding)
     }
+    .background(
+      action.isFromFallback ? 
+        Color.blue.opacity(0.05) : 
+        Color.clear
+    )
+    .cornerRadius(action.isFromFallback ? 4 : 0)
     .onAppear {
       state.keyInputValue = action.key ?? ""
       state.valueInputValue = action.value
@@ -903,13 +909,13 @@ struct GroupRow: View {
             .frame(width: group.isFromFallback ? 70 : 120)
 
           if group.isFromFallback {
-            HStack(spacing: 2) {
-              Image(systemName: "arrow.down.circle.fill")
-                .foregroundColor(.white.opacity(0.2))
-                .font(.system(size: 10))
-                .help("From \(group.fallbackSource ?? "Fallback App Config")")
+            HStack(spacing: 3) {
+              Image(systemName: "arrow.down")
+                .foregroundColor(.blue.opacity(0.6))
+                .font(.system(size: 11, weight: .medium))
+                .help("Inherited from \(group.fallbackSource ?? "Fallback App Config")")
 
-              Button("Override") {
+              Button("Make Editable") {
                 // Convert fallback item to app-specific item, including all nested items
                 var newGroup = group
                 newGroup.isFromFallback = false
@@ -918,10 +924,10 @@ struct GroupRow: View {
                 newGroup.actions = convertNestedFallbacksToAppSpecific(newGroup.actions)
                 userConfig.updateGroup(at: path, newGroup: newGroup)
               }
-              .font(.system(size: 9))
+              .font(.system(size: 9, weight: .medium))
               .buttonStyle(.bordered)
               .controlSize(.mini)
-              .help("Convert to app-specific item")
+              .help("Create app-specific copy of this fallback group that you can modify")
             }
           }
         }
@@ -946,6 +952,12 @@ struct GroupRow: View {
         .buttonStyle(.plain)
         .padding(.trailing, generalPadding)
       }
+      .background(
+        group.isFromFallback ? 
+          Color.blue.opacity(0.05) : 
+          Color.clear
+      )
+      .cornerRadius(group.isFromFallback ? 4 : 0)
 
       if isExpanded {
         HStack(spacing: 0) {
@@ -963,6 +975,7 @@ struct GroupRow: View {
     .onAppear {
       keyInputValue = group.key ?? ""
       labelInputValue = group.label ?? ""
+// Debug logging removed
     }
     .onChange(of: group.key) { newValue in
         let newKeyValue = newValue ?? ""
