@@ -20,11 +20,11 @@ extension Defaults.Keys {
   static let theme = Key<Theme>(
     "theme", default: .mysteryBox, suite: defaultsSuite)
   static let automaticallyChecksForUpdates = Key<Bool>(
-    "automaticallyChecksForUpdates", default: true, suite: defaultsSuite)
+    "automaticallyChecksForUpdates", default: false, suite: defaultsSuite)
 
   static let autoOpenCheatsheet = Key<AutoOpenCheatsheetSetting>(
     "autoOpenCheatsheet",
-    default: .delay, suite: defaultsSuite)
+    default: .always, suite: defaultsSuite)
   static let cheatsheetDelayMS = Key<Int>(
     "cheatsheetDelayMS", default: 2000, suite: defaultsSuite)
   static let expandGroupsInCheatsheet = Key<Bool>(
@@ -36,15 +36,15 @@ extension Defaults.Keys {
   static let showFaviconsInCheatsheet = Key<Bool>(
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
-    "reactivateBehavior", default: .hide, suite: defaultsSuite)
+    "reactivateBehavior", default: .reset, suite: defaultsSuite)
   static let resetOnCmdRelease = Key<Bool>(
     "resetOnCmdRelease", default: false, suite: defaultsSuite)
   static let normalModeOpacity = Key<Double>(
     "normalModeOpacity", default: 0.9, suite: defaultsSuite)
   static let stickyModeOpacity = Key<Double>(
-    "stickyModeOpacity", default: 0.9, suite: defaultsSuite)
+    "stickyModeOpacity", default: 0.7, suite: defaultsSuite)
   static let panelTopOffsetPercent = Key<Double>(
-    "panelTopOffsetPercent", default: 0.3, suite: defaultsSuite)
+    "panelTopOffsetPercent", default: 0.15, suite: defaultsSuite)
   static let panelClickThrough = Key<Bool>(
     "panelClickThrough", default: false, suite: defaultsSuite)
   static let showFallbackItems = Key<Bool>(
