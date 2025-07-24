@@ -1,23 +1,60 @@
 <img src="https://s3.brnbw.com/icon_1024-akc2Ij3q9JOyhQ6Y7Lz6AFkX6nQQFhrQaRPqbV4vor0A62EA0vq4xOGrXpg6PVKi3aUJxOAyItkyktblPtZD4K4oYZ1bJVdh96VE.png" width="256" height="256" alt="Leader Key.app" />
 
-**The \*faster than your launcher\* launcher**
+# Leader Key.app - Enhanced
 
-A riff on [Raycast](https://www.raycast.com), [@mxstbr's multi-key Karabiner setup](https://www.youtube.com/watch?v=m5MDv9qwhU8&t=540s), and Vim's `<leader>` key.
+**The \*faster than your launcher\* launcher - with enhanced features**
 
-Watch the intro video on YouTube:
+An enhanced fork of the original [Leader Key.app](https://github.com/mikker/LeaderKey.app) by [@mikker](https://github.com/mikker), featuring improved validation UX, enhanced overlay detection, real-time feedback, and refined UI components.
+
+*Original concept: A riff on [Raycast](https://www.raycast.com), [@mxstbr's multi-key Karabiner setup](https://www.youtube.com/watch?v=m5MDv9qwhU8&t=540s), and Vim's `<leader>` key.*
+
+Watch the original intro videos by [@mikker](https://github.com/mikker):
 
 <div>
 <a href="https://www.youtube.com/watch?v=EQYakLsYSAQ"><img src="https://img.youtube.com/vi/EQYakLsYSAQ/maxresdefault.jpg" width=480></a>
 <a href="https://www.youtube.com/watch?v=hzzQl5FOL-k"><img src="https://img.youtube.com/vi/hzzQl5FOL-k/maxresdefault.jpg" width=480></a>
 </div>
 
-*Yes, I only have that one thumbnail face.*
+*The original videos showcase the core functionality that this enhanced fork builds upon.*
 
-📦 [Download latest version](https://github.com/mikker/LeaderKey.app/releases)
+## Fork Enhancements
 
+This enhanced version includes several improvements over the original:
+
+### 🎯 **Enhanced Validation UX**
+- **Rich Error Feedback**: Interactive tooltips with detailed error messages and actionable suggestions
+- **Validation Summary Panel**: Comprehensive overview of all configuration issues with one-click navigation
+- **Severity-Based Indicators**: Color-coded visual feedback (red for errors, orange for warnings) with appropriate icons
+- **Real-time Validation**: Immediate feedback as you edit configurations
+
+### 🔍 **Improved Overlay Detection**
+- Enhanced detection algorithms for better app overlay recognition
+- Improved reliability and responsiveness
+
+### ⚡ **Real-time Feedback & UI Improvements**
+- Instant configuration validation without modal dialogs
+- Refined settings interface with better visual hierarchy
+- Enhanced keyboard interaction and accessibility
+- Improved sorting and organization of configuration elements
+
+### 🛠 **Development Improvements**
+- Comprehensive test coverage for validation systems
+- Better error handling and resilience
+- Clean, maintainable codebase architecture
+
+📦 [Download latest version](https://github.com/arabshapt/LeaderKey.app/releases)
+
+### Installation
+
+**Option 1: Direct Download**
+Download the latest release from the [releases page](https://github.com/arabshapt/LeaderKey.app/releases).
+
+**Option 2: Original via Homebrew** *(installs the upstream version)*
 ```sh
 $ brew install leader-key
 ```
+
+*Note: The Homebrew formula currently installs the original version. For the enhanced features, please use the direct download option above.*
 
 ## Why Leader Key?
 
@@ -59,6 +96,14 @@ See [@mikker's config](https://github.com/mikker/LeaderKey.app/wiki/@mikker's-co
 
 Activate Leader Key, then <kbd>cmd + ,</kbd>.
 
+## Attribution
+
+This project is an enhanced fork of the original [Leader Key.app](https://github.com/mikker/LeaderKey.app) created by [@mikker](https://github.com/mikker). All original concepts, design, and core functionality are credited to the original author.
+
+**Original Project**: https://github.com/mikker/LeaderKey.app  
+**Original Author**: [@mikker](https://github.com/mikker)  
+**Fork Maintainer**: [@arabshapt](https://github.com/arabshapt)
+
 ## License
 
-MIT
+MIT - Same as the original project
