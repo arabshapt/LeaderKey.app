@@ -42,14 +42,17 @@ This enhanced version includes several improvements over the original:
 - Better error handling and resilience
 - Clean, maintainable codebase architecture
 
-📦 [Download latest version](https://github.com/arabshapt/LeaderKey.app/releases)
+📦 [Download enhanced version](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing)
 
 ### Installation
 
-**Option 1: Direct Download**
-Download the latest release from the [releases page](https://github.com/arabshapt/LeaderKey.app/releases).
+**Option 1: Pre-built Download**
+Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing).
 
-**Option 2: Original via Homebrew** *(installs the upstream version)*
+**Option 2: Build from Source**
+Clone this repository and build using Xcode or the command line tools documented in `CLAUDE.md`.
+
+**Option 3: Original via Homebrew** *(installs the upstream version)*
 ```sh
 $ brew install leader-key
 ```
