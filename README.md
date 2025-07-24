@@ -46,18 +46,24 @@ This enhanced version includes several improvements over the original:
 
 ### Installation
 
-**Option 1: Pre-built Download**
-Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing).
-
-**Option 2: Build from Source**
-Clone this repository and build using Xcode or the command line tools documented in `CLAUDE.md`.
-
-**Option 3: Original via Homebrew** *(installs the upstream version)*
+**Option 1: Homebrew (Recommended)**
 ```sh
-$ brew install leader-key
+brew tap arabshapt/leader-key-enhanced
+brew install --cask leader-key-enhanced
 ```
 
-*Note: The Homebrew formula currently installs the original version. For the enhanced features, please use the direct download option above.*
+**Option 2: Direct Download**
+Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing).
+
+**Option 3: Build from Source**
+Clone this repository and build using Xcode or the command line tools documented in `CLAUDE.md`.
+
+**Option 4: Original via Homebrew** *(installs the upstream version)*
+```sh
+brew install --cask leader-key
+```
+
+*Note: The original Homebrew formula installs the upstream version. For the enhanced features, use Option 1 above.*
 
 ## Why Leader Key?
 
