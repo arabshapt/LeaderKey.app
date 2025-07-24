@@ -20,6 +20,11 @@ class OverlayDetector: ObservableObject {
     // MARK: - Continuous Testing
     private var continuousTestingTimer: Timer?
     @Published var isContinuousTestingEnabled = false
+    
+    // MARK: - Real-time Detection Display
+    @Published var currentDetection: String = ""
+    @Published var lastUpdated: Date = Date()
+    private var realtimeDetectionTimer: Timer?
 
     private init() {}
 
@@ -851,5 +856,42 @@ class OverlayDetector: ObservableObject {
         }
 
         print("[OverlayDetector] 🔍 === END TEST ===")
+    }
+    
+    // MARK: - Real-time Detection Display
+    
+    func startRealtimeDetection() {
+        guard realtimeDetectionTimer == nil else { return }
+        
+        // Update immediately
+        updateRealtimeDetection()
+        
+        // Start timer for periodic updates
+        realtimeDetectionTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+            self?.updateRealtimeDetection()
+        }
+    }
+    
+    func stopRealtimeDetection() {
+        realtimeDetectionTimer?.invalidate()
+        realtimeDetectionTimer = nil
+        currentDetection = ""
+    }
+    
+    private func updateRealtimeDetection() {
+        guard Defaults[.overlayDetectionEnabled] else {
+            currentDetection = "Overlay detection is disabled"
+            lastUpdated = Date()
+            return
+        }
+        
+        guard hasAccessibilityPermissions() else {
+            currentDetection = "Accessibility permissions required"
+            lastUpdated = Date()
+            return
+        }
+        
+        currentDetection = testDetection()
+        lastUpdated = Date()
     }
 }

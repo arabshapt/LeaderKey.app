@@ -9,6 +9,7 @@ struct AdvancedPane: View {
   private let contentWidth = SettingsConfig.contentWidth
 
   @EnvironmentObject private var config: UserConfig
+  @ObservedObject private var overlayDetector = OverlayDetector.shared
 
   @Default(.configDir) var configDir
   @Default(.modifierKeyConfiguration) var modifierKeyConfiguration
@@ -24,9 +25,6 @@ struct AdvancedPane: View {
   @Default(.overlayApps) var overlayApps
 
   @State private var hasAccessibilityPermissions = false
-  @State private var testResult = ""
-  @State private var showingTestResult = false
-  @State private var isContinuousTestingEnabled = false
 
   var body: some View {
     ScrollView {
@@ -253,20 +251,50 @@ struct AdvancedPane: View {
             }
             .padding(.bottom, 8)
 
-            // Test Detection
+            // Live Detection Display
             VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Testing:")
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-
-                Spacer()
-
-                Button("Test Detection") {
-                  testResult = OverlayDetector.shared.testDetection()
-                  showingTestResult = true
+              Text("Current Detection:")
+                .font(.subheadline)
+                .fontWeight(.medium)
+              
+              if !overlayDetector.currentDetection.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                  // Detection status with visual indicator
+                  HStack(spacing: 8) {
+                    Image(systemName: detectionStatusIcon)
+                      .foregroundColor(detectionStatusColor)
+                      .font(.system(size: 12, weight: .medium))
+                    
+                    Text("Status: \(detectionStatusText)")
+                      .font(.caption)
+                      .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Text("Updated: \(timeFormatter.string(from: overlayDetector.lastUpdated))")
+                      .font(.caption2)
+                      .foregroundColor(.secondary)
+                  }
+                  
+                  // Detection details
+                  Text(overlayDetector.currentDetection)
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                    .padding(8)
+                    .background(detectionBackgroundColor)
+                    .cornerRadius(8)
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 8)
+                        .stroke(detectionStatusColor.opacity(0.3), lineWidth: 1)
+                    )
                 }
-                .disabled(!hasAccessibilityPermissions)
+              } else {
+                Text("Detection not running")
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+                  .padding(8)
+                  .background(Color.gray.opacity(0.1))
+                  .cornerRadius(8)
               }
 
               // Continuous Testing Toggle
@@ -277,14 +305,13 @@ struct AdvancedPane: View {
 
                 Spacer()
 
-                Button(isContinuousTestingEnabled ? "Stop Continuous Testing" : "Start Continuous Testing") {
+                Button(overlayDetector.isContinuousTestingEnabled ? "Stop Continuous Testing" : "Start Continuous Testing") {
                   OverlayDetector.shared.toggleContinuousTesting()
-                  isContinuousTestingEnabled = OverlayDetector.shared.isContinuousTestingEnabled
                 }
                 .disabled(!hasAccessibilityPermissions)
               }
 
-              if isContinuousTestingEnabled {
+              if overlayDetector.isContinuousTestingEnabled {
                 Text("🔍 Continuous testing active - check Console.app for real-time detection logs (search for '[OverlayDetector]')")
                   .font(.caption)
                   .foregroundColor(.blue)
@@ -292,42 +319,36 @@ struct AdvancedPane: View {
                   .background(Color.blue.opacity(0.1))
                   .cornerRadius(4)
               }
-
-              if showingTestResult {
-                VStack(alignment: .leading, spacing: 4) {
-                  Text("Detection Result:")
-                    .font(.caption)
-                    .fontWeight(.medium)
-
-                  Text(testResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(4)
-
-                  Button("Clear") {
-                    showingTestResult = false
-                    testResult = ""
-                  }
-                  .font(.caption)
-                }
-              }
             }
           }
         }
         .onAppear {
           updatePermissionStatus()
-          updateContinuousTestingState()
+          if overlayDetectionEnabled && hasAccessibilityPermissions {
+            OverlayDetector.shared.startRealtimeDetection()
+          }
         }
-        .onChange(of: overlayDetectionEnabled) { _ in
-          if overlayDetectionEnabled {
+        .onDisappear {
+          OverlayDetector.shared.stopRealtimeDetection()
+        }
+        .onChange(of: overlayDetectionEnabled) { enabled in
+          if enabled {
             updatePermissionStatus()
+            if hasAccessibilityPermissions {
+              OverlayDetector.shared.startRealtimeDetection()
+            }
           } else {
+            OverlayDetector.shared.stopRealtimeDetection()
             // Stop continuous testing if overlay detection is disabled
-            if isContinuousTestingEnabled {
-              OverlayDetector.shared.stopContinuousTesting()
-              updateContinuousTestingState()
+            OverlayDetector.shared.stopContinuousTesting()
+          }
+        }
+        .onChange(of: hasAccessibilityPermissions) { hasPermissions in
+          if overlayDetectionEnabled {
+            if hasPermissions {
+              OverlayDetector.shared.startRealtimeDetection()
+            } else {
+              OverlayDetector.shared.stopRealtimeDetection()
             }
           }
         }
@@ -370,9 +391,59 @@ struct AdvancedPane: View {
   private func updatePermissionStatus() {
     hasAccessibilityPermissions = OverlayDetector.shared.hasAccessibilityPermissions()
   }
-
-  private func updateContinuousTestingState() {
-    isContinuousTestingEnabled = OverlayDetector.shared.isContinuousTestingEnabled
+  
+  // MARK: - Visual Indicators
+  
+  private var timeFormatter: DateFormatter {
+    let formatter = DateFormatter()
+    formatter.timeStyle = .medium
+    return formatter
+  }
+  
+  private var detectionStatusIcon: String {
+    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
+      return "pause.circle.fill"
+    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
+      return "exclamationmark.triangle.fill"
+    } else if overlayDetector.currentDetection.contains("Overlay: true") {
+      return "checkmark.circle.fill"
+    } else if overlayDetector.currentDetection.contains("App: none") {
+      return "circle.fill"
+    } else {
+      return "app.circle.fill"
+    }
+  }
+  
+  private var detectionStatusColor: Color {
+    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
+      return .gray
+    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
+      return .orange
+    } else if overlayDetector.currentDetection.contains("Overlay: true") {
+      return .green
+    } else if overlayDetector.currentDetection.contains("App: none") {
+      return .gray
+    } else {
+      return .blue
+    }
+  }
+  
+  private var detectionStatusText: String {
+    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
+      return "Disabled"
+    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
+      return "No Permissions"
+    } else if overlayDetector.currentDetection.contains("Overlay: true") {
+      return "Overlay Detected"
+    } else if overlayDetector.currentDetection.contains("App: none") {
+      return "No App"
+    } else {
+      return "Normal App"
+    }
+  }
+  
+  private var detectionBackgroundColor: Color {
+    detectionStatusColor.opacity(0.1)
   }
 }
 
