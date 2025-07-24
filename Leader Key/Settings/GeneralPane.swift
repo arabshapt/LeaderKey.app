@@ -34,6 +34,22 @@ struct GeneralPane: View {
           return key1 < key2
       }
   }
+  
+  var renameAlertMessage: String {
+      var messageText = "Enter a new name for the configuration '\(config.selectedConfigKeyForEditing)'."
+      // Fix URL creation for file paths
+      if let path = filePathToRename { // Unwrap path first
+          let url = URL(fileURLWithPath: path) // Create URL directly
+          if !url.lastPathComponent.isEmpty { // Check lastPathComponent
+              messageText += "\n(File: \(url.lastPathComponent))"
+          } else { // Handle case where lastPathComponent might be empty for some reason
+              messageText += "\n(Path: ...\(path.suffix(40)))"
+          }
+      } // Fallback is implicitly handled if path is nil
+
+      messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
+      return messageText
+  }
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -142,6 +158,16 @@ struct GeneralPane: View {
                   Text("Editing: \(config.selectedConfigKeyForEditing)")
                       .font(.title3)
                       .padding(.bottom, 5)
+
+                  // Validation Summary
+                  ValidationSummaryView(
+                      errors: config.validationErrors,
+                      onErrorTap: { error in
+                          // Navigate to the error location by expanding groups if needed
+                          expandToPath(error.path)
+                      }
+                  )
+                  .padding([.bottom], 8)
 
                   // The existing config editor section
                   VStack(alignment: .leading, spacing: 8) {
@@ -279,20 +305,7 @@ struct GeneralPane: View {
         }
         Button("Cancel", role: .cancel) { }
     }, message: {
-        // Construct the message dynamically
-        var messageText = "Enter a new name for the configuration '\(config.selectedConfigKeyForEditing)'."
-        // Fix URL creation for file paths
-        if let path = filePathToRename { // Unwrap path first
-            let url = URL(fileURLWithPath: path) // Create URL directly
-            if !url.lastPathComponent.isEmpty { // Check lastPathComponent
-                messageText += "\n(File: \(url.lastPathComponent))"
-            } else { // Handle case where lastPathComponent might be empty for some reason
-                messageText += "\n(Path: ...\(path.suffix(40)))"
-            }
-        } // Fallback is implicitly handled if path is nil
-
-        messageText += "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
-        return Text(messageText)
+        Text(renameAlertMessage)
     })
     // Delete confirmation alert
     .alert("Delete Configuration", isPresented: $showingDeleteAlert, actions: {
@@ -321,6 +334,19 @@ struct GeneralPane: View {
       if case .group(let subgroup) = item {
         expandedGroups.insert(currentPath)
         expandAllGroups(in: subgroup, parentPath: currentPath)
+      }
+    }
+  }
+  
+  private func expandToPath(_ path: [Int]) {
+    // Expand all parent groups along the path to make the error item visible
+    var currentPath: [Int] = []
+    for index in path.dropLast() {
+      currentPath.append(index)
+      // Check if this path represents a group
+      if let item = ConfigValidator.findItem(in: config.currentlyEditingGroup, at: currentPath),
+         case .group = item {
+        expandedGroups.insert(currentPath)
       }
     }
   }
@@ -506,4 +532,112 @@ struct GeneralPane_Previews: PreviewProvider {
     return GeneralPane()
       .environmentObject(previewConfig)
   }
+}
+
+// MARK: - ValidationSummaryView
+private struct ValidationSummaryView: View {
+    let errors: [ValidationError]
+    let onErrorTap: ((ValidationError) -> Void)?
+    
+    init(errors: [ValidationError], onErrorTap: ((ValidationError) -> Void)? = nil) {
+        self.errors = errors
+        self.onErrorTap = onErrorTap
+    }
+    
+    var body: some View {
+        if errors.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                Text("No validation issues")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.green.opacity(0.1))
+            .cornerRadius(8)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                // Summary header
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(summaryIconColor)
+                    Text("\(errors.count) validation \(errors.count == 1 ? "issue" : "issues")")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(summaryBackgroundColor)
+                .cornerRadius(8)
+                
+                // Error list
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(errors) { error in
+                        ValidationErrorRow(error: error, onTap: onErrorTap)
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+            .padding(.vertical, 4)
+            .background(Color(.controlBackgroundColor))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+    
+    private var summaryIconColor: Color {
+        let hasErrors = errors.contains { $0.severity == .error }
+        return hasErrors ? .red : .orange
+    }
+    
+    private var summaryBackgroundColor: Color {
+        let hasErrors = errors.contains { $0.severity == .error }
+        return hasErrors ? Color.red.opacity(0.1) : Color.orange.opacity(0.1)
+    }
+}
+
+private struct ValidationErrorRow: View {
+    let error: ValidationError
+    let onTap: ((ValidationError) -> Void)?
+    
+    var body: some View {
+        let errorContent = VStack(alignment: .leading, spacing: 2) {
+            Text(error.message)
+                .font(.caption)
+                .foregroundColor(.primary)
+            
+            if let suggestion = error.suggestion {
+                Text("💡 \(suggestion)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        
+        return Button(action: {
+            onTap?(error)
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: error.severity.iconName)
+                    .foregroundColor(error.severity == .error ? .red : .orange)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 16)
+                
+                errorContent
+                Spacer()
+                
+                if onTap != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(8)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
 }

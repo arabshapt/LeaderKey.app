@@ -179,6 +179,9 @@ extension UserConfig {
         }
 
         updateLogic()
+        
+        // Trigger real-time validation after key update
+        validateWithoutAlerts()
     }
 
     private func modifyItem(in group: inout Group, at path: [Int], update: (inout ActionOrGroup) -> Void) {
@@ -228,10 +231,14 @@ extension UserConfig {
 
         if Thread.isMainThread {
             updateLogic()
+            // Trigger real-time validation after action update
+            validateWithoutAlerts()
             saveCurrentlyEditingConfig()
         } else {
             DispatchQueue.main.async {
                 updateLogic()
+                // Trigger real-time validation after action update
+                self.validateWithoutAlerts()
                 self.saveCurrentlyEditingConfig()
             }
         }
@@ -253,10 +260,14 @@ extension UserConfig {
 
         if Thread.isMainThread {
             updateLogic()
+            // Trigger real-time validation after group update
+            validateWithoutAlerts()
             saveCurrentlyEditingConfig()
         } else {
             DispatchQueue.main.async {
                 updateLogic()
+                // Trigger real-time validation after group update
+                self.validateWithoutAlerts()
                 self.saveCurrentlyEditingConfig()
             }
         }
@@ -283,6 +294,9 @@ extension UserConfig {
         }
 
         updateLogic()
+        
+        // Trigger real-time validation after action type update
+        validateWithoutAlerts()
     }
 }
 

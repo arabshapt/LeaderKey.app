@@ -788,7 +788,7 @@ struct ActionRow: View {
     ) // Close AnyView
   }
 
-  private var validationErrorForKey: ValidationErrorType? {
+  private var validationErrorForKey: ValidationError? {
     guard !path.isEmpty else { return nil }
 
     // Find validation errors for this item
@@ -796,11 +796,7 @@ struct ActionRow: View {
       error.path == path
     }
 
-    if let error = errors.first {
-      return error.type
-    }
-
-    return nil
+    return errors.first
   }
 }
 
@@ -833,13 +829,6 @@ struct GroupRow: View {
   var body: some View {
     VStack(spacing: generalPadding) {
       HStack(spacing: generalPadding) {
-        // --- Add simple debug text --- START
-        /* Text("DBG:[\(path.map(String.init).joined(separator: ","))] Key:\(group.key ?? "?")")
-             .font(.caption)
-             .foregroundColor(.red)
-             .padding(.leading, 5) // Indent slightly based on path depth
-             .opacity(0.7) */
-        // --- Add simple debug text --- END
 
         KeyButton(
           text: $keyInputValue,
@@ -975,7 +964,6 @@ struct GroupRow: View {
     .onAppear {
       keyInputValue = group.key ?? ""
       labelInputValue = group.label ?? ""
-// Debug logging removed
     }
     .onChange(of: group.key) { newValue in
         let newKeyValue = newValue ?? ""
@@ -995,7 +983,7 @@ struct GroupRow: View {
     .padding(.horizontal, 0)
   }
 
-  private var validationErrorForKey: ValidationErrorType? {
+  private var validationErrorForKey: ValidationError? {
     guard !path.isEmpty else { return nil }
 
     // Find validation errors for this item
@@ -1003,11 +991,7 @@ struct GroupRow: View {
       error.path == path
     }
 
-    if let error = errors.first {
-      return error.type
-    }
-
-    return nil
+    return errors.first
   }
 }
 

@@ -5,7 +5,7 @@ struct KeyButton: View {
   @Binding var text: String
   let placeholder: String
   @State private var isListening = false
-  var validationError: ValidationErrorType?
+  var validationError: ValidationError?
   var path: [Int]
   var onKeyChanged: (([Int], String) -> Void)?
   var showFallbackIndicator: Bool = false
@@ -22,21 +22,27 @@ struct KeyButton: View {
               .fill(backgroundColor)
               .overlay(
                 RoundedRectangle(cornerRadius: 5)
-                  .stroke(borderColor, lineWidth: 1)
+                  .stroke(borderColor, lineWidth: borderWidth)
               )
           )
           .foregroundColor(text.isEmpty ? .gray : .primary)
         
-        if showFallbackIndicator {
+        // Validation error indicator
+        if let error = validationError {
+          Image(systemName: error.severity.iconName)
+            .foregroundColor(errorIconColor)
+            .font(.system(size: 8, weight: .bold))
+            .offset(x: -2, y: -2)
+        } else if showFallbackIndicator {
           Image(systemName: "arrow.down")
             .foregroundColor(.blue.opacity(0.7))
             .font(.system(size: 8, weight: .bold))
             .offset(x: -2, y: -2)
-            .help("This key is inherited from fallback configuration. Click 'Make Editable' to customize it.")
         }
       }
     }
     .buttonStyle(PlainButtonStyle())
+    .help(helpText)
     .background(
       KeyListenerView(isListening: $isListening, path: path, onKeyChanged: onKeyChanged)
     )
@@ -45,8 +51,8 @@ struct KeyButton: View {
   private var backgroundColor: Color {
     if isListening {
       return Color.blue.opacity(0.2)
-    } else if validationError != nil {
-      return Color.red.opacity(0.1)
+    } else if let error = validationError {
+      return error.severity == .error ? Color.red.opacity(0.1) : Color.orange.opacity(0.1)
     } else {
       return Color(.controlBackgroundColor)
     }
@@ -55,10 +61,37 @@ struct KeyButton: View {
   private var borderColor: Color {
     if isListening {
       return Color.blue
-    } else if validationError != nil {
-      return Color.red
+    } else if let error = validationError {
+      return error.severity == .error ? Color.red : Color.orange
     } else {
       return Color.gray.opacity(0.5)
+    }
+  }
+  
+  private var borderWidth: CGFloat {
+    if validationError != nil {
+      return 2.0
+    } else {
+      return 1.0
+    }
+  }
+  
+  private var errorIconColor: Color {
+    guard let error = validationError else { return .clear }
+    return error.severity == .error ? .red : .orange
+  }
+  
+  private var helpText: String {
+    if let error = validationError {
+      var text = error.message
+      if let suggestion = error.suggestion {
+        text += "\n\n💡 " + suggestion
+      }
+      return text
+    } else if showFallbackIndicator {
+      return "This key is inherited from fallback configuration. Click 'Make Editable' to customize it."
+    } else {
+      return "Click to set a key, then press any character"
     }
   }
 }
@@ -146,13 +179,8 @@ struct KeyListenerView: NSViewRepresentable {
 }
 
 #Preview {
-  // Add placeholder definitions needed for Preview
-  enum ValidationErrorType { case duplicateKey, emptyKey, nonSingleCharacterKey }
-  class UserConfig: ObservableObject {}
-
   struct Container: View {
     @State var text = "a"
-    @StateObject var userConfig = UserConfig()
 
     var body: some View {
       VStack(spacing: 20) {
@@ -160,38 +188,49 @@ struct KeyListenerView: NSViewRepresentable {
           text: $text,
           placeholder: "Key",
           path: [0],
-          // Update closure to accept the path and String argument
           onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
-          validationError: .duplicateKey,
+          validationError: ValidationError(
+            path: [1],
+            message: "Multiple actions for the same key 'a'",
+            type: .duplicateKey,
+            suggestion: "Change this key to a unique character"
+          ),
           path: [1],
-          // Update closure to accept the path and String argument
           onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
-          validationError: .emptyKey,
+          validationError: ValidationError(
+            path: [2],
+            message: "Key is empty",
+            type: .emptyKey,
+            suggestion: "Click the key button and press a single character"
+          ),
           path: [2],
-          // Update closure to accept the path and String argument
           onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         KeyButton(
           text: $text,
           placeholder: "Key",
-          validationError: .nonSingleCharacterKey,
+          validationError: ValidationError(
+            path: [3],
+            message: "Key must be a single character",
+            type: .nonSingleCharacterKey,
+            severity: .warning,
+            suggestion: "Use only one character (a-z, 0-9, or symbols)"
+          ),
           path: [3],
-          // Update closure to accept the path and String argument
           onKeyChanged: { path, capturedKey in print("Key changed at path \(path) to: \(capturedKey)") }
         )
         Text("Current value: '\(text)'")
       }
       .padding()
       .frame(width: 300)
-      .environmentObject(userConfig)
     }
   }
 

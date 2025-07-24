@@ -4,7 +4,8 @@ import Foundation
 extension UserConfig {
 
     func validateWithoutAlerts() {
-        validationErrors = ConfigValidator.validate(group: root)
+        // Validate the currently editing group for real-time feedback
+        validationErrors = ConfigValidator.validate(group: currentlyEditingGroup)
     }
 
     func finishEditingKey() {
