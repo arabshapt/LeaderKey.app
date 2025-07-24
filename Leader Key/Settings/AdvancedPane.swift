@@ -410,7 +410,7 @@ struct AdvancedPane: View {
     } else if overlayDetector.currentDetection.contains("App: none") {
       return "circle.fill"
     } else {
-      return "app.circle.fill"
+      return "app.fill"
     }
   }
   
