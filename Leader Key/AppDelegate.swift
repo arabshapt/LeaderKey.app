@@ -245,7 +245,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
   private var stateRecoveryTimer: Timer?
   private var eventTapHealthTimer: Timer?
-  private var consecutiveHealthyChecks = 0
   
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
@@ -253,14 +252,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       self?.checkAndRecoverWindowState()
     }
     
-    // Start with frequent checks, then back off if healthy
-    scheduleEventTapHealthCheck(interval: 1.0)
-  }
-  
-  private func scheduleEventTapHealthCheck(interval: TimeInterval) {
-    eventTapHealthTimer?.invalidate()
-    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-      self?.checkEventTapHealthAdaptive()
+    // Check event tap health every 1 second - lightweight and critical for high CPU scenarios
+    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      self?.checkEventTapHealth()
     }
   }
   
@@ -277,20 +271,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
   
-  private func checkEventTapHealthAdaptive() {
+  private func checkEventTapHealth() {
     // Only check if we should be monitoring
-    guard isMonitoring else {
-      scheduleEventTapHealthCheck(interval: 5.0) // Check less frequently when not monitoring
-      return
-    }
+    guard isMonitoring else { return }
     
     // Check if event tap exists and is enabled
-    var isHealthy = true
-    
     if let tap = eventTap {
       if !CGEvent.tapIsEnabled(tap: tap) {
-        isHealthy = false
-        consecutiveHealthyChecks = 0
         print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
         CGEvent.tapEnable(tap: tap, enable: true)
         
@@ -302,29 +289,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
     } else {
       // Event tap is nil but we should be monitoring
-      isHealthy = false
-      consecutiveHealthyChecks = 0
       print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
       restartEventTap()
-    }
-    
-    // Adaptive interval based on health
-    if isHealthy {
-      consecutiveHealthyChecks += 1
-      // Back off gradually: 1s -> 2s -> 5s -> 10s
-      let nextInterval: TimeInterval = min(Double(consecutiveHealthyChecks), 10.0)
-      scheduleEventTapHealthCheck(interval: nextInterval)
-    } else {
-      // Problem detected, check again soon
-      scheduleEventTapHealthCheck(interval: 1.0)
     }
   }
   
   private func restartEventTap() {
     print("[AppDelegate] Restarting event tap...")
-    
-    // Reset health check counter
-    consecutiveHealthyChecks = 0
     
     // First stop the existing tap
     stopEventTapMonitoring()

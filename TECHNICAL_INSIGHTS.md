@@ -30,11 +30,11 @@ macOS can disable event taps that:
 
 ### Safeguards Implemented
 
-1. **Adaptive Health Check**
-   - Starts checking every 1 second
-   - Backs off to 10 seconds when healthy
-   - Immediately returns to 1s checks when problems detected
-   - Minimal CPU overhead (just checking a boolean flag)
+1. **Health Check (Every 1 Second)**
+   - Simple, non-adaptive 1-second interval
+   - Lightweight: just checks `CGEvent.tapIsEnabled()` boolean flag
+   - CPU impact is negligible (microseconds per check)
+   - Fast recovery from system-disabled taps in high CPU scenarios
 
 2. **Automatic Recovery**
    - Re-enables disabled event taps
