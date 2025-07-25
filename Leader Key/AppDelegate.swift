@@ -237,17 +237,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     stopEventTapMonitoring() // Defined in Event Tap Handling extension
     config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
     stateRecoveryTimer?.invalidate() // Stop state recovery timer
+    eventTapHealthTimer?.invalidate() // Stop event tap health timer
     print("[AppDelegate] applicationWillTerminate completed.")
   }
   
   // MARK: - State Recovery
   
   private var stateRecoveryTimer: Timer?
+  private var eventTapHealthTimer: Timer?
   
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
     stateRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
       self?.checkAndRecoverWindowState()
+    }
+    
+    // Check event tap health every 1 second - critical for high CPU scenarios
+    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      self?.checkEventTapHealth()
     }
   }
   
@@ -261,6 +268,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("[AppDelegate] State Recovery: Window visible but no active sequence. Hiding window.")
         hide()
       }
+    }
+  }
+  
+  private func checkEventTapHealth() {
+    // Only check if we should be monitoring
+    guard isMonitoring else { return }
+    
+    // Check if event tap exists and is enabled
+    if let tap = eventTap {
+      if !CGEvent.tapIsEnabled(tap: tap) {
+        print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
+        CGEvent.tapEnable(tap: tap, enable: true)
+        
+        // If still disabled after re-enabling, restart the whole event tap
+        if !CGEvent.tapIsEnabled(tap: tap) {
+          print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting event tap...")
+          restartEventTap()
+        }
+      }
+    } else {
+      // Event tap is nil but we should be monitoring
+      print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
+      restartEventTap()
+    }
+  }
+  
+  private func restartEventTap() {
+    print("[AppDelegate] Restarting event tap...")
+    
+    // First stop the existing tap
+    stopEventTapMonitoring()
+    
+    // Hide any stuck window
+    if controller?.window.isVisible == true {
+      hide()
+    }
+    
+    // Restart after a brief delay to ensure cleanup
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      self?.startEventTapMonitoring()
     }
   }
 

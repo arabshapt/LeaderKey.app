@@ -103,6 +103,10 @@ extension KeyboardShortcuts.Name {
     "forceReset",
     default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift, .control])
   )
+  static let fallbackEscape = KeyboardShortcuts.Name(
+    "fallbackEscape",
+    default: nil // No default - user can set if needed
+  )
 
   // Helper for group-specific shortcuts
   // static func forGroup(_ path: String) -> KeyboardShortcuts.Name {
