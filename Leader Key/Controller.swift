@@ -423,7 +423,7 @@ class Controller {
     }
 
     if window.isVisible {
-      window.makeKeyAndOrderFront(nil)
+      window.orderFront(nil)
     }
   }
 

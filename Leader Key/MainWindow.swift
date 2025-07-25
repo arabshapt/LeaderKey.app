@@ -113,7 +113,7 @@ class MainWindow: PanelWindow, NSWindowDelegate {
         self.contentView?.layoutSubtreeIfNeeded()
 
         self.alphaValue = 1
-        self.makeKeyAndOrderFront(nil)
+        self.orderFront(nil)
     }
   }
 

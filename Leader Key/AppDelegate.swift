@@ -190,6 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupFileMonitor()      // Defined in private extension
     setupStatusItem()       // Defined in private extension
     setupUpdaterController() // Configure auto-update behavior
+    setupStateRecoveryTimer() // Setup periodic state recovery checks
 
     // Attempt to start the global event tap immediately
     print("[AppDelegate] Attempting initial startEventTapMonitoring()...")
@@ -235,7 +236,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     print("[AppDelegate] applicationWillTerminate: Stopping event tap and saving config...")
     stopEventTapMonitoring() // Defined in Event Tap Handling extension
     config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
+    stateRecoveryTimer?.invalidate() // Stop state recovery timer
     print("[AppDelegate] applicationWillTerminate completed.")
+  }
+  
+  // MARK: - State Recovery
+  
+  private var stateRecoveryTimer: Timer?
+  
+  private func setupStateRecoveryTimer() {
+    // Check state every 5 seconds
+    stateRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+      self?.checkAndRecoverWindowState()
+    }
+  }
+  
+  private func checkAndRecoverWindowState() {
+    guard let window = controller?.window else { return }
+    
+    // Check for inconsistent states (only check isVisible, not opacity since user can set opacity to 0)
+    if window.isVisible {
+      // Check if we have a stuck sequence with no active group
+      if currentSequenceGroup == nil && activeRootGroup == nil {
+        print("[AppDelegate] State Recovery: Window visible but no active sequence. Hiding window.")
+        hide()
+      }
+    }
   }
 
     // --- Actions & Window Handling ---
@@ -484,10 +510,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           case .reset:
               // Preference: Reset the sequence if activated again while visible.
               print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
-              // If window wasn't key (e.g., user clicked elsewhere), make it key first.
-              if !controller.window.isKeyWindow {
-                  print("[AppDelegate] handleActivation (Reset): Window visible but not key. Making panel key without activating app.")
-                  controller.window.makeKeyAndOrderFront(nil) // non-activating panel; preserves other app focus
+              // Ensure window is visible and frontmost (but not key to avoid interfering with overlays)
+              if !controller.window.isVisible {
+                  print("[AppDelegate] handleActivation (Reset): Making window visible.")
+                  controller.window.orderFront(nil) // Just bring to front without making key
               }
               // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
               controller.userState.clear()
@@ -516,11 +542,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           case .nothing:
               // Preference: Do nothing if activated again while visible, unless window lost focus.
               print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
-              // If window wasn't key, make it key first.
-              if !controller.window.isKeyWindow {
-                  print("[AppDelegate] handleActivation (Nothing): Window visible but not key. Activating.")
-                  NSApp.activate(ignoringOtherApps: true)
-                  controller.window.makeKeyAndOrderFront(nil)
+              // Ensure window is visible (but not key to avoid interfering with overlays)
+              if !controller.window.isVisible {
+                  print("[AppDelegate] handleActivation (Nothing): Making window visible.")
+                  controller.window.orderFront(nil) // Just bring to front without making key
               }
               // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
               // This prevents restarting if the user just presses the shortcut again mid-sequence.
@@ -1194,17 +1219,21 @@ extension AppDelegate {
         // 4. If NOT an activation shortcut, check for Escape
         if keyCode == KeyCodes.escape {
             let isWindowVisible = self.controller.window.isVisible
-            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible)")
+            let windowAlpha = self.controller.window.alphaValue
+            let hasActiveSequence = (currentSequenceGroup != nil || activeRootGroup != nil)
+            
+            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible), alpha: \(windowAlpha), hasActiveSequence: \(hasActiveSequence)")
 
-            if isWindowVisible {
-                // Normal case: Window is visible, reset state, hide, and consume event.
-                print("[AppDelegate] Escape: Window is visible. Hiding window (state resets after close).")
+            // Check multiple conditions to determine if we should hide the window
+            if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
+                // Window is visible OR has opacity OR we have an active sequence - hide it
+                print("[AppDelegate] Escape: Hiding window and resetting state.")
                 hide()
+                resetSequenceState()
                 return true // Consume the Escape press
             } else {
-                // Inconsistent state: Window is visually present but isVisible is false.
-                // Do NOT reset state, do NOT hide, let the Escape key pass through.
-                print("[AppDelegate] Escape: Window isVisible is false (inconsistent state?). Passing event through.")
+                // Window is truly hidden, no active sequence - pass through
+                print("[AppDelegate] Escape: Window is hidden, no active sequence. Passing event through.")
                 return false // Pass through the Escape press
             }
         }
