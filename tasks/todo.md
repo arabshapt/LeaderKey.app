@@ -82,3 +82,23 @@ Leader Key remains responsive while preserving compatibility with Raycast and si
 
 ## Final Implementation
 Leader Key now has robust safeguards against event tap failures, especially important for users with high CPU usage. The 1-second health check ensures quick recovery from system-disabled taps, while the force reset provides a guaranteed escape hatch that works independently of the event tap system.
+
+## Accessibility Permission Auto-Detection Fix
+
+### Problem
+After granting accessibility permissions, users had to manually open app settings before global shortcuts worked.
+
+### Solution Implemented
+Modified the existing event tap health check to also monitor for permission changes:
+- Added `lastPermissionCheck: Bool?` to track permission state
+- Health check now runs different logic when `!isMonitoring`:
+  - Checks current permission state
+  - Detects change from false to true
+  - Automatically starts event tap
+- Initialization sets baseline permission state before first attempt
+
+### Result
+- No manual intervention required after granting permissions
+- Detection within 1 second of permission grant
+- Uses existing timer infrastructure (no new timers)
+- Maintains all existing safeguards and recovery mechanisms

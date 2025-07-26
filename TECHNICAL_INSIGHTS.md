@@ -35,6 +35,8 @@ macOS can disable event taps that:
    - Lightweight: just checks `CGEvent.tapIsEnabled()` boolean flag
    - CPU impact is negligible (microseconds per check)
    - Fast recovery from system-disabled taps in high CPU scenarios
+   - **NEW**: Also monitors for accessibility permission changes when not monitoring
+   - Automatically starts event tap within 1 second of granting permissions
 
 2. **Automatic Recovery**
    - Re-enables disabled event taps
@@ -144,6 +146,9 @@ if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
 - Required for global event tap
 - Prompts user on first launch
 - Graceful degradation if permissions revoked
+- **Automatic Detection**: Event tap health check monitors for permission changes
+- **No Manual Intervention**: Detects when permissions are granted and auto-starts within 1 second
+- **Permission State Tracking**: Tracks `lastPermissionCheck` to detect changes from false to true
 
 ### No Sensitive Data in Memory
 - Doesn't store passwords or sensitive keystrokes

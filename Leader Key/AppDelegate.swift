@@ -192,6 +192,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupUpdaterController() // Configure auto-update behavior
     setupStateRecoveryTimer() // Setup periodic state recovery checks
 
+    // Check initial permission state
+    lastPermissionCheck = checkAccessibilityPermissions()
+    print("[AppDelegate] Initial accessibility permission state: \(lastPermissionCheck ?? false)")
+    
     // Attempt to start the global event tap immediately
     print("[AppDelegate] Attempting initial startEventTapMonitoring()...")
     startEventTapMonitoring() // Defined in Event Tap Handling extension
@@ -199,10 +203,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Add a delayed check to retry starting the event tap if it failed initially.
     // This helps if Accessibility permissions were granted just before launch
     // and the system needs a moment to register them.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { // Wait 1 second
-        if !self.isMonitoring {
-            print("[AppDelegate] Delayed check: Still not monitoring. Retrying startEventTapMonitoring()...")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { // Wait 2 seconds
+        if !self.isMonitoring && self.checkAccessibilityPermissions() {
+            print("[AppDelegate] Delayed check: Permissions available but not monitoring. Retrying startEventTapMonitoring()...")
             self.startEventTapMonitoring()
+        } else if !self.isMonitoring {
+            print("[AppDelegate] Delayed check: Still no permissions. Health check will monitor for changes.")
         } else {
             print("[AppDelegate] Delayed check: Monitoring was already active.")
         }
@@ -245,6 +251,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
   private var stateRecoveryTimer: Timer?
   private var eventTapHealthTimer: Timer?
+  private var lastPermissionCheck: Bool? = nil
   
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
@@ -272,25 +279,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
   
   private func checkEventTapHealth() {
-    // Only check if we should be monitoring
-    guard isMonitoring else { return }
-    
-    // Check if event tap exists and is enabled
-    if let tap = eventTap {
-      if !CGEvent.tapIsEnabled(tap: tap) {
-        print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
-        CGEvent.tapEnable(tap: tap, enable: true)
-        
-        // If still disabled after re-enabling, restart the whole event tap
+    if isMonitoring {
+      // Check if event tap exists and is enabled
+      if let tap = eventTap {
         if !CGEvent.tapIsEnabled(tap: tap) {
-          print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting event tap...")
-          restartEventTap()
+          print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
+          CGEvent.tapEnable(tap: tap, enable: true)
+          
+          // If still disabled after re-enabling, restart the whole event tap
+          if !CGEvent.tapIsEnabled(tap: tap) {
+            print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting event tap...")
+            restartEventTap()
+          }
         }
+      } else {
+        // Event tap is nil but we should be monitoring
+        print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
+        restartEventTap()
       }
     } else {
-      // Event tap is nil but we should be monitoring
-      print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
-      restartEventTap()
+      // Not monitoring - check if permissions have been granted
+      let hasPermissions = checkAccessibilityPermissions()
+      
+      // Detect permission change from false to true
+      if lastPermissionCheck == false && hasPermissions {
+        print("[AppDelegate] Event Tap Health Check: Accessibility permissions newly granted! Starting event tap...")
+        startEventTapMonitoring()
+      }
+      
+      // Update last permission state
+      lastPermissionCheck = hasPermissions
     }
   }
   
