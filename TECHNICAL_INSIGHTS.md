@@ -146,8 +146,10 @@ if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
 - Required for global event tap
 - Prompts user on first launch
 - Graceful degradation if permissions revoked
-- **Automatic Detection**: Event tap health check monitors for permission changes
-- **No Manual Intervention**: Detects when permissions are granted and auto-starts within 1 second
+- **Dual Permission Detection**: Uses both `CGPreflightListenEventAccess()` and `AXIsProcessTrustedWithOptions()` for reliability
+- **Aggressive Polling After Prompt**: When user opens System Settings, polls every 1 second for 30 seconds
+- **Automatic Detection**: Event tap health check monitors for permission changes every second
+- **No Manual Intervention**: Detects when permissions are granted and auto-starts without requiring app restart
 - **Permission State Tracking**: Tracks `lastPermissionCheck` to detect changes from false to true
 
 ### No Sensitive Data in Memory

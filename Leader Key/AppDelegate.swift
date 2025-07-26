@@ -244,6 +244,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
     stateRecoveryTimer?.invalidate() // Stop state recovery timer
     eventTapHealthTimer?.invalidate() // Stop event tap health timer
+    permissionPollingTimer?.invalidate() // Stop permission polling timer
     print("[AppDelegate] applicationWillTerminate completed.")
   }
   
@@ -252,6 +253,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var stateRecoveryTimer: Timer?
   private var eventTapHealthTimer: Timer?
   private var lastPermissionCheck: Bool? = nil
+  private var permissionPollingTimer: Timer?
+  private var permissionPollingStartTime: Date?
   
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
@@ -1575,13 +1578,53 @@ extension AppDelegate {
     // --- Permissions Helpers ---
     // Checks if Accessibility permissions are granted *without* prompting the user.
     private func checkAccessibilityPermissions() -> Bool {
+        // Method 1: Try CGPreflightListenEventAccess first - it's more reliable for immediate detection
+        let hasEventAccess = CGPreflightListenEventAccess()
+        
+        // Method 2: Also check AXIsProcessTrustedWithOptions
         let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
         let options = [checkOptPrompt: false] // Option to not prompt
-        let enabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        print("[AppDelegate] checkAccessibilityPermissions: AXIsProcessTrustedWithOptions returned \(enabled).")
+        let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        // Use either check - if either returns true, we have permissions
+        let enabled = hasEventAccess || isTrusted
+        
+        print("[AppDelegate] checkAccessibilityPermissions: CGPreflightListenEventAccess=\(hasEventAccess), AXIsProcessTrustedWithOptions=\(isTrusted), final=\(enabled)")
         return enabled
     }
 
+    // Start aggressive permission polling after showing the alert
+    private func startPermissionPolling() {
+        print("[AppDelegate] Starting aggressive permission polling...")
+        permissionPollingStartTime = Date()
+        
+        // Stop any existing polling timer
+        permissionPollingTimer?.invalidate()
+        
+        // Poll every 1 second for the first 30 seconds after prompt
+        permissionPollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // Check if permissions are now granted
+            if self.checkAccessibilityPermissions() {
+                print("[AppDelegate] Permission polling: Permissions granted! Starting event tap...")
+                self.permissionPollingTimer?.invalidate()
+                self.permissionPollingTimer = nil
+                self.startEventTapMonitoring()
+                return
+            }
+            
+            // Stop aggressive polling after 30 seconds
+            if let startTime = self.permissionPollingStartTime,
+               Date().timeIntervalSince(startTime) > 30.0 {
+                print("[AppDelegate] Permission polling: Timeout reached. Stopping aggressive polling.")
+                self.permissionPollingTimer?.invalidate()
+                self.permissionPollingTimer = nil
+                // Regular health check will continue monitoring
+            }
+        }
+    }
+    
     // Shows the standard alert explaining why Accessibility is needed and offering to open Settings.
     private func showPermissionsAlert() {
         print("[AppDelegate] showPermissionsAlert: Displaying Accessibility permissions alert.")
@@ -1600,6 +1643,9 @@ extension AppDelegate {
                 let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
                 let backupPath = "/System/Library/PreferencePanes/Security.prefPane"
                 if let url = URL(string: urlString) { NSWorkspace.shared.open(url) } else { NSWorkspace.shared.open(URL(fileURLWithPath: backupPath)) }
+                
+                // Start aggressive permission polling after user opens System Settings
+                self.startPermissionPolling()
             }
         }
     }

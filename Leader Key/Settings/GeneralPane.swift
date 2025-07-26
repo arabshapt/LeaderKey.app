@@ -20,6 +20,7 @@ struct GeneralPane: View {
   @State private var listSelection: String?
   @State private var showingAddConfigSheet = false
   @State private var keyToDelete: String?
+  @State private var highlightedPath: [Int]?
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -234,6 +235,22 @@ struct GeneralPane: View {
               self.config.loadConfigForEditing(key: key)
 
               self.keyToLoad = nil
+          }
+          .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToSearchResult"))) { notification in
+              guard let path = notification.userInfo?["path"] as? [Int] else { return }
+              
+              print("[GeneralPane] Received navigation request for path: \(path)")
+              
+              // Expand all parent groups
+              expandToPath(path)
+              
+              // Set highlighted path
+              highlightedPath = path
+              
+              // Clear highlight after a delay
+              DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                  highlightedPath = nil
+              }
           }
       } // End of Settings.Section wrapping the HStack
 

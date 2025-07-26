@@ -469,19 +469,58 @@ extension UserConfig {
         let lowercasedQuery = query.lowercased()
         var results: [SearchResult] = []
 
-        // Search in the default config (config.json)
-        let defaultResults = search(in: root, query: lowercasedQuery, configName: globalDefaultDisplayName, matchType: matchType, includeGroups: includeGroups)
-        results.append(contentsOf: defaultResults)
-
-        // Search in all discovered app-specific configs
-        for (configName, configPath) in discoveredConfigFiles where configName != globalDefaultDisplayName {
-            if let configGroup = decodeConfig(from: configPath, suppressAlerts: true, isDefaultConfig: false) {
-                let appResults = search(in: configGroup, query: lowercasedQuery, configName: configName, matchType: matchType, includeGroups: includeGroups)
-                results.append(contentsOf: appResults)
+        // Search in all discovered configs
+        for (configName, configPath) in discoveredConfigFiles {
+            let groupToSearch: Group
+            
+            // If this is the currently loaded config, search in the merged version that's being edited
+            if configName == selectedConfigKeyForEditing {
+                groupToSearch = currentlyEditingGroup
+            } else if configName == globalDefaultDisplayName {
+                // For the default config, use root
+                groupToSearch = root
+            } else {
+                // For other configs, load and merge them the same way loadConfigForEditing does
+                guard let loadedGroup = decodeConfig(from: configPath, suppressAlerts: true, isDefaultConfig: false) else {
+                    continue
+                }
+                
+                // Apply the same merging logic as loadConfigForEditing
+                if configPath.contains(appConfigPrefix) && !configPath.contains(defaultAppConfigFileName) {
+                    // This is an app-specific config, merge with fallback
+                    let bundleId = extractBundleIdFromSearchKey(key: configName)
+                    let rawMergedGroup = mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
+                    groupToSearch = sortGroupRecursively(group: rawMergedGroup)
+                } else {
+                    // This is the fallback app config or other config, use as-is
+                    groupToSearch = loadedGroup
+                }
             }
+            
+            let configResults = search(in: groupToSearch, query: lowercasedQuery, configName: configName, matchType: matchType, includeGroups: includeGroups)
+            results.append(contentsOf: configResults)
         }
 
         return results.sorted { $0.keySequence < $1.keySequence } // Sort alphabetically by key sequence
+    }
+    
+    // Helper to extract bundle ID from a display key (copied from extension for search use)
+    private func extractBundleIdFromSearchKey(key: String) -> String {
+        // If the key matches discovered config patterns, extract bundle ID from the file path
+        if let filePath = discoveredConfigFiles[key] {
+            let fileName = (filePath as NSString).lastPathComponent
+            if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
+                let withoutPrefix = String(fileName.dropFirst(appConfigPrefix.count))
+                let withoutSuffix = String(withoutPrefix.dropLast(".json".count))
+                return withoutSuffix
+            }
+        }
+        // Fallback: assume the key is the bundle ID if it contains dots
+        if key.contains(".") {
+            return key
+        }
+        // Last resort: return key as-is
+        return key
     }
 
     // Recursive helper function to search within a specific group

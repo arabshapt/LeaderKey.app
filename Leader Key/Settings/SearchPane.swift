@@ -12,6 +12,7 @@ struct SearchPane: View {
     @State private var searchResults: [SearchResult] = []
     @State private var isSearching = false
     @State private var selectedResult: SearchResult?
+    @State private var navigateToResult: SearchResult?
 
     var body: some View {
         Settings.Container(contentWidth: contentWidth) {
@@ -54,6 +55,10 @@ struct SearchPane: View {
         }
         .onChange(of: includeGroups) { _ in
             performSearch()
+        }
+        .onChange(of: navigateToResult) { result in
+            guard let result = result else { return }
+            navigateToGeneralPane(with: result)
         }
     }
 
@@ -180,7 +185,8 @@ struct SearchPane: View {
                         SearchResultRow(
                             result: result,
                             isSelected: selectedResult?.id == result.id,
-                            onSelect: { selectedResult = result }
+                            onSelect: { selectedResult = result },
+                            onNavigate: { navigateToResult = result }
                         )
 
                         if result.id != searchResults.last?.id {
@@ -222,12 +228,43 @@ struct SearchPane: View {
             }
         }
     }
+    
+    private func navigateToGeneralPane(with result: SearchResult) {
+        // Get the app delegate and settings window controller
+        guard let appDelegate = NSApp.delegate as? AppDelegate else {
+            print("[SearchPane] Failed to get app delegate")
+            return
+        }
+        
+        // First, load the appropriate config if it's different from current
+        if result.configName != config.selectedConfigKeyForEditing {
+            print("[SearchPane] Loading config: \(result.configName)")
+            config.loadConfigForEditing(key: result.configName)
+        }
+        
+        // Switch to the General pane
+        appDelegate.settingsWindowController.show(pane: .general)
+        
+        // Store the path in UserDefaults or a shared state so GeneralPane can read it
+        // For now, we'll use a notification to communicate with GeneralPane
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(
+                name: Notification.Name("NavigateToSearchResult"),
+                object: nil,
+                userInfo: ["path": result.path]
+            )
+        }
+        
+        // Clear the navigation request
+        navigateToResult = nil
+    }
 }
 
 struct SearchResultRow: View {
     let result: SearchResult
     let isSelected: Bool
     let onSelect: () -> Void
+    let onNavigate: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -308,10 +345,7 @@ struct SearchResultRow: View {
                 Spacer()
 
                 // Action button
-                Button(action: {
-                    // TODO: Implement "Go to" functionality to open the item in General pane
-                    goToResult(result)
-                }) {
+                Button(action: onNavigate) {
                     Image(systemName: "arrow.right.circle")
                         .foregroundColor(.accentColor)
                 }
@@ -327,11 +361,6 @@ struct SearchResultRow: View {
         .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 
-    private func goToResult(_ result: SearchResult) {
-        // This will be implemented to switch to General pane and highlight the item
-        print("Go to result: \(result.keySequence) in \(result.configName)")
-        // TODO: Add functionality to switch panes and navigate to the specific item
-    }
 }
 
 struct SearchPane_Previews: PreviewProvider {
