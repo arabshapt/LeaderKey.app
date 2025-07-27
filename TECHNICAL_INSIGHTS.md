@@ -156,6 +156,32 @@ if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
 - Doesn't store passwords or sensitive keystrokes
 - Only tracks modifier states and activation sequences
 
+## Development Workflow
+
+### Accessibility Permission Management
+When developing Leader Key, macOS treats each rebuild as a new application unless properly code-signed:
+
+1. **Automatic Permission Reset (Debug Builds)**
+   - Build script automatically runs `tccutil reset Accessibility` before each Debug build
+   - Ensures clean permission state and avoids confusion
+   - Only runs in Debug configuration to preserve Release build permissions
+   - Requires re-granting permissions after each rebuild
+
+2. **Why This Happens**
+   - Without paid Apple Developer account, app uses ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`)
+   - Each build has different signature, so macOS treats it as a new app
+   - This is intentional security behavior by Apple
+
+3. **Solutions for Smoother Development**
+   - **Free**: Use the automated reset script (implemented)
+   - **Paid**: Sign with Developer ID certificate ($99/year)
+   - **Alternative**: Create self-signed certificate (partial improvement)
+
+### Testing with Accessibility Permissions
+- Tests requiring event tap need accessibility permissions
+- Permission resets affect test consistency
+- Use Force Reset (Cmd+Shift+Ctrl+K) for test recovery
+
 ## Future Considerations
 
 ### Potential Improvements
