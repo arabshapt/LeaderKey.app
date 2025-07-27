@@ -300,6 +300,7 @@
 			buildConfigurationList = 427C180C2BD311B500955B98 /* Build configuration list for PBXNativeTarget "Leader Key" */;
 			buildPhases = (
 				42D6FF682DA513A400C8257C /* Format */,
+				42D6FF692DA513A400C8257D /* Reset Accessibility Permissions */,
 				427C17E32BD311B400955B98 /* Sources */,
 				427C17E42BD311B400955B98 /* Frameworks */,
 				427C17E52BD311B400955B98 /* Resources */,
@@ -428,6 +429,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n/usr/bin/swift format -r -i .\n";
+		};
+		42D6FF692DA513A400C8257D /* Reset Accessibility Permissions */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Reset Accessibility Permissions";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Reset accessibility permissions for development builds\n# This helps avoid confusion when rebuilding the app\n\n# Only run in Debug configuration\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n    echo \"Resetting accessibility permissions for ${PRODUCT_BUNDLE_IDENTIFIER}...\"\n    /usr/bin/tccutil reset Accessibility \"${PRODUCT_BUNDLE_IDENTIFIER}\"\n    echo \"Accessibility permissions reset. You'll need to re-grant them when the app launches.\"\nelse\n    echo \"Skipping accessibility reset for ${CONFIGURATION} configuration\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
