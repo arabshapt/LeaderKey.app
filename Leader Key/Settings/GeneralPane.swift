@@ -539,8 +539,8 @@ struct GeneralPane_Previews: PreviewProvider {
     let previewConfig = UserConfig()
     // Manually add some discovered files for preview
     previewConfig.discoveredConfigFiles = [
-        globalDefaultDisplayName: "/path/to/config.json",
-        defaultAppConfigDisplayName: "/path/to/app.default.json",
+        globalDefaultDisplayName: "/path/to/global-config.json",
+        defaultAppConfigDisplayName: "/path/to/app-fallback-config.json",
         "App: com.app.example": "/path/to/app.com.app.example.json",
         "App: com.another.app": "/path/to/app.com.another.app.json"
     ]

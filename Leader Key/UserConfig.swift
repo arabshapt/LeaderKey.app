@@ -67,7 +67,7 @@ let globalDefaultDisplayName = "Global"
 let defaultAppConfigDisplayName = "Fallback App Config"
 
 class UserConfig: ObservableObject {
-  // Root for the default config (config.json)
+  // Root for the default config (global-config.json)
   @Published var root = emptyRoot
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
@@ -76,9 +76,9 @@ class UserConfig: ObservableObject {
   @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName // Initialize with the new default key
   @Published var isActivelyEditing: Bool = false // Track if user is actively editing vs ready to finalize
 
-  let fileName = "config.json"
+  let fileName = "global-config.json"
   let appConfigPrefix = "app."
-  let defaultAppConfigFileName = "app.default.json" // Added default app config filename
+  let defaultAppConfigFileName = "app-fallback-config.json" // Added default app config filename
   var appConfigs: [String: Group?] = [:] // Cache for app-specific configs
   let alertHandler: AlertHandler
   let fileManager: FileManager
@@ -96,8 +96,8 @@ class UserConfig: ObservableObject {
 
   func ensureAndLoad() {
     self.ensureValidConfigDirectory()
-    self.ensureConfigFileExists() // Ensures default config.json exists
-    self.ensureDefaultAppConfigExists() // Ensures default app.default.json exists
+    self.ensureConfigFileExists() // Ensures default global-config.json exists
+    self.ensureDefaultAppConfigExists() // Ensures default app-fallback-config.json exists
     self.discoverConfigFiles() // Discover after ensuring both files exist
     self.loadConfig() // Loads the default config into 'root'
     // Initially, load the default config for editing

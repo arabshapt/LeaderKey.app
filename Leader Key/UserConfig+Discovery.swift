@@ -29,7 +29,7 @@ extension UserConfig {
                 let currentFileName = fileURL.lastPathComponent
                 let filePath = fileURL.path
 
-                // Skip the main config.json as it's handled above
+                // Skip the main global-config.json as it's handled above
                 if filePath == defaultPath {
                     continue
                 }
@@ -43,7 +43,7 @@ extension UserConfig {
                 else if currentFileName.hasPrefix(appConfigPrefix) && currentFileName.hasSuffix(".json") {
                     // Extract bundle ID
                     let bundleId = String(currentFileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
-                    if !bundleId.isEmpty && bundleId != "default" { // Exclude app.default.json here
+                    if !bundleId.isEmpty && bundleId != "default" { // Exclude app-fallback-config.json here
                         let defaultAppDisplayName = "App: \(bundleId)" // Corrected interpolation
                         let displayName = getDisplayName(for: filePath, defaultName: defaultAppDisplayName)
                         discovered[displayName] = filePath

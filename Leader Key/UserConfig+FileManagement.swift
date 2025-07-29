@@ -31,6 +31,39 @@ extension UserConfig {
             )
             Defaults[.configDir] = defaultDir
         }
+        
+        // Migrate old config filenames to new ones
+        migrateConfigFilenames()
+    }
+    
+    private func migrateConfigFilenames() {
+        let configDir = Defaults[.configDir]
+        
+        // Migrate config.json to global-config.json
+        let oldGlobalPath = (configDir as NSString).appendingPathComponent("config.json")
+        let newGlobalPath = (configDir as NSString).appendingPathComponent(fileName)
+        
+        if fileManager.fileExists(atPath: oldGlobalPath) && !fileManager.fileExists(atPath: newGlobalPath) {
+            do {
+                try fileManager.moveItem(atPath: oldGlobalPath, toPath: newGlobalPath)
+                print("[Migration] Renamed config.json to \(fileName)")
+            } catch {
+                print("[Migration] Failed to rename config.json: \(error)")
+            }
+        }
+        
+        // Migrate app.default.json to app-fallback-config.json
+        let oldFallbackPath = (configDir as NSString).appendingPathComponent("app.default.json")
+        let newFallbackPath = (configDir as NSString).appendingPathComponent(defaultAppConfigFileName)
+        
+        if fileManager.fileExists(atPath: oldFallbackPath) && !fileManager.fileExists(atPath: newFallbackPath) {
+            do {
+                try fileManager.moveItem(atPath: oldFallbackPath, toPath: newFallbackPath)
+                print("[Migration] Renamed app.default.json to \(defaultAppConfigFileName)")
+            } catch {
+                print("[Migration] Failed to rename app.default.json: \(error)")
+            }
+        }
     }
 
     var path: String {
