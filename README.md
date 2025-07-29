@@ -42,7 +42,7 @@ This enhanced version includes several improvements over the original:
 - Better error handling and resilience
 - Clean, maintainable codebase architecture
 
-📦 [Download enhanced version](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing)
+📦 [Download enhanced version](https://drive.google.com/file/d/1FKiv33CbHWUpUQEEvt_O1DybSvwuAlbm/view?usp=sharing)
 
 ### Installation
 
@@ -53,7 +53,7 @@ brew install --cask leader-key-enhanced
 ```
 
 **Option 2: Direct Download**
-Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K/view?usp=sharing).
+Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1FKiv33CbHWUpUQEEvt_O1DybSvwuAlbm/view?usp=sharing).
 
 **Option 3: Build from Source**
 Clone this repository and build using Xcode or the command line tools documented in `CLAUDE.md`.
