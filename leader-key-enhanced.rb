@@ -1,8 +1,8 @@
 cask "leader-key-enhanced" do
   version "1.16.0-enhanced"
-  sha256 "33bc396b3966f44f3047995c1fe3e23727ed48b189696a53c51e342114695028"
+  sha256 "7660b333b02acf98474cac3a71549a9a03f218c2de748470d81ad10faf730359"
 
-  url "https://drive.google.com/uc?export=download&id=1XkhhDJ3TCKMmmYsS3LzaOYjqlEzFKv_K"
+  url "https://drive.google.com/uc?export=download&id=1E6BcdelZ6FYXwM4fTGTyyY5_PBEsLOxb"
   name "Leader Key Enhanced"
   desc "Enhanced fork of Leader Key - The faster than your launcher launcher"
   homepage "https://github.com/arabshapt/LeaderKey.app"
