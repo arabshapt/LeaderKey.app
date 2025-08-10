@@ -67,6 +67,14 @@ struct GeneralPane: View {
                   List(selection: $listSelection) {
                       ForEach(sortedConfigKeys, id: \.self) { key in
                           HStack {
+                              // Show app icon for app-specific configs
+                              if let bundleId = config.extractBundleId(from: key),
+                                 let appIcon = config.getAppIcon(for: bundleId) {
+                                  Image(nsImage: appIcon)
+                                      .resizable()
+                                      .frame(width: 16, height: 16)
+                              }
+                              
                               Text(key)
                                   .tag(key) // Needed for List selection binding
                                   .lineLimit(1)

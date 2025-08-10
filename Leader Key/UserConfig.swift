@@ -93,6 +93,57 @@ class UserConfig: ObservableObject {
   }
 
   // MARK: - Public Interface
+  
+  // Helper function to extract bundle ID from config filename or display name
+  func extractBundleId(from displayName: String) -> String? {
+    // Check if this is an app-specific config
+    guard displayName != globalDefaultDisplayName && displayName != defaultAppConfigDisplayName else {
+      return nil
+    }
+    
+    // First check if we have the file path for this display name
+    if let filePath = discoveredConfigFiles[displayName] {
+      let url = URL(fileURLWithPath: filePath)
+      let filename = url.lastPathComponent
+      
+      // Extract bundle ID from filename (app.bundleId.json or app.bundleId.overlay.json)
+      if filename.hasPrefix(appConfigPrefix) && filename.hasSuffix(".json") {
+        var bundleId = String(filename.dropFirst(appConfigPrefix.count))
+        
+        // Handle overlay configs
+        if bundleId.hasSuffix(".overlay.json") {
+          bundleId = String(bundleId.dropLast(".overlay.json".count))
+        } else {
+          bundleId = String(bundleId.dropLast(".json".count))
+        }
+        
+        return bundleId.isEmpty ? nil : bundleId
+      }
+    }
+    
+    // Fallback: try to extract from display name if it starts with "App: "
+    if displayName.hasPrefix("App: ") {
+      return String(displayName.dropFirst("App: ".count))
+    }
+    
+    return nil
+  }
+  
+  // Helper function to get app icon from bundle ID
+  func getAppIcon(for bundleId: String) -> NSImage? {
+    // First check running applications for better performance
+    if let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleId }) {
+      return runningApp.icon
+    }
+    
+    // Try to find the app on disk
+    if let appPath = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)?.path {
+      return NSWorkspace.shared.icon(forFile: appPath)
+    }
+    
+    // Return nil if app not found
+    return nil
+  }
 
   func ensureAndLoad() {
     self.ensureValidConfigDirectory()
