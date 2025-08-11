@@ -9,6 +9,7 @@ final class UserState: ObservableObject {
   @Published var isShowingRefreshState: Bool
   @Published var navigationPath: [Group] = []
   @Published var activeRoot: Group? // Root group for the current context (app-specific or default)
+  var activeConfigKey: String? // The config key that was used to load activeRoot
 
   var currentGroup: Group? {
     return navigationPath.last
@@ -32,6 +33,7 @@ final class UserState: ObservableObject {
     isShowingRefreshState = false
     // Reset activeRoot to the default when clearing
     activeRoot = userConfig.root
+    activeConfigKey = nil
   }
 
   func navigateToGroup(_ group: Group) {

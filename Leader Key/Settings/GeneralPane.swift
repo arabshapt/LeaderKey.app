@@ -249,8 +249,17 @@ struct GeneralPane: View {
               
               print("[GeneralPane] Received navigation request for path: \(path)")
               
-              // Expand all parent groups
-              expandToPath(path)
+              // Check if this is from error navigation (has isError flag) or regular navigation
+              let isErrorNavigation = notification.userInfo?["isError"] as? Bool ?? false
+              
+              if isErrorNavigation {
+                  // For errors, expand only parent groups (existing behavior)
+                  expandToPath(path)
+              } else {
+                  // For regular navigation from Leader Key, collapse all groups first then expand target
+                  expandedGroups.removeAll()
+                  expandFullPath(path)
+              }
               
               // Set highlighted path
               highlightedPath = path
@@ -372,6 +381,20 @@ struct GeneralPane: View {
       if let item = ConfigValidator.findItem(in: config.currentlyEditingGroup, at: currentPath),
          case .group = item {
         expandedGroups.insert(currentPath)
+      }
+    }
+  }
+  
+  private func expandFullPath(_ path: [Int]) {
+    // Expand all groups in the path, including the target group
+    var currentPath: [Int] = []
+    for index in path {
+      currentPath.append(index)
+      // Check if this path represents a group
+      if let item = ConfigValidator.findItem(in: config.currentlyEditingGroup, at: currentPath),
+         case .group = item {
+        expandedGroups.insert(currentPath)
+        print("[GeneralPane] expandFullPath: Expanded group at path \(currentPath)")
       }
     }
   }

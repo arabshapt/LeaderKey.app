@@ -76,19 +76,44 @@ class Controller {
     // IMPORTANT: Detect overlay state BEFORE sending activation events
     // This prevents overlay apps from hiding their overlays before we can detect them
     let configToLoad: Group
+    let configKeyForSettings: String // Track which config key to show in settings
+    
     switch type {
     case .defaultOnly:
       configToLoad = userConfig.root // Use the already loaded default config
+      configKeyForSettings = globalDefaultDisplayName
     case .appSpecificWithFallback:
       let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
       let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
       configToLoad = userConfig.getConfig(for: configKey) // Use the enhanced getter
+      
+      // Determine the config key to use in settings
+      if let bundleId = bundleId {
+        // Look for the display name that matches this bundle ID in discovered configs
+        var foundConfigKey: String? = nil
+        for (displayKey, _) in userConfig.discoveredConfigFiles {
+          if displayKey != globalDefaultDisplayName && 
+             displayKey != defaultAppConfigDisplayName {
+            // Check if this key is for the current bundle ID
+            if let extractedId = userConfig.extractBundleId(from: displayKey),
+               extractedId == bundleId {
+              foundConfigKey = displayKey
+              break
+            }
+          }
+        }
+        configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
+      } else {
+        // No bundle ID, use the default
+        configKeyForSettings = globalDefaultDisplayName
+      }
     }
 
     // Now send activation events after detection is complete
     Events.send(.willActivate)
 
     userState.activeRoot = configToLoad // Update UserState with the selected config
+    userState.activeConfigKey = configKeyForSettings // Store the config key for settings
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
     var calculatedOrigin: NSPoint? // Store calculated origin

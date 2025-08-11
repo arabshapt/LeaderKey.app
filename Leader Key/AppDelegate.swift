@@ -343,6 +343,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // Update the UserConfig to select the appropriate config for editing
       print("[AppDelegate] Setting config to focus on: \(configKeyToFocus)")
       config.loadConfigForEditing(key: configKeyToFocus)
+      
+      // Store the navigation path to be used after config loads
+      let userStateNavigationPath = controller.userState.navigationPath
+      let hasNavigationPath = !userStateNavigationPath.isEmpty
+      if hasNavigationPath {
+          print("[AppDelegate] User has navigation path with \(userStateNavigationPath.count) groups to restore")
+      }
 
       // Ensure we have the window reference first
       guard let window = settingsWindowController.window else {
@@ -394,17 +401,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       NSApp.activate(ignoringOtherApps: true) // Bring the app to the front for settings
       print("[AppDelegate] Settings window show() called (positioning deferred).")
+      
+      // Post navigation notification if we have a navigation path
+      if hasNavigationPath {
+          // Build the navigation path using the loaded config
+          let navigationPath = buildNavigationPathFromLoadedConfig(userStateNavigationPath)
+          if let path = navigationPath, !path.isEmpty {
+              print("[AppDelegate] Posting NavigateToSearchResult notification with path: \(path)")
+              NotificationCenter.default.post(
+                  name: Notification.Name("NavigateToSearchResult"),
+                  object: nil,
+                  userInfo: ["path": path]
+              )
+          } else {
+              print("[AppDelegate] Failed to build navigation path for groups: \(userStateNavigationPath.map { $0.key ?? "nil" })")
+          }
+      }
   }
 
     // Determine which config to focus on based on current state
     private func determineConfigToFocus() -> String {
-        // First check if we have an active sequence state
+        // First check if UserState has a stored config key
+        if let activeConfigKey = controller.userState.activeConfigKey {
+            print("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
+            return activeConfigKey
+        }
+        
+        // Fallback: check if we have an active sequence state
         if let activeRoot = self.activeRootGroup {
             print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
             return findConfigKeyForGroup(activeRoot)
         }
 
-        // Check if the Controller's UserState has an active root
+        // Check if the Controller's UserState has an active root (without stored key)
         if let userStateActiveRoot = controller.userState.activeRoot {
             print("[AppDelegate] Using UserState activeRoot to determine config")
             return findConfigKeyForGroup(userStateActiveRoot)
@@ -476,6 +505,144 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return group1.key == group2.key &&
                group1.label == group2.label &&
                group1.actions.count == group2.actions.count
+    }
+
+    // Build navigation path from the loaded config using the navigationPath groups
+    private func buildNavigationPathFromLoadedConfig(_ navigationPath: [Group]) -> [Int]? {
+        guard !navigationPath.isEmpty else {
+            print("[AppDelegate] buildNavigationPathFromLoadedConfig: Navigation path is empty")
+            return nil
+        }
+        
+        // Use the actually loaded config that's displayed in settings
+        let rootGroup = config.currentlyEditingGroup
+        print("[AppDelegate] buildNavigationPathFromLoadedConfig: Using currentlyEditingGroup with key '\(rootGroup.key ?? "nil")'")
+        print("[AppDelegate] buildNavigationPathFromLoadedConfig: Navigation path has \(navigationPath.count) groups")
+        
+        // Check if the first group in navigationPath is the root itself (has same nil key and matches root)
+        var groupsToProcess = navigationPath
+        if let firstGroup = navigationPath.first,
+           firstGroup.key == rootGroup.key && firstGroup.key == nil {
+            print("[AppDelegate] buildNavigationPathFromLoadedConfig: Skipping root group in navigation path")
+            groupsToProcess = Array(navigationPath.dropFirst())
+        }
+        
+        // If no groups left after removing root, return empty path
+        guard !groupsToProcess.isEmpty else {
+            print("[AppDelegate] buildNavigationPathFromLoadedConfig: No groups to navigate after removing root")
+            return []
+        }
+        
+        // Build the index path by finding each group in the hierarchy
+        var indexPath: [Int] = []
+        var currentGroup = rootGroup
+        
+        for (navIndex, targetGroup) in groupsToProcess.enumerated() {
+            let targetKey = targetGroup.key ?? ""
+            let targetLabel = targetGroup.label ?? ""
+            print("[AppDelegate] buildNavigationPathFromLoadedConfig: Looking for group with key='\(targetKey)' label='\(targetLabel)' at level \(navIndex)")
+            
+            // Find the index of this group in the current level
+            // Match by key if both have keys, otherwise try to match by label or other properties
+            if let index = currentGroup.actions.firstIndex(where: { item in
+                if case .group(let group) = item {
+                    // If target has a key, match by key and label
+                    if !targetKey.isEmpty {
+                        let matches = group.key == targetGroup.key && 
+                                    (targetGroup.label == nil || group.label == targetGroup.label)
+                        if matches {
+                            print("[AppDelegate] buildNavigationPathFromLoadedConfig: Found match by key at index \(index)")
+                        }
+                        return matches
+                    } else if !targetLabel.isEmpty {
+                        // If no key but has label, try matching by label alone
+                        let matches = group.label == targetGroup.label
+                        if matches {
+                            print("[AppDelegate] buildNavigationPathFromLoadedConfig: Found match by label at index \(index)")
+                        }
+                        return matches
+                    }
+                }
+                return false
+            }) {
+                indexPath.append(index)
+                // Move to the next level
+                if case .group(let nextGroup) = currentGroup.actions[index] {
+                    currentGroup = nextGroup
+                    print("[AppDelegate] buildNavigationPathFromLoadedConfig: Moving to next level, now at group with key='\(nextGroup.key ?? "nil")' label='\(nextGroup.label ?? "")'")
+                }
+            } else {
+                // If we can't find the group, log available groups for debugging
+                let availableGroups = currentGroup.actions.compactMap { item -> String in
+                    if case .group(let g) = item {
+                        return "key='\(g.key ?? "nil")' label='\(g.label ?? "")'"
+                    }
+                    return ""
+                }.filter { !$0.isEmpty }
+                print("[AppDelegate] buildNavigationPathFromLoadedConfig: Could not find group with key='\(targetKey)' label='\(targetLabel)' at level \(navIndex)")
+                print("[AppDelegate] buildNavigationPathFromLoadedConfig: Available groups at this level: \(availableGroups)")
+                return nil
+            }
+        }
+        
+        print("[AppDelegate] buildNavigationPathFromLoadedConfig: Successfully built path: \(indexPath)")
+        return indexPath
+    }
+    
+    // Build navigation path from UserState's navigationPath to indices (legacy method kept for compatibility)
+    private func buildNavigationPath() -> [Int]? {
+        let navigationPath = controller.userState.navigationPath
+        guard !navigationPath.isEmpty else {
+            return nil
+        }
+        
+        // Get the root group that settings will show
+        let configKey = determineConfigToFocus()
+        let rootGroup: Group
+        
+        if configKey == globalDefaultDisplayName {
+            rootGroup = config.root
+        } else if let filePath = config.discoveredConfigFiles[configKey],
+                  let loadedGroup = config.decodeConfig(from: filePath, suppressAlerts: true, isDefaultConfig: false) {
+            // Apply the same merging logic as loadConfigForEditing
+            // Check if this is an app-specific config (not the fallback)
+            if filePath.contains("app.") && !filePath.contains("app-fallback-config.json") {
+                // Extract bundle ID from the display name
+                let bundleId = config.extractBundleId(from: configKey) ?? ""
+                let rawMergedGroup = config.mergeConfigWithFallback(appSpecificConfig: loadedGroup, bundleId: bundleId)
+                rootGroup = config.sortGroupRecursively(group: rawMergedGroup)
+            } else {
+                rootGroup = loadedGroup
+            }
+        } else {
+            return nil
+        }
+        
+        // Build the index path by finding each group in the hierarchy
+        var indexPath: [Int] = []
+        var currentGroup = rootGroup
+        
+        for targetGroup in navigationPath {
+            // Find the index of this group in the current level
+            if let index = currentGroup.actions.firstIndex(where: { item in
+                if case .group(let group) = item {
+                    return group.key == targetGroup.key && group.label == targetGroup.label
+                }
+                return false
+            }) {
+                indexPath.append(index)
+                // Move to the next level
+                if case .group(let nextGroup) = currentGroup.actions[index] {
+                    currentGroup = nextGroup
+                }
+            } else {
+                // If we can't find the group, the path is invalid
+                print("[AppDelegate] buildNavigationPath: Could not find group '\(targetGroup.key ?? "")' in current level")
+                return nil
+            }
+        }
+        
+        return indexPath
     }
 
     // Convenience method to show the main Leader Key window
