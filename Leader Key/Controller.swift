@@ -140,21 +140,21 @@ class Controller {
             calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
 
             // ---- DEBUG LOGGING START ----
-            // print("[Controller show] Mouse Location: \(mouseLocation)")
-            // print("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
-            // print("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
-            // print("[Controller show] Window Size: \(windowSize)")
-            print("[Controller show] Calculated Origin: \(calculatedOrigin!)")
+            // debugLog("[Controller show] Mouse Location: \(mouseLocation)")
+            // debugLog("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
+            // debugLog("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
+            // debugLog("[Controller show] Window Size: \(windowSize)")
+            debugLog("[Controller show] Calculated Origin: \(calculatedOrigin!)")
             // ---- DEBUG LOGGING END ----
 
         } else {
             // Fallback: Window size is zero.
-            print("[Controller show] Warning: Window size \(windowSize) is invalid. Will center window.")
+            debugLog("[Controller show] Warning: Window size \(windowSize) is invalid. Will center window.")
             // calculatedOrigin remains nil, will be handled below
         }
     } else {
         // Fallback: Should not happen
-        print("[Controller show] Warning: Could not determine target screen. Will center window.")
+        debugLog("[Controller show] Warning: Could not determine target screen. Will center window.")
         // calculatedOrigin remains nil, will be handled below
     }
     // --- End Screen Positioning Logic ---
@@ -218,22 +218,22 @@ class Controller {
     if event.modifierFlags.contains(.command) {
       switch event.charactersIgnoringModifiers {
       case ",":
-        print("[Controller] Cmd+, detected. Opening settings.")
+        debugLog("[Controller] Cmd+, detected. Opening settings.")
         NSApp.sendAction(
           #selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil,
           from: nil)
         hide() // Hide the main window when settings open
         return // Consume the event
       case "w":
-         print("[Controller] Cmd+w detected. Hiding window.")
+         debugLog("[Controller] Cmd+w detected. Hiding window.")
          hide()
          return // Consume the event
       case "q":
-         print("[Controller] Cmd+q detected. Terminating app.")
+         debugLog("[Controller] Cmd+q detected. Terminating app.")
          NSApp.terminate(nil)
          return // Consume the event
          default:
-        print("[Controller] Unhandled Cmd+Key: \(event.charactersIgnoringModifiers ?? "nil")")
+        debugLog("[Controller] Unhandled Cmd+Key: \(event.charactersIgnoringModifiers ?? "nil")")
          // Let other Cmd key combinations pass through if needed
       }
     }
@@ -299,9 +299,9 @@ class Controller {
         if group.stickyMode == true {
           if let appDelegate = appDelegate {
             appDelegate.activateStickyMode()
-            print("[Controller] handleKey: Group has stickyMode enabled. Activating sticky mode.")
+            debugLog("[Controller] handleKey: Group has stickyMode enabled. Activating sticky mode.")
           } else {
-            print("[Controller] handleKey: Cannot activate sticky mode - appDelegate is nil")
+            debugLog("[Controller] handleKey: Cannot activate sticky mode - appDelegate is nil")
           }
         }
 
@@ -430,7 +430,7 @@ class Controller {
       if !success {
         // If shortcut failed, we already showed an alert and reset state.
         // We might still need to hide if not in sticky mode, but the state is handled.
-        print("[Controller] runAction: Detected shortcut failure. State should be reset by runKeyboardShortcut.")
+        debugLog("[Controller] runAction: Detected shortcut failure. State should be reset by runKeyboardShortcut.")
       }
     case .text:
       typeText(action.value)
@@ -438,21 +438,21 @@ class Controller {
       if let appDelegate = appDelegate {
         appDelegate.toggleStickyMode()
       } else {
-        print("[Controller] runAction: Cannot toggle sticky mode - appDelegate is nil")
+        debugLog("[Controller] runAction: Cannot toggle sticky mode - appDelegate is nil")
       }
     case .macro:
       runMacro(action)
     default:
-      print("\(action.type) unknown")
+      debugLog("\(action.type) unknown")
     }
 
     // Check if this action has sticky mode enabled (except for Toggle Sticky Mode action)
     if action.type != .toggleStickyMode && action.stickyMode == true {
       if let appDelegate = appDelegate {
         appDelegate.activateStickyMode()
-        print("[Controller] runAction: Activated sticky mode for action with stickyMode enabled")
+        debugLog("[Controller] runAction: Activated sticky mode for action with stickyMode enabled")
       } else {
-        print("[Controller] runAction: Cannot activate sticky mode - appDelegate is nil")
+        debugLog("[Controller] runAction: Cannot activate sticky mode - appDelegate is nil")
       }
     }
 
@@ -463,27 +463,27 @@ class Controller {
 
   func runMacro(_ action: Action) {
     guard let macroSteps = action.macroSteps else {
-      print("[Controller] runMacro: No macro steps found for action")
+      debugLog("[Controller] runMacro: No macro steps found for action")
       return
     }
 
-    print("[Controller] runMacro: Starting macro with \(macroSteps.count) steps")
+    debugLog("[Controller] runMacro: Starting macro with \(macroSteps.count) steps")
 
     // Execute macro steps asynchronously with delays
     DispatchQueue.global(qos: .userInitiated).async {
       for (index, step) in macroSteps.enumerated() {
         guard step.enabled else {
-          print("[Controller] runMacro: Step \(index + 1) is disabled, skipping")
+          debugLog("[Controller] runMacro: Step \(index + 1) is disabled, skipping")
           continue
         }
 
         // Apply delay before executing the step
         if step.delay > 0 {
-          print("[Controller] runMacro: Waiting \(step.delay) seconds before step \(index + 1)")
+          debugLog("[Controller] runMacro: Waiting \(step.delay) seconds before step \(index + 1)")
           Thread.sleep(forTimeInterval: step.delay)
         }
 
-        print("[Controller] runMacro: Executing step \(index + 1)/\(macroSteps.count)")
+        debugLog("[Controller] runMacro: Executing step \(index + 1)/\(macroSteps.count)")
 
         // Execute the step action on the main thread
         DispatchQueue.main.async {
@@ -491,7 +491,7 @@ class Controller {
         }
       }
 
-      print("[Controller] runMacro: Completed macro execution")
+      debugLog("[Controller] runMacro: Completed macro execution")
     }
   }
 
@@ -502,7 +502,7 @@ class Controller {
   // --- Repositioning Function --- START ---
   func repositionWindowNearMouse() {
       guard let window = self.window else {
-          print("[Controller reposition] Error: Window is nil. Cannot reposition.")
+          debugLog("[Controller reposition] Error: Window is nil. Cannot reposition.")
           return
       }
 
@@ -521,12 +521,12 @@ class Controller {
               let newOriginX = screenFrame.origin.x + (screenFrame.size.width - windowSize.width) / 2.0
               let newOriginY = (screenFrame.origin.y + screenFrame.size.height) - (screenFrame.size.height * verticalPercent) - windowSize.height
               calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
-              print("[Controller reposition] Calculated Origin: \(calculatedOrigin!)")
+              debugLog("[Controller reposition] Calculated Origin: \(calculatedOrigin!)")
           } else {
-              print("[Controller reposition] Warning: Window size \(windowSize) is invalid. Skipping reposition calculation.")
+              debugLog("[Controller reposition] Warning: Window size \(windowSize) is invalid. Skipping reposition calculation.")
           }
       } else {
-          print("[Controller reposition] Warning: Could not determine target screen. Skipping reposition calculation.")
+          debugLog("[Controller reposition] Warning: Could not determine target screen. Skipping reposition calculation.")
       }
 
       // Apply the position if calculated, otherwise center
@@ -561,11 +561,11 @@ class Controller {
     if let explicitlySetActivates = action.activates {
       // User explicitly set the value
       shouldActivate = explicitlySetActivates
-      print("[Controller] openURL: 'activates' explicitly set to \(shouldActivate) for \(action.value)")
+      debugLog("[Controller] openURL: 'activates' explicitly set to \(shouldActivate) for \(action.value)")
     } else {
       // Fallback to default behavior based on scheme if activates is nil
       shouldActivate = (scheme == "http" || scheme == "https")
-      print("[Controller] openURL: 'activates' not set, defaulting based on scheme ('\(scheme)') to \(shouldActivate) for \(action.value)")
+      debugLog("[Controller] openURL: 'activates' not set, defaulting based on scheme ('\(scheme)') to \(shouldActivate) for \(action.value)")
     }
 
     if shouldActivate {
@@ -584,7 +584,7 @@ class Controller {
   private func showAlert(title: String, message: String) {
     // Run the alert asynchronously on the main thread
     DispatchQueue.main.async {
-        print("[Controller showAlert async] Displaying alert: Title='\(title)', Message='\(message)'")
+        debugLog("[Controller showAlert async] Displaying alert: Title='\(title)', Message='\(message)'")
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -592,15 +592,15 @@ class Controller {
         alert.addButton(withTitle: "OK")
         // runModal will still block this async block, but not the original event handler
         let response = alert.runModal()
-        print("[Controller showAlert async] Alert dismissed with response: \(response == .alertFirstButtonReturn ? "OK" : "Other")")
+        debugLog("[Controller showAlert async] Alert dismissed with response: \(response == .alertFirstButtonReturn ? "OK" : "Other")")
     }
   }
 
   // --- Text Typing Helper --- START ---
   private func typeText(_ textToType: String) {
-      print("[Controller] Attempting to type text: '\(textToType)'")
+      debugLog("[Controller] Attempting to type text: '\(textToType)'")
       guard let source = CGEventSource(stateID: .hidSystemState) else {
-          print("Error: Failed to create CGEventSource for typing.")
+          debugLog("Error: Failed to create CGEventSource for typing.")
           showAlert(title: "Typing Error", message: "Could not create event source.")
           return
       }
@@ -610,13 +610,13 @@ class Controller {
       for character in textToType {
           // Get the Unicode value(s) for the character
           guard let utf16Values = character.unicodeScalars.first?.value else {
-              print("Warning: Could not get Unicode value for character '\(character)'. Skipping.")
+              debugLog("Warning: Could not get Unicode value for character '\(character)'. Skipping.")
               continue
           }
 
           // Create KeyDown event
           guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else { // virtualKey 0 for Unicode
-              print("Error: Failed to create KeyDown CGEvent for character '\(character)'.")
+              debugLog("Error: Failed to create KeyDown CGEvent for character '\(character)'.")
               continue
           }
           var charCode = UniChar(utf16Values)
@@ -628,7 +628,7 @@ class Controller {
 
           // Create KeyUp event
           guard let eventUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { // virtualKey 0 for Unicode
-              print("Error: Failed to create KeyUp CGEvent for character '\(character)'.")
+              debugLog("Error: Failed to create KeyUp CGEvent for character '\(character)'.")
               continue
           }
           eventUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
@@ -637,14 +637,14 @@ class Controller {
           // Add a small delay between characters (optional, makes typing feel more natural)
           // usleep(10000) // 10 milliseconds
       }
-      print("[Controller] Finished typing text.")
+      debugLog("[Controller] Finished typing text.")
   }
   // --- Text Typing Helper --- END ---
 
   // --- Shortcut Execution Helpers --- START ---
 
   private func runKeyboardShortcut(_ shortcutSequenceString: String) -> Bool {
-      print("[Controller] Attempting to run shortcut sequence: '\(shortcutSequenceString)'")
+      debugLog("[Controller] Attempting to run shortcut sequence: '\(shortcutSequenceString)'")
 
       // Split the sequence string by spaces
       let individualShortcutStrings = shortcutSequenceString.split(separator: " ").map(String.init)
@@ -653,12 +653,12 @@ class Controller {
       // Parse each individual shortcut string
       for shortcutString in individualShortcutStrings {
           guard let eventData = parseCompactShortcutToCGEventData(shortcutString) else {
-              print("[Controller] Failed to parse part '\(shortcutString)' of sequence '\(shortcutSequenceString)'")
+              debugLog("[Controller] Failed to parse part '\(shortcutString)' of sequence '\(shortcutSequenceString)'")
               showAlert(
                   title: "Invalid Shortcut Sequence",
                   message: "Could not parse part '\(shortcutString)' in sequence: '\(shortcutSequenceString)'\n\nUse format like 'CSb Oa' (Cmd+Shift+b then Opt+a). Check logs for details."
               )
-              print("[Controller] Shortcut parse failed. Resetting sequence state.")
+              debugLog("[Controller] Shortcut parse failed. Resetting sequence state.")
               appDelegate?.resetSequenceState() // Call reset on AppDelegate
               return false // Indicate failure
           }
@@ -668,7 +668,7 @@ class Controller {
       // Execute the parsed shortcuts sequentially with a delay
       let delayBetweenShortcutsMicroseconds: useconds_t = 50000 // 50ms delay
       for (index, shortcutData) in parsedShortcuts.enumerated() {
-          print("[Controller] Executing step \(index + 1)/\(parsedShortcuts.count): KeyCode: \(shortcutData.keyCode), Flags: \(shortcutData.flags)")
+          debugLog("[Controller] Executing step \(index + 1)/\(parsedShortcuts.count): KeyCode: \(shortcutData.keyCode), Flags: \(shortcutData.flags)")
           executeShortcut(keyCode: shortcutData.keyCode, flags: shortcutData.flags)
 
           // Add delay *after* executing a shortcut, except for the last one
@@ -676,7 +676,7 @@ class Controller {
               usleep(delayBetweenShortcutsMicroseconds)
           }
       }
-      print("[Controller] Finished executing shortcut sequence.")
+      debugLog("[Controller] Finished executing shortcut sequence.")
       return true // Indicate success
   }
 
@@ -779,7 +779,7 @@ class Controller {
 
   private func parseCompactShortcutToCGEventData(_ shortcut: String) -> (keyCode: CGKeyCode, flags: CGEventFlags)? {
       guard !shortcut.isEmpty else {
-          print("Error: Shortcut string is empty.")
+          debugLog("Error: Shortcut string is empty.")
           return nil
       }
 
@@ -823,13 +823,13 @@ class Controller {
       let keyName = remainingString.lowercased()
 
       guard !keyName.isEmpty else {
-          print("Error: No key name found after modifiers in shortcut string '\(shortcut)'.")
+          debugLog("Error: No key name found after modifiers in shortcut string '\(shortcut)'.")
           return nil
       }
 
       // 3. Map the key name string to a CGKeyCode using the standard constants map
       guard let keyCode = karabinerToKeyCodeMap[keyName] else {
-          print("Error: Unknown key name '\(keyName)' in shortcut string '\(shortcut)'. Cannot map to CGKeyCode.")
+          debugLog("Error: Unknown key name '\(keyName)' in shortcut string '\(shortcut)'. Cannot map to CGKeyCode.")
           return nil
       }
 
@@ -840,7 +840,7 @@ class Controller {
   private func executeShortcut(keyCode: CGKeyCode, flags: CGEventFlags) {
       // Get the system event source
       guard let source = CGEventSource(stateID: .hidSystemState) else {
-          print("Error: Failed to create CGEventSource.")
+          debugLog("Error: Failed to create CGEventSource.")
           return
       }
       // Add the tag to the source
@@ -851,28 +851,28 @@ class Controller {
 
       // 1. Create and post the Key Down event
       guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) else {
-          print("Error: Failed to create KeyDown CGEvent.")
+          debugLog("Error: Failed to create KeyDown CGEvent.")
           return
       }
       eventDown.flags = flags // Apply modifier flags
       // Set the user data field to identify this as a synthetic event
       eventDown.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
       eventDown.post(tap: tapLocation)
-      print("Posted KeyDown: \(keyCode) with flags: \(flags)")
+      debugLog("Posted KeyDown: \(keyCode) with flags: \(flags)")
 
       // Add a small delay between down and up (optional)
       // usleep(10000) // e.g., 10 milliseconds
 
       // 2. Create and post the Key Up event
       guard let eventUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
-          print("Error: Failed to create KeyUp CGEvent.")
+          debugLog("Error: Failed to create KeyUp CGEvent.")
           return
       }
       eventUp.flags = flags // Apply the *same* modifier flags
       // Set the user data field to identify this as a synthetic event
       eventUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
       eventUp.post(tap: tapLocation)
-      print("Posted KeyUp: \(keyCode) with flags: \(flags)")
+      debugLog("Posted KeyUp: \(keyCode) with flags: \(flags)")
   }
   // --- Shortcut Execution Helpers --- END ---
 }
