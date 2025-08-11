@@ -83,6 +83,12 @@ class UserConfig: ObservableObject {
   let alertHandler: AlertHandler
   let fileManager: FileManager
   var suppressValidationAlerts = false // Internal flag
+  // Cache app icons by bundle identifier to avoid repeated disk lookups & large NSImage payloads
+  private let appBundleIconCache: NSCache<NSString, NSImage> = {
+    let c = NSCache<NSString, NSImage>()
+    c.countLimit = 256
+    return c
+  }()
 
   init(
     alertHandler: AlertHandler = DefaultAlertHandler(),
@@ -131,18 +137,30 @@ class UserConfig: ObservableObject {
   
   // Helper function to get app icon from bundle ID
   func getAppIcon(for bundleId: String) -> NSImage? {
-    // First check running applications for better performance
+    let cacheKey = bundleId as NSString
+    if let cached = appBundleIconCache.object(forKey: cacheKey) {
+      return cached
+    }
+
+    // Prefer running app icon if available
+    var baseIcon: NSImage?
     if let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleId }) {
-      return runningApp.icon
+      baseIcon = runningApp.icon
+    } else if let appPath = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)?.path {
+      baseIcon = NSWorkspace.shared.icon(forFile: appPath)
     }
-    
-    // Try to find the app on disk
-    if let appPath = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)?.path {
-      return NSWorkspace.shared.icon(forFile: appPath)
+
+    guard let icon = baseIcon else { return nil }
+
+    // Create a small resized representation (16x16) that matches sidebar usage
+    let targetSize = NSSize(width: 16, height: 16)
+    let resized = NSImage(size: targetSize, flipped: false) { rect in
+      let iconRect = NSRect(origin: .zero, size: icon.size)
+      icon.draw(in: rect, from: iconRect, operation: .sourceOver, fraction: 1)
+      return true
     }
-    
-    // Return nil if app not found
-    return nil
+    appBundleIconCache.setObject(resized, forKey: cacheKey)
+    return resized
   }
 
   func ensureAndLoad() {

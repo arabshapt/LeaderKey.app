@@ -152,6 +152,7 @@ struct FavIconImage: View {
         .placeholder({ fallback })
         .setProcessor(DownsamplingImageProcessor(size: size))
         .scaleFactor(NSScreen.main?.backingScaleFactor ?? 2.0)
+        .cancelOnDisappear(true)
         .resizable()
         .padding(4)
         .frame(width: size.width, height: size.height, alignment: .center)

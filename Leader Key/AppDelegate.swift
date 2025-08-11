@@ -266,8 +266,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       self?.checkAndRecoverWindowState()
     }
     
-    // Check event tap health every 1 second - lightweight and critical for high CPU scenarios
-    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+    // Check event tap health every 2 seconds by default; this is robust while reducing wakeups
+    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
       self?.checkEventTapHealth()
     }
   }
@@ -1220,8 +1220,9 @@ extension AppDelegate {
     }
 
     private func checkCPULoad() {
+        // Keep a lightweight check; avoid expensive sampling. Threshold logic retained for safety.
         let cpuUsage = getCurrentCPUUsage()
-        let highCpuThreshold: Double = 80.0 // 80% threshold
+        let highCpuThreshold: Double = 85.0 // slightly higher to avoid flapping
 
         let wasHighCpuMode = isHighCpuMode
         isHighCpuMode = cpuUsage > highCpuThreshold
