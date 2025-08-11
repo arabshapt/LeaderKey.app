@@ -1,6 +1,20 @@
 import Defaults
 import Kingfisher
 import SwiftUI
+import AppKit
+
+// Lightweight in-memory cache for app icons resized to requested size
+private final class AppIconMemoryCache {
+  static let shared = AppIconMemoryCache()
+  private let cache = NSCache<NSString, NSImage>()
+  private init() {
+    // A small cap; each 24x24 NSImage is tiny, this is mostly to avoid unbounded growth
+    cache.countLimit = 512
+  }
+
+  func image(for key: String) -> NSImage? { cache.object(forKey: key as NSString) }
+  func set(_ image: NSImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
+}
 
 func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
   // Extract common properties
@@ -31,7 +45,16 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
     case .application:
       return AnyView(AppIconImage(appPath: value ?? "", size: iconSize))
     case .url:
-      return AnyView(FavIconImage(url: value ?? "", icon: "link"))
+      // Respect user preference to disable favicons to save memory/network
+      if Defaults[.showFaviconsInCheatsheet] {
+        return AnyView(FavIconImage(url: value ?? "", icon: "link", size: iconSize))
+      } else {
+        return AnyView(
+          Image(systemName: "link")
+            .foregroundStyle(.secondary)
+            .frame(width: iconSize.width, height: iconSize.height, alignment: .center)
+        )
+      }
     case .command:
       return AnyView(
         Image(systemName: "terminal")
@@ -90,12 +113,19 @@ struct AppIconImage: View {
       return nil
     }
 
+    // Use cached resized icon first
+    let cacheKey = "\(path)|\(Int(size.width))x\(Int(size.height))"
+    if let cached = AppIconMemoryCache.shared.image(for: cacheKey) {
+      return cached
+    }
+
     let icon = NSWorkspace.shared.icon(forFile: path)
     let resizedIcon = NSImage(size: size, flipped: false) { rect in
       let iconRect = NSRect(origin: .zero, size: icon.size)
       icon.draw(in: rect, from: iconRect, operation: .sourceOver, fraction: 1)
       return true
     }
+    AppIconMemoryCache.shared.set(resizedIcon, for: cacheKey)
     return resizedIcon
   }
 }
@@ -118,9 +148,11 @@ struct FavIconImage: View {
 
   var body: some View {
     if url.starts(with: "http:") || url.starts(with: "https:") {
-      KFImage.url(URL(string: url)).placeholder({
-        fallback
-      }).resizable()
+      KFImage.url(URL(string: url))
+        .placeholder({ fallback })
+        .setProcessor(DownsamplingImageProcessor(size: size))
+        .scaleFactor(NSScreen.main?.backingScaleFactor ?? 2.0)
+        .resizable()
         .padding(4)
         .frame(width: size.width, height: size.height, alignment: .center)
     } else {

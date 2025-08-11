@@ -7,6 +7,7 @@ import Sparkle
 import SwiftUI
 import UserNotifications
 import ObjectiveC
+import Kingfisher
 
 let updateLocationIdentifier = "UpdateCheck"
 
@@ -191,6 +192,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupStatusItem()       // Defined in private extension
     setupUpdaterController() // Configure auto-update behavior
     setupStateRecoveryTimer() // Setup periodic state recovery checks
+
+    // Configure global image cache to keep memory tight
+    configureImageCaching()
 
     // Check initial permission state
     lastPermissionCheck = checkAccessibilityPermissions()
@@ -886,6 +890,16 @@ private extension AppDelegate {
                 }
             }
         }
+    }
+
+    func configureImageCaching() {
+        // Kingfisher: reduce memory footprint and avoid caching huge originals
+        let cache = KingfisherManager.shared.cache
+        cache.memoryStorage.config.totalCostLimit = 25 * 1024 * 1024 // ~25MB in-RAM images
+        cache.memoryStorage.config.countLimit = 1024
+        cache.memoryStorage.config.expiration = .seconds(600)
+        cache.diskStorage.config.sizeLimit = 100 * 1024 * 1024 // 100MB on disk
+        cache.diskStorage.config.expiration = .days(14)
     }
 }
 

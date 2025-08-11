@@ -200,7 +200,7 @@ enum Cheatsheet {
 
     var body: some SwiftUI.View {
       ScrollView {
-        SwiftUI.VStack(alignment: .leading, spacing: 4) {
+        LazyVStack(alignment: .leading, spacing: 4) {
           // Header showing current group or root label
           HStack {
             KeyBadge(key: userState.currentGroup?.key ?? "•")
@@ -260,11 +260,13 @@ enum Cheatsheet {
   }
 
   static func createWindow(for userState: UserState) -> NSWindow {
+    // Build view controller on demand to reduce baseline memory
     let view = CheatsheetView().environmentObject(userState)
     let controller = NSHostingController(rootView: view)
     let cheatsheet = PanelWindow(
       contentRect: NSRect(x: 0, y: 0, width: 580, height: 640)
     )
+    cheatsheet.isReleasedWhenClosed = true // allow memory to be reclaimed when window is closed
     cheatsheet.contentViewController = controller
     return cheatsheet
   }
