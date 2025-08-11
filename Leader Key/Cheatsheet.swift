@@ -199,7 +199,7 @@ enum Cheatsheet {
     }
 
     var body: some SwiftUI.View {
-      ScrollView {
+      ScrollView(showsIndicators: false) {
         LazyVStack(alignment: .leading, spacing: 4) {
           // Header showing current group or root label
           HStack {
