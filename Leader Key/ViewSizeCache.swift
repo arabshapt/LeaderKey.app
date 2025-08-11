@@ -7,6 +7,7 @@ final class ViewSizeCache {
     static let shared = ViewSizeCache()
     private var cache: [UUID: NSSize] = [:]
     private let lock = NSLock()
+    private let maxEntries = 256
 
     private init() {}
 
@@ -17,6 +18,9 @@ final class ViewSizeCache {
 
     func store(_ size: NSSize, for group: Group) {
         lock.lock(); defer { lock.unlock() }
+        if cache.count >= maxEntries {
+            cache.removeAll() // prevent unbounded growth in long sessions
+        }
         cache[group.id] = size
     }
 

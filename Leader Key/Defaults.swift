@@ -35,6 +35,10 @@ extension Defaults.Keys {
     "showDetailsInCheatsheet", default: true, suite: defaultsSuite)
   static let showFaviconsInCheatsheet = Key<Bool>(
     "showFaviconsInCheatsheet", default: true, suite: defaultsSuite)
+
+  // Enable or disable verbose diagnostic logging at runtime (safe default: off)
+  static let enableVerboseLogging = Key<Bool>(
+    "enableVerboseLogging", default: false, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .reset, suite: defaultsSuite)
   static let resetOnCmdRelease = Key<Bool>(

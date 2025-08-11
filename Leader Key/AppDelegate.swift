@@ -168,24 +168,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return
     } // isRunningTests() is in private extension
 
-    print("[AppDelegate] applicationDidFinishLaunching: Starting up...")
+    debugLog("[AppDelegate] applicationDidFinishLaunching: Starting up...")
 
     // Setup Notifications
     UNUserNotificationCenter.current().delegate = self // Conformance is in extension
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-        if let error = error { print("[AppDelegate] Error requesting notification permission: \(error)") }
-        print("[AppDelegate] Notification permission granted: \(granted)")
+        if let error = error { debugLog("[AppDelegate] Error requesting notification permission: \(error)") }
+        debugLog("[AppDelegate] Notification permission granted: \(granted)")
     }
 
     // Setup Main Menu
     NSApp.mainMenu = MainMenu()
 
     // Load configuration and initialize state
-    print("[AppDelegate] Initializing UserConfig and UserState...")
+    debugLog("[AppDelegate] Initializing UserConfig and UserState...")
     config.ensureAndLoad() // Ensures config dir/file exists and loads default config
     state = UserState(userConfig: config)
     controller = Controller(userState: state, userConfig: config, appDelegate: self)
-    print("[AppDelegate] UserConfig and UserState initialized.")
+    debugLog("[AppDelegate] UserConfig and UserState initialized.")
 
     // Setup background services and UI elements
     setupFileMonitor()      // Defined in private extension
@@ -201,7 +201,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     print("[AppDelegate] Initial accessibility permission state: \(lastPermissionCheck ?? false)")
     
     // Attempt to start the global event tap immediately
-    print("[AppDelegate] Attempting initial startEventTapMonitoring()...")
+    debugLog("[AppDelegate] Attempting initial startEventTapMonitoring()...")
     startEventTapMonitoring() // Defined in Event Tap Handling extension
 
     // Add a delayed check to retry starting the event tap if it failed initially.
@@ -319,7 +319,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
   
-  private func restartEventTap() {
+    private func restartEventTap() {
     print("[AppDelegate] Restarting event tap...")
     
     // First stop the existing tap
@@ -1096,25 +1096,25 @@ extension AppDelegate {
             userInfo: Unmanaged.passUnretained(self).toOpaque() // Pass reference to self
         ) else {
             // Failure usually means Accessibility permissions are missing or denied.
-            print("[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing.")
+            debugLog("[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing.")
             // Check permissions status *after* failure, only prompt if we haven't recently.
             if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
-                print("[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert.")
+                debugLog("[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert.")
                 showPermissionsAlert()
                 self.didShowPermissionsAlertRecently = true // Flag to avoid spamming alerts
                 // Reset the flag after a short delay to allow re-prompting later if needed
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                    print("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
+                    debugLog("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
                     self.didShowPermissionsAlertRecently = false
                 }
             } else {
-                print("[AppDelegate] startEventTapMonitoring: Accessibility check passed OR alert shown recently. Not showing permissions alert now.")
+                debugLog("[AppDelegate] startEventTapMonitoring: Accessibility check passed OR alert shown recently. Not showing permissions alert now.")
             }
             return // Stop, as tap creation failed
         }
 
         // Tap creation successful, proceed with setup
-        print("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
+        debugLog("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
         self.eventTap = tap
         // Create a run loop source from the tap and add it to the current run loop
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -1130,15 +1130,15 @@ extension AppDelegate {
         // Start CPU monitoring for adaptive behavior
         startCPUMonitoring()
 
-        print("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
+        debugLog("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
     }
 
     func stopEventTapMonitoring() {
         guard isMonitoring else {
-             print("[AppDelegate] stopEventTapMonitoring: Not currently monitoring. Aborting.")
+             debugLog("[AppDelegate] stopEventTapMonitoring: Not currently monitoring. Aborting.")
              return
         }
-        print("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
+        debugLog("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
 
         // Stop health monitoring and CPU monitoring
         stopCPUMonitoring()
@@ -1146,17 +1146,17 @@ extension AppDelegate {
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
         if let source = runLoopSource {
-             print("[AppDelegate] stopEventTapMonitoring: Removing run loop source.")
+             debugLog("[AppDelegate] stopEventTapMonitoring: Removing run loop source.")
              CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
              self.runLoopSource = nil
         }
         if let tap = eventTap {
-             print("[AppDelegate] stopEventTapMonitoring: Disabling and releasing tap.")
+             debugLog("[AppDelegate] stopEventTapMonitoring: Disabling and releasing tap.")
              CGEvent.tapEnable(tap: tap, enable: false) // Disable first
              self.eventTap = nil // Release reference
         }
         self.isMonitoring = false // Update state
-        print("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
+        debugLog("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
 
     // --- Force Reset Mechanism ---
@@ -1290,7 +1290,7 @@ extension AppDelegate {
         // ----> Check if the event is tagged as synthetic <----
         let userData = event.getIntegerValueField(.eventSourceUserData)
         if userData == leaderKeySyntheticEventTag {
-            print("[AppDelegate] handleKeyDownEvent: Ignoring synthetic event generated by Leader Key.")
+            debugLog("[AppDelegate] handleKeyDownEvent: Ignoring synthetic event generated by Leader Key.")
             return Unmanaged.passRetained(event) // Pass it through
         }
         // ----> End synthetic event check <----
@@ -1299,19 +1299,19 @@ extension AppDelegate {
         if isProcessingKey {
             // Buffer the event for later processing instead of passing it through
             guard let nsEvent = NSEvent(cgEvent: event) else {
-                print("[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through.")
+                debugLog("[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through.")
                 return Unmanaged.passRetained(event)
             }
             
             // Check queue size limit to prevent memory issues
             if keyEventQueue.count >= maxQueueSize {
-                print("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space.")
+                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space.")
                 keyEventQueue.removeFirst()
             }
             
             let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
             keyEventQueue.append(queuedEvent)
-            print("[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)")
+            debugLog("[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)")
             return nil // Consume the event (don't pass through)
         }
         
@@ -1323,18 +1323,18 @@ extension AppDelegate {
 
         // Try to convert CGEvent to NSEvent to easily access key code and modifiers
         guard let nsEvent = NSEvent(cgEvent: event) else {
-             print("[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
+             debugLog("[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
              return Unmanaged.passRetained(event)
         }
         // Process the key event using our main logic function
         // Let's get the mapped key string here for better logging
         let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
         let modsDescription = describeModifiers(nsEvent.modifierFlags)
-        print("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
+        debugLog("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
         let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
 
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
-         print("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
+         debugLog("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
         return handled ? nil : Unmanaged.passRetained(event)
     }
     
@@ -1343,7 +1343,7 @@ extension AppDelegate {
         while !keyEventQueue.isEmpty && !isProcessingKey {
             let queuedEvent = keyEventQueue.removeFirst()
             
-            print("[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)")
+            debugLog("[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)")
             
             // Set processing flag to prevent new events from being processed
             isProcessingKey = true
@@ -1360,7 +1360,7 @@ extension AppDelegate {
             // Process the queued event using the same logic as handleKeyDownEvent
             let handled = processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
             
-            print("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
+            debugLog("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
             
             // Break the loop to allow UI updates, continuation handled in defer block
             break
@@ -1369,7 +1369,7 @@ extension AppDelegate {
     
     private func clearKeyEventQueue() {
         if !keyEventQueue.isEmpty {
-            print("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
+            debugLog("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
             keyEventQueue.removeAll()
         }
     }
@@ -1425,7 +1425,7 @@ extension AppDelegate {
                 }
             }
             let stickyState = isInStickyMode(currentFlags)
-            print("[AppDelegate] handleFlagsChangedEvent: cmdPressed=\(commandPressed) cmdReleased=\(commandReleased) sticky=\(stickyState)")
+            debugLog("[AppDelegate] handleFlagsChangedEvent: cmdPressed=\(commandPressed) cmdReleased=\(commandReleased) sticky=\(stickyState)")
         }
 
         // Always pass through modifier changes
@@ -1436,7 +1436,7 @@ extension AppDelegate {
         // 1. Check for force reset shortcut FIRST (highest priority)
         let shortcutForceReset = KeyboardShortcuts.getShortcut(for: .forceReset)
         if let shortcut = shortcutForceReset, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
+            debugLog("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
             forceResetState()
             return true // Consume the force reset shortcut press
         }
@@ -1449,13 +1449,13 @@ extension AppDelegate {
 
         // Check App-Specific Shortcut
         if let shortcut = shortcutAppSpecific, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[AppDelegate] processKeyEvent: Matched App-Specific shortcut.")
+            debugLog("[AppDelegate] processKeyEvent: Matched App-Specific shortcut.")
             matchedActivationType = .appSpecificWithFallback
             matchedShortcut = shortcut
         }
         // Check Default Only Shortcut
         else if let shortcut = shortcutDefaultOnly, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-            print("[AppDelegate] processKeyEvent: Matched Default Only shortcut.")
+            debugLog("[AppDelegate] processKeyEvent: Matched Default Only shortcut.")
             matchedActivationType = .defaultOnly
             matchedShortcut = shortcut
         }
@@ -1472,18 +1472,18 @@ extension AppDelegate {
             let windowAlpha = self.controller.window.alphaValue
             let hasActiveSequence = (currentSequenceGroup != nil || activeRootGroup != nil)
             
-            print("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible), alpha: \(windowAlpha), hasActiveSequence: \(hasActiveSequence)")
+            debugLog("[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible), alpha: \(windowAlpha), hasActiveSequence: \(hasActiveSequence)")
 
             // Check multiple conditions to determine if we should hide the window
             if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
                 // Window is visible OR has opacity OR we have an active sequence - hide it
-                print("[AppDelegate] Escape: Hiding window and resetting state.")
+                debugLog("[AppDelegate] Escape: Hiding window and resetting state.")
                 hide()
                 resetSequenceState()
                 return true // Consume the Escape press
             } else {
                 // Window is truly hidden, no active sequence - pass through
-                print("[AppDelegate] Escape: Window is hidden, no active sequence. Passing event through.")
+                debugLog("[AppDelegate] Escape: Window is hidden, no active sequence. Passing event through.")
                 return false // Pass through the Escape press
             }
         }
@@ -1495,7 +1495,7 @@ extension AppDelegate {
             if modifiers.contains(.command),
                let nsEvent = NSEvent(cgEvent: cgEvent),
                nsEvent.charactersIgnoringModifiers == "," {
-                print("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
+                debugLog("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
                 NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
                 // Reset sequence state and hide the panel
                 hide()
@@ -1504,12 +1504,12 @@ extension AppDelegate {
             // --- END SPECIAL CHECK ---
 
             // If not Cmd+, process the key normally within the sequence
-            print("[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence...")
+            debugLog("[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence...")
 
             // Clear the activation shortcut since the user is now actively using Leader Key
             // This enables the Cmd-release reset feature after activation
             if activeActivationShortcut != nil {
-                print("[AppDelegate] processKeyEvent: Clearing activeActivationShortcut - user is now actively using Leader Key.")
+                debugLog("[AppDelegate] processKeyEvent: Clearing activeActivationShortcut - user is now actively using Leader Key.")
                 activeActivationShortcut = nil
             }
 
@@ -1517,50 +1517,50 @@ extension AppDelegate {
         }
 
         // 5. If NOT activation, Escape, or in a sequence, let the event pass through
-        print("[AppDelegate] processKeyEvent: No activation shortcut, Escape, or active sequence matched. Passing event through.")
+        debugLog("[AppDelegate] processKeyEvent: No activation shortcut, Escape, or active sequence matched. Passing event through.")
         return false
     }
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
-        print("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))")
+        debugLog("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))")
 
         // Get the single character string representation for the key event
         guard let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers) else {
             // If we can't map the key event to a string, decide based on sticky mode.
             let isStickyModeActive = isInStickyMode(modifiers)
             if isStickyModeActive {
-                print("[AppDelegate] processKeyInSequence: Could not map event to keyString, but sticky mode ACTIVE – passing event through.")
+                debugLog("[AppDelegate] processKeyInSequence: Could not map event to keyString, but sticky mode ACTIVE – passing event through.")
                 return false // Event NOT handled – let it propagate
             } else {
-                print("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
+                debugLog("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
                 DispatchQueue.main.async { self.controller.window.shake() }
                 return true // Event handled (by shaking)
             }
         }
 
-        print("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
+        debugLog("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
 
         // Check if the keyString matches an action or group within the currently active group
         if let currentGroup = currentSequenceGroup, let hit = currentGroup.actions.first(where: { $0.item.key == keyString }) {
-            print("[AppDelegate] processKeyInSequence: Found match for '\(keyString)' in group '\(currentGroup.displayName).'")
+            debugLog("[AppDelegate] processKeyInSequence: Found match for '\(keyString)' in group '\(currentGroup.displayName).'")
             switch hit {
             case .action(let action):
-                print("[AppDelegate] processKeyInSequence: Matched ACTION: '\\(action.displayName)' (\\(action.value)).")
+                debugLog("[AppDelegate] processKeyInSequence: Matched ACTION: '\\(action.displayName)' (\\(action.value)).")
                 // Run the action
                 controller.runAction(action)
 
                 // Original Behavior: Check Sticky Mode for ALL action types
                 let isStickyModeActive = isInStickyMode(modifiers)
                 if !isStickyModeActive {
-                    print("[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence.")
+                    debugLog("[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence.")
                     hide()
                 } else {
-                    print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
+                    debugLog("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
                 }
                 return true // Event handled
 
             case .group(let subgroup):
-                print("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                debugLog("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
                 
                 // Update sequence state immediately to prevent race conditions
                 currentSequenceGroup = subgroup
@@ -1572,7 +1572,7 @@ extension AppDelegate {
 
                 // Check if the group has sticky mode enabled
                 if subgroup.stickyMode == true {
-                    print("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
+                    debugLog("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
                     activateStickyMode()
                 }
                 
@@ -1581,12 +1581,12 @@ extension AppDelegate {
         } else {
             // Key not found in the current group.
             let groupName = currentSequenceGroup?.displayName ?? "(nil)"
-            print("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName)'.")
+            debugLog("[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName)'.")
 
             let isStickyModeActive = isInStickyMode(modifiers)
             if isStickyModeActive {
                 // In sticky mode: pass the event through so the underlying app receives the key/shortcut.
-                print("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE -> passing event through.")
+                debugLog("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE -> passing event through.")
                 return false // Event NOT handled – let it propagate
             } else {
                 // Not in sticky mode: indicate error by shaking the window and consuming the event.

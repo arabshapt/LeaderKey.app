@@ -23,6 +23,7 @@ struct AdvancedPane: View {
   @Default(.panelClickThrough) var panelClickThrough
   @Default(.overlayDetectionEnabled) var overlayDetectionEnabled
   @Default(.overlayApps) var overlayApps
+  @Default(.enableVerboseLogging) var enableVerboseLogging
 
   @State private var hasAccessibilityPermissions = false
 
@@ -360,6 +361,7 @@ struct AdvancedPane: View {
           "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
         Defaults.Toggle("Automatically check for updates", key: .automaticallyChecksForUpdates)
         Defaults.Toggle("Allow mouse clicks through panel", key: .panelClickThrough)
+        Defaults.Toggle("Enable verbose logging (diagnostics)", key: .enableVerboseLogging)
         // Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
       }
 
