@@ -89,6 +89,14 @@ extension UserConfig {
             try jsonData.write(to: URL(fileURLWithPath: filePath)) // Write to the specific file path
             print("[UserConfig] Successfully saved sorted config to: \(filePath)")
 
+            // Update metadata lastModified date
+            var metadata = loadMetadata(for: filePath) ?? ConfigMetadata()
+            metadata.lastModified = Date()
+            if metadata.createdAt == nil {
+                metadata.createdAt = Date()
+            }
+            saveMetadata(metadata, for: filePath)
+            
             // Trigger a reload to update the entire app state with the saved & sorted config
             print("[UserConfig] Triggering reloadConfig() after saving.")
             self.reloadConfig() // <<< RELOAD AFTER SAVE

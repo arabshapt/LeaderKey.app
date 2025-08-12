@@ -85,7 +85,14 @@ struct GeneralPane: View {
                                   Button {
                                       // Get current custom name or default name to pre-fill
                                       if let filePath = config.discoveredConfigFiles[key] {
-                                          newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? key
+                                          // Try to get name from metadata first
+                                          if let metadata = config.loadMetadata(for: filePath),
+                                             let customName = metadata.customName {
+                                              newConfigNameInput = customName
+                                          } else {
+                                              // Fall back to Defaults or use the key
+                                              newConfigNameInput = Defaults[.configFileCustomNames][filePath] ?? key
+                                          }
                                           filePathToRename = filePath
                                           showingRenameAlert = true
                                       } else {
@@ -304,14 +311,17 @@ struct GeneralPane: View {
             if !newConfigNameInput.isEmpty,
                newConfigNameInput != globalDefaultDisplayName,
                newConfigNameInput != defaultAppConfigDisplayName {
-                var currentCustomNames = Defaults[.configFileCustomNames]
-                // Ensure the new name isn't already used (by a custom name or a default name)
-                // Note: Check against other values in currentCustomNames, EXCLUDING the current path itself
-                let existingCustomNamePaths = currentCustomNames.filter { $0.key != path && $0.value == newConfigNameInput }.map { $0.key }
+                // Check for name collisions
                 let existingDefaultNamePaths = config.discoveredConfigFiles.filter { $0.value != path && $0.key == newConfigNameInput }.map { $0.value }
 
-                if existingCustomNamePaths.isEmpty && existingDefaultNamePaths.isEmpty {
+                if existingDefaultNamePaths.isEmpty {
                     print("Saving new name '\(newConfigNameInput)' for path '\(path)'")
+                    
+                    // Save to metadata file instead of Defaults
+                    config.updateMetadataCustomName(newConfigNameInput, for: path)
+                    
+                    // Also update Defaults for backward compatibility (will be removed in future)
+                    var currentCustomNames = Defaults[.configFileCustomNames]
                     currentCustomNames[path] = newConfigNameInput
                     Defaults[.configFileCustomNames] = currentCustomNames
 

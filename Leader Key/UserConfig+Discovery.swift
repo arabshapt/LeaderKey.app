@@ -6,13 +6,23 @@ import Foundation
 extension UserConfig {
 
     internal func discoverConfigFiles() {
+        // Migrate any existing custom names to metadata files
+        migrateCustomNamesToMetadata()
+        
         var discovered: [String: String] = [:]
         let configDir = Defaults[.configDir]
         let configDirUrl = URL(fileURLWithPath: configDir)
-        let customNames = Defaults[.configFileCustomNames] // Get custom names
+        let customNames = Defaults[.configFileCustomNames] // Get custom names (for fallback)
 
         // Helper function to get display name
         func getDisplayName(for path: String, defaultName: String) -> String {
+            // First try to load from metadata file
+            if let metadata = loadMetadata(for: path),
+               let customName = metadata.customName,
+               !customName.isEmpty {
+                return customName
+            }
+            // Fall back to Defaults storage
             return customNames[path] ?? defaultName
         }
 
@@ -31,6 +41,11 @@ extension UserConfig {
 
                 // Skip the main global-config.json as it's handled above
                 if filePath == defaultPath {
+                    continue
+                }
+                
+                // Skip metadata files (they end with .meta.json)
+                if currentFileName.hasSuffix(".meta.json") {
                     continue
                 }
 

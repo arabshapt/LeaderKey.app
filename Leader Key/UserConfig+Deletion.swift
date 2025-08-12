@@ -25,7 +25,11 @@ extension UserConfig {
 
         do {
             try fileManager.removeItem(atPath: path)
-            // Remove custom name entry if present
+            
+            // Delete metadata file if it exists
+            deleteMetadata(for: path)
+            
+            // Remove custom name entry from Defaults if present (for backward compatibility)
             var names = Defaults[.configFileCustomNames]
             names.removeValue(forKey: path)
             Defaults[.configFileCustomNames] = names

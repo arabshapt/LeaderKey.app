@@ -65,6 +65,14 @@ extension UserConfig {
 
         // Persist custom sidebar name if provided
         if let name = customName, !name.isEmpty {
+            // Save to metadata file
+            var metadata = ConfigMetadata()
+            metadata.customName = name
+            metadata.createdAt = Date()
+            metadata.lastModified = Date()
+            saveMetadata(metadata, for: destPath)
+            
+            // Also save to Defaults for backward compatibility
             var names = Defaults[.configFileCustomNames]
             names[destPath] = name
             Defaults[.configFileCustomNames] = names
