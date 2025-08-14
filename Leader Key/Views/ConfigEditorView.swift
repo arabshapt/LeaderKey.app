@@ -4,7 +4,7 @@ import SymbolPicker
 
 struct KeyReference {
     static let keyCategories: [String: [String]] = [
-        "Special Commands": ["vk_none", "release_modifiers"],
+        "Special Commands": ["vk_none", "release_modifiers", "delay:500", "keydown:left_command", "keyup:left_command", "keydown:left_shift", "keyup:left_shift", "keydown:left_option", "keyup:left_option", "keydown:left_control", "keyup:left_control", "keydown:right_command", "keyup:right_command", "keydown:right_shift", "keyup:right_shift", "keydown:right_option", "keyup:right_option", "keydown:right_control", "keyup:right_control"],
         "Letters": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"],
         "Numbers": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
         "Arrows": ["left_arrow", "right_arrow", "up_arrow", "down_arrow"],
@@ -23,6 +23,12 @@ struct KeyReference {
             return "Release all modifier keys (Karabiner-compatible). Use in sequences like 'Ctab vk_none'"
         case "release_modifiers":
             return "Release all modifier keys. Use to prevent stuck modifiers after shortcuts"
+        case let str where str.hasPrefix("delay:"):
+            return "Wait for specified milliseconds (0-10000). Example: 'tab delay:500 tab' waits 500ms between tabs"
+        case let str where str.hasPrefix("keydown:"):
+            return "Hold down the specified key. Example: 'keydown:left_command tab tab keyup:left_command' for app switching"
+        case let str where str.hasPrefix("keyup:"):
+            return "Release a held key. Must be paired with a previous keydown command"
         default:
             return ""
         }

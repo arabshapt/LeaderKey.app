@@ -31,6 +31,9 @@ class Controller {
   private var cheatsheetTimer: Timer?
 
   private var cancellables = Set<AnyCancellable>()
+  
+  // Track currently held modifier keys for keydown/keyup control
+  private var heldModifierKeys = Set<CGKeyCode>()
 
   init(userState: UserState, userConfig: UserConfig, appDelegate: AppDelegate) {
     self.userState = userState
@@ -187,6 +190,9 @@ class Controller {
 
   func hide(afterClose: (() -> Void)? = nil) {
     Events.send(.willDeactivate)
+    
+    // Release any held modifier keys before hiding
+    releaseAllHeldModifiers()
 
     window.hide {
       afterClose?()
@@ -432,6 +438,8 @@ class Controller {
         // We might still need to hide if not in sticky mode, but the state is handled.
         debugLog("[Controller] runAction: Detected shortcut failure. State should be reset by runKeyboardShortcut.")
       }
+      // Always release held modifiers after shortcut execution for safety
+      releaseAllHeldModifiers()
     case .text:
       typeText(action.value)
     case .toggleStickyMode:
@@ -675,11 +683,101 @@ class Controller {
               // Release all possible modifiers
               let allModifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl, .maskSecondaryFn]
               releaseModifierKeys(allModifiers)
+              // Also release our tracked held modifiers
+              releaseAllHeldModifiers()
               
               // Add delay if not the last item
               if index < individualShortcutStrings.count - 1 {
                   usleep(delayBetweenShortcutsMicroseconds)
               }
+              continue // Move to next item in sequence
+          }
+          
+          // Check for keydown: prefix (hold key down)
+          if shortcutString.lowercased().hasPrefix("keydown:") {
+              let keyName = String(shortcutString.dropFirst(8)) // Remove "keydown:" prefix
+              debugLog("[Controller] Processing keydown: '\(keyName)' at position \(index + 1)")
+              
+              // Look up the key code
+              if let keyCode = karabinerToKeyCodeMap[keyName.lowercased()] {
+                  sendKeyDown(keyCode: keyCode)
+              } else {
+                  debugLog("[Controller] Unknown key for keydown: '\(keyName)'")
+                  showAlert(
+                      title: "Invalid Keydown Command",
+                      message: "Unknown key: '\(keyName)' in keydown command.\n\nUse keys like: left_command, left_shift, left_option, left_control, etc."
+                  )
+                  releaseAllHeldModifiers() // Safety cleanup
+                  appDelegate?.resetSequenceState()
+                  return false
+              }
+              
+              // Add delay if not the last item
+              if index < individualShortcutStrings.count - 1 {
+                  usleep(delayBetweenShortcutsMicroseconds)
+              }
+              continue // Move to next item in sequence
+          }
+          
+          // Check for keyup: prefix (release held key)
+          if shortcutString.lowercased().hasPrefix("keyup:") {
+              let keyName = String(shortcutString.dropFirst(6)) // Remove "keyup:" prefix
+              debugLog("[Controller] Processing keyup: '\(keyName)' at position \(index + 1)")
+              
+              // Look up the key code
+              if let keyCode = karabinerToKeyCodeMap[keyName.lowercased()] {
+                  sendKeyUp(keyCode: keyCode)
+              } else {
+                  debugLog("[Controller] Unknown key for keyup: '\(keyName)'")
+                  showAlert(
+                      title: "Invalid Keyup Command",
+                      message: "Unknown key: '\(keyName)' in keyup command.\n\nUse keys like: left_command, left_shift, left_option, left_control, etc."
+                  )
+                  releaseAllHeldModifiers() // Safety cleanup
+                  appDelegate?.resetSequenceState()
+                  return false
+              }
+              
+              // Add delay if not the last item
+              if index < individualShortcutStrings.count - 1 {
+                  usleep(delayBetweenShortcutsMicroseconds)
+              }
+              continue // Move to next item in sequence
+          }
+          
+          // Check for delay: prefix (custom delay in milliseconds)
+          if shortcutString.lowercased().hasPrefix("delay:") {
+              let delayString = String(shortcutString.dropFirst(6)) // Remove "delay:" prefix
+              debugLog("[Controller] Processing delay: '\(delayString)' ms at position \(index + 1)")
+              
+              // Parse the delay value
+              guard let delayMs = Int(delayString) else {
+                  debugLog("[Controller] Invalid delay value: '\(delayString)'")
+                  showAlert(
+                      title: "Invalid Delay Command",
+                      message: "Invalid delay value: '\(delayString)'.\n\nUse a number in milliseconds (e.g., delay:500 for 500ms)."
+                  )
+                  releaseAllHeldModifiers() // Safety cleanup
+                  appDelegate?.resetSequenceState()
+                  return false
+              }
+              
+              // Validate delay range (0 to 10000ms = 10 seconds max)
+              let clampedDelay = max(0, min(10000, delayMs))
+              if clampedDelay != delayMs {
+                  debugLog("[Controller] Delay value clamped from \(delayMs)ms to \(clampedDelay)ms")
+              }
+              
+              // Apply the delay (convert milliseconds to microseconds)
+              if clampedDelay > 0 {
+                  let delayMicroseconds = useconds_t(clampedDelay * 1000)
+                  usleep(delayMicroseconds)
+                  debugLog("[Controller] Applied delay of \(clampedDelay)ms")
+              } else {
+                  debugLog("[Controller] Skipping delay (0ms specified)")
+              }
+              
+              // No additional delay after a delay command
               continue // Move to next item in sequence
           }
           
@@ -695,9 +793,11 @@ class Controller {
               return false // Indicate failure
           }
           
-          // Execute the shortcut
-          debugLog("[Controller] Executing step \(index + 1)/\(individualShortcutStrings.count): KeyCode: \(eventData.keyCode), Flags: \(eventData.flags)")
-          executeShortcut(keyCode: eventData.keyCode, flags: eventData.flags)
+          // Execute the shortcut with currently held modifiers combined
+          let currentHeldFlags = getCurrentModifierFlags()
+          let combinedFlags = eventData.flags.union(currentHeldFlags)
+          debugLog("[Controller] Executing step \(index + 1)/\(individualShortcutStrings.count): KeyCode: \(eventData.keyCode), Flags: \(combinedFlags) (includes held modifiers)")
+          executeShortcut(keyCode: eventData.keyCode, flags: combinedFlags)
           
           // Add delay if not the last item
           if index < individualShortcutStrings.count - 1 {
@@ -991,6 +1091,110 @@ class Controller {
               debugLog("Released Function key")
           }
       }
+  }
+  
+  // Send only a keyDown event (for holding modifiers)
+  private func sendKeyDown(keyCode: CGKeyCode, flags: CGEventFlags = []) {
+      guard let source = CGEventSource(stateID: .hidSystemState) else {
+          debugLog("Error: Failed to create CGEventSource for keyDown.")
+          return
+      }
+      source.userData = leaderKeySyntheticEventTag
+      let tapLocation = CGEventTapLocation.cghidEventTap
+      
+      guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) else {
+          debugLog("Error: Failed to create KeyDown CGEvent.")
+          return
+      }
+      eventDown.flags = flags
+      eventDown.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+      eventDown.post(tap: tapLocation)
+      debugLog("Posted KeyDown only: \(keyCode) with flags: \(flags)")
+      
+      // Track this modifier as held if it's a modifier key
+      if isModifierKey(keyCode: keyCode) {
+          heldModifierKeys.insert(keyCode)
+          debugLog("Tracking held modifier: \(keyCode)")
+      }
+  }
+  
+  // Send only a keyUp event (for releasing held modifiers)
+  private func sendKeyUp(keyCode: CGKeyCode, flags: CGEventFlags = []) {
+      guard let source = CGEventSource(stateID: .hidSystemState) else {
+          debugLog("Error: Failed to create CGEventSource for keyUp.")
+          return
+      }
+      source.userData = leaderKeySyntheticEventTag
+      let tapLocation = CGEventTapLocation.cghidEventTap
+      
+      guard let eventUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+          debugLog("Error: Failed to create KeyUp CGEvent.")
+          return
+      }
+      eventUp.flags = flags
+      eventUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+      eventUp.post(tap: tapLocation)
+      debugLog("Posted KeyUp only: \(keyCode) with flags: \(flags)")
+      
+      // Remove from tracked held modifiers if it's a modifier key
+      if isModifierKey(keyCode: keyCode) {
+          heldModifierKeys.remove(keyCode)
+          debugLog("Released held modifier: \(keyCode)")
+      }
+  }
+  
+  // Check if a keyCode is a modifier key
+  private func isModifierKey(keyCode: CGKeyCode) -> Bool {
+      let modifierKeyCodes: Set<CGKeyCode> = [
+          CGKeyCode(kVK_Command),
+          CGKeyCode(kVK_RightCommand),
+          CGKeyCode(kVK_Shift),
+          CGKeyCode(kVK_RightShift),
+          CGKeyCode(kVK_Option),
+          CGKeyCode(kVK_RightOption),
+          CGKeyCode(kVK_Control),
+          CGKeyCode(kVK_RightControl),
+          CGKeyCode(kVK_Function),
+          CGKeyCode(kVK_CapsLock)
+      ]
+      return modifierKeyCodes.contains(keyCode)
+  }
+  
+  // Release all currently held modifier keys
+  private func releaseAllHeldModifiers() {
+      guard !heldModifierKeys.isEmpty else { return }
+      
+      debugLog("Releasing all held modifiers: \(heldModifierKeys)")
+      for keyCode in heldModifierKeys {
+          sendKeyUp(keyCode: keyCode)
+      }
+      heldModifierKeys.removeAll()
+  }
+  
+  // Get current modifier flags based on held modifiers
+  private func getCurrentModifierFlags() -> CGEventFlags {
+      var flags: CGEventFlags = []
+      
+      for keyCode in heldModifierKeys {
+          switch Int(keyCode) {
+          case kVK_Command, kVK_RightCommand:
+              flags.insert(.maskCommand)
+          case kVK_Shift, kVK_RightShift:
+              flags.insert(.maskShift)
+          case kVK_Option, kVK_RightOption:
+              flags.insert(.maskAlternate)
+          case kVK_Control, kVK_RightControl:
+              flags.insert(.maskControl)
+          case kVK_Function:
+              flags.insert(.maskSecondaryFn)
+          case kVK_CapsLock:
+              flags.insert(.maskAlphaShift)
+          default:
+              break
+          }
+      }
+      
+      return flags
   }
   // --- Shortcut Execution Helpers --- END ---
 }
