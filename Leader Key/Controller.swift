@@ -642,41 +642,70 @@ class Controller {
   // --- Text Typing Helper --- END ---
 
   // --- Shortcut Execution Helpers --- START ---
+  // 
+  // Supported shortcut formats:
+  // - Single shortcuts: "Ctab" (Cmd+Tab), "CSa" (Cmd+Shift+A)
+  // - Sequences: "Ctab Oa" (Cmd+Tab then Option+A)
+  // - Special commands:
+  //   • "vk_none" - Release all modifier keys (Karabiner compatible)
+  //   • "release_modifiers" - Release all modifier keys
+  // - Example with release: "Ctab vk_none" (Cmd+Tab then release modifiers)
 
   private func runKeyboardShortcut(_ shortcutSequenceString: String) -> Bool {
       debugLog("[Controller] Attempting to run shortcut sequence: '\(shortcutSequenceString)'")
+      
+      // Special case: handle explicit modifier release
+      if shortcutSequenceString.lowercased() == "release_modifiers" || shortcutSequenceString.lowercased() == "vk_none" {
+          debugLog("[Controller] Executing explicit modifier release")
+          // Release all possible modifiers
+          let allModifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl, .maskSecondaryFn]
+          releaseModifierKeys(allModifiers)
+          return true
+      }
 
       // Split the sequence string by spaces
       let individualShortcutStrings = shortcutSequenceString.split(separator: " ").map(String.init)
-      var parsedShortcuts: [(keyCode: CGKeyCode, flags: CGEventFlags)] = []
-
-      // Parse each individual shortcut string
-      for shortcutString in individualShortcutStrings {
+      
+      // Process each shortcut in the sequence
+      let delayBetweenShortcutsMicroseconds: useconds_t = 50000 // 50ms delay
+      for (index, shortcutString) in individualShortcutStrings.enumerated() {
+          // Check if this is a special modifier release command
+          if shortcutString.lowercased() == "vk_none" || shortcutString.lowercased() == "release_modifiers" {
+              debugLog("[Controller] Executing modifier release in sequence at position \(index + 1)")
+              // Release all possible modifiers
+              let allModifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl, .maskSecondaryFn]
+              releaseModifierKeys(allModifiers)
+              
+              // Add delay if not the last item
+              if index < individualShortcutStrings.count - 1 {
+                  usleep(delayBetweenShortcutsMicroseconds)
+              }
+              continue // Move to next item in sequence
+          }
+          
+          // Parse as normal shortcut
           guard let eventData = parseCompactShortcutToCGEventData(shortcutString) else {
               debugLog("[Controller] Failed to parse part '\(shortcutString)' of sequence '\(shortcutSequenceString)'")
               showAlert(
                   title: "Invalid Shortcut Sequence",
-                  message: "Could not parse part '\(shortcutString)' in sequence: '\(shortcutSequenceString)'\n\nUse format like 'CSb Oa' (Cmd+Shift+b then Opt+a). Check logs for details."
+                  message: "Could not parse part '\(shortcutString)' in sequence: '\(shortcutSequenceString)'\n\nUse format like 'CSb Oa' (Cmd+Shift+b then Opt+a).\n\nSpecial commands:\n• vk_none or release_modifiers - Release all modifier keys\n\nCheck logs for details."
               )
               debugLog("[Controller] Shortcut parse failed. Resetting sequence state.")
               appDelegate?.resetSequenceState() // Call reset on AppDelegate
               return false // Indicate failure
           }
-          parsedShortcuts.append(eventData)
-      }
-
-      // Execute the parsed shortcuts sequentially with a delay
-      let delayBetweenShortcutsMicroseconds: useconds_t = 50000 // 50ms delay
-      for (index, shortcutData) in parsedShortcuts.enumerated() {
-          debugLog("[Controller] Executing step \(index + 1)/\(parsedShortcuts.count): KeyCode: \(shortcutData.keyCode), Flags: \(shortcutData.flags)")
-          executeShortcut(keyCode: shortcutData.keyCode, flags: shortcutData.flags)
-
-          // Add delay *after* executing a shortcut, except for the last one
-          if index < parsedShortcuts.count - 1 {
+          
+          // Execute the shortcut
+          debugLog("[Controller] Executing step \(index + 1)/\(individualShortcutStrings.count): KeyCode: \(eventData.keyCode), Flags: \(eventData.flags)")
+          executeShortcut(keyCode: eventData.keyCode, flags: eventData.flags)
+          
+          // Add delay if not the last item
+          if index < individualShortcutStrings.count - 1 {
               usleep(delayBetweenShortcutsMicroseconds)
           }
       }
-      debugLog("[Controller] Finished executing shortcut sequence.")
+
+      debugLog("[Controller] Successfully executed shortcut sequence: '\(shortcutSequenceString)'")
       return true // Indicate success
   }
 
@@ -873,6 +902,95 @@ class Controller {
       eventUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
       eventUp.post(tap: tapLocation)
       debugLog("Posted KeyUp: \(keyCode) with flags: \(flags)")
+  }
+  
+  // Explicitly releases modifier keys to prevent them from appearing "stuck"
+  // This is called when shortcut value is "release_modifiers" or "vk_none"
+  // Usage in config: {"key": "r", "type": "shortcut", "value": "release_modifiers"}
+  private func releaseModifierKeys(_ flags: CGEventFlags) {
+      guard let source = CGEventSource(stateID: .hidSystemState) else {
+          debugLog("Error: Failed to create CGEventSource for releasing modifiers.")
+          return
+      }
+      source.userData = leaderKeySyntheticEventTag
+      let tapLocation = CGEventTapLocation.cghidEventTap
+      
+      // Release Command keys
+      if flags.contains(.maskCommand) {
+          // Left Command (kVK_Command = 0x37)
+          if let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false) {
+              cmdUp.flags = []  // No flags - key is being released
+              cmdUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              cmdUp.post(tap: tapLocation)
+              debugLog("Released left Command key")
+          }
+          // Right Command (kVK_RightCommand = 0x36)
+          if let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_RightCommand), keyDown: false) {
+              cmdUp.flags = []
+              cmdUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              cmdUp.post(tap: tapLocation)
+              debugLog("Released right Command key")
+          }
+      }
+      
+      // Release Shift keys
+      if flags.contains(.maskShift) {
+          // Left Shift (kVK_Shift = 0x38)
+          if let shiftUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Shift), keyDown: false) {
+              shiftUp.flags = []
+              shiftUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              shiftUp.post(tap: tapLocation)
+              debugLog("Released left Shift key")
+          }
+          // Right Shift (kVK_RightShift = 0x3C)
+          if let shiftUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_RightShift), keyDown: false) {
+              shiftUp.flags = []
+              shiftUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              shiftUp.post(tap: tapLocation)
+              debugLog("Released right Shift key")
+          }
+      }
+      
+      // Release Option/Alt keys
+      if flags.contains(.maskAlternate) {
+          // Left Option (kVK_Option = 0x3A)
+          if let optUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Option), keyDown: false) {
+              optUp.flags = []
+              optUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              optUp.post(tap: tapLocation)
+              debugLog("Released left Option key")
+          }
+          // Right Option (kVK_RightOption = 0x3D)
+          if let optUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_RightOption), keyDown: false) {
+              optUp.flags = []
+              optUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              optUp.post(tap: tapLocation)
+              debugLog("Released right Option key")
+          }
+      }
+      
+      // Release Control keys
+      if flags.contains(.maskControl) {
+          // Left Control (kVK_Control = 0x3B)
+          if let ctrlUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Control), keyDown: false) {
+              ctrlUp.flags = []
+              ctrlUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              ctrlUp.post(tap: tapLocation)
+              debugLog("Released Control key")
+          }
+          // Note: Right Control (0x3E) may not exist on all Mac keyboards
+      }
+      
+      // Release Function key if present
+      if flags.contains(.maskSecondaryFn) {
+          // Function key (kVK_Function = 0x3F)
+          if let fnUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Function), keyDown: false) {
+              fnUp.flags = []
+              fnUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
+              fnUp.post(tap: tapLocation)
+              debugLog("Released Function key")
+          }
+      }
   }
   // --- Shortcut Execution Helpers --- END ---
 }

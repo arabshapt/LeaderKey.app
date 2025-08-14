@@ -4,6 +4,7 @@ import SymbolPicker
 
 struct KeyReference {
     static let keyCategories: [String: [String]] = [
+        "Special Commands": ["vk_none", "release_modifiers"],
         "Letters": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"],
         "Numbers": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
         "Arrows": ["left_arrow", "right_arrow", "up_arrow", "down_arrow"],
@@ -15,6 +16,17 @@ struct KeyReference {
         "Media": ["volume_increment", "volume_decrement", "mute"],
         "Other": ["print_screen", "scroll_lock", "pause", "lang1", "lang2", "japanese_eisuu", "japanese_kana"]
     ]
+    
+    static func getKeyHelp(for key: String) -> String {
+        switch key {
+        case "vk_none":
+            return "Release all modifier keys (Karabiner-compatible). Use in sequences like 'Ctab vk_none'"
+        case "release_modifiers":
+            return "Release all modifier keys. Use to prevent stuck modifiers after shortcuts"
+        default:
+            return ""
+        }
+    }
 }
 
 // Helper function to recursively convert fallback items to app-specific
@@ -528,14 +540,21 @@ struct ActionRow: View {
 
             DisclosureGroup("Key Reference", isExpanded: $state.showingKeyReference) {
               ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
                   ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
                     VStack(alignment: .leading, spacing: 4) {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                      let columns = [
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading)
+                      ]
+                      
+                      LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
                             .font(.system(.caption, design: .monospaced))
@@ -1270,14 +1289,21 @@ struct MacroStepRow: View {
 
             DisclosureGroup("Key Reference", isExpanded: $showingKeyReference) {
               ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
                   ForEach(KeyReference.keyCategories.keys.sorted(), id: \.self) { category in
                     VStack(alignment: .leading, spacing: 4) {
                       Text(category)
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), spacing: 4) {
+                      let columns = [
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading)
+                      ]
+                      
+                      LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(KeyReference.keyCategories[category] ?? [], id: \.self) { key in
                           Text(key)
                             .font(.system(.caption, design: .monospaced))
