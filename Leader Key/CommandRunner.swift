@@ -1,4 +1,5 @@
 import Cocoa
+import Defaults
 
 class CommandRunner {
   static func run(_ command: String) {
@@ -8,8 +9,44 @@ class CommandRunner {
 
     task.standardOutput = pipe
     task.standardError = errorPipe
-    task.launchPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh"
-    task.arguments = ["-c", command]
+    
+    // Get shell preference and RC file loading preference
+    let shellPreference = Defaults[.commandShellPreference]
+    let loadRCFiles = Defaults[.loadShellRCFiles]
+    
+    var shellPath = shellPreference.path
+    
+    // Validate custom shell path if using custom shell
+    if shellPreference == .custom {
+      let customPath = Defaults[.customShellPath]
+      if !customPath.isEmpty && ShellPreference.isValidShellPath(customPath) {
+        shellPath = customPath
+      } else {
+        // Fall back to system shell and notify user
+        shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh"
+        
+        if !customPath.isEmpty {
+          // Only show alert if user has entered a path (not empty)
+          DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Invalid Custom Shell"
+            alert.informativeText = "The custom shell path '\(customPath)' is invalid or not executable. Falling back to system shell."
+            alert.runModal()
+          }
+        }
+      }
+    }
+    
+    task.launchPath = shellPath
+    
+    // Use login shell (-l) to load RC files if enabled
+    // This ensures aliases and environment variables from .zshrc/.bashrc are available
+    if loadRCFiles {
+      task.arguments = ["-l", "-c", command]
+    } else {
+      task.arguments = ["-c", command]
+    }
 
     do {
       try task.run()

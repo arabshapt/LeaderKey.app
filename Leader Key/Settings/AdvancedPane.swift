@@ -24,8 +24,12 @@ struct AdvancedPane: View {
   @Default(.overlayDetectionEnabled) var overlayDetectionEnabled
   @Default(.overlayApps) var overlayApps
   @Default(.enableVerboseLogging) var enableVerboseLogging
+  @Default(.commandShellPreference) var commandShellPreference
+  @Default(.loadShellRCFiles) var loadShellRCFiles
+  @Default(.customShellPath) var customShellPath
 
   @State private var hasAccessibilityPermissions = false
+  @State private var isCustomShellValid = false
 
   var body: some View {
     ScrollView {
@@ -351,6 +355,82 @@ struct AdvancedPane: View {
             } else {
               OverlayDetector.shared.stopRealtimeDetection()
             }
+          }
+        }
+      }
+
+      Settings.Section(title: "Command Execution", bottomDivider: true) {
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            Text("Shell:")
+            Picker("", selection: $commandShellPreference) {
+              ForEach(ShellPreference.allCases) { shell in
+                Text(shell.description).tag(shell)
+              }
+            }
+            .frame(width: 200)
+            .labelsHidden()
+          }
+          
+          // Show custom shell path field when Custom is selected
+          if commandShellPreference == .custom {
+            HStack {
+              Text("Path:")
+              TextField("e.g., /opt/homebrew/bin/fish", text: $customShellPath)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 300)
+                .onChange(of: customShellPath) { newPath in
+                  isCustomShellValid = ShellPreference.isValidShellPath(newPath)
+                }
+              
+              // Validation indicator
+              if !customShellPath.isEmpty {
+                Image(systemName: isCustomShellValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                  .foregroundColor(isCustomShellValid ? .green : .orange)
+                  .help(isCustomShellValid ? "Valid shell executable" : "Invalid or non-executable path")
+              }
+              
+              Button("Browse…") {
+                let panel = NSOpenPanel()
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+                panel.canChooseFiles = true
+                panel.directoryURL = URL(fileURLWithPath: "/")
+                panel.message = "Select a shell executable"
+                
+                if panel.runModal() == .OK, let url = panel.url {
+                  customShellPath = url.path
+                  isCustomShellValid = ShellPreference.isValidShellPath(customShellPath)
+                }
+              }
+            }
+            
+            if !customShellPath.isEmpty && !isCustomShellValid {
+              Text("The specified path is not a valid executable. Commands will fall back to the system shell.")
+                .font(.caption)
+                .foregroundColor(.orange)
+            }
+            
+            Text("Common custom shell paths: /opt/homebrew/bin/fish, /usr/local/bin/zsh, /opt/homebrew/bin/nu")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
+          
+          Defaults.Toggle(
+            "Load shell configuration files",
+            key: .loadShellRCFiles
+          )
+          .help("When enabled, commands run with login shell mode to load .zshrc, .bashrc, and other shell configuration files")
+          
+          Text("Shell configuration files provide access to aliases, custom functions, and environment variables defined in your shell's RC files.")
+            .font(.callout)
+            .foregroundColor(.secondary)
+            .padding(.top, 4)
+        }
+        .onAppear {
+          // Validate custom shell path on view appear
+          if commandShellPreference == .custom {
+            isCustomShellValid = ShellPreference.isValidShellPath(customShellPath)
           }
         }
       }
