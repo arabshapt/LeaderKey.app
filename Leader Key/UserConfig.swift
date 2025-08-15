@@ -89,6 +89,9 @@ class UserConfig: ObservableObject {
     c.countLimit = 256
     return c
   }()
+  
+  // Cache parsed configurations to avoid repeated JSON parsing
+  internal let configCache = ConfigCache()
 
   init(
     alertHandler: AlertHandler = DefaultAlertHandler(),
@@ -190,6 +193,7 @@ class UserConfig: ObservableObject {
 
     // Clear caches and reset state
     appConfigs = [:] // Clear app-specific cache
+    configCache.clearCache() // Clear parsed config cache
 
     // Re-discover available config files
     self.discoverConfigFiles()

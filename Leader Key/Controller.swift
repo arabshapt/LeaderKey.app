@@ -170,7 +170,7 @@ class Controller {
     }
 
     // Apply click-through preference and reset transparency.
-    DispatchQueue.main.async {
+    ThreadOptimization.executeOnMain {
         self.window.alphaValue = Defaults[.normalModeOpacity]
         self.window.ignoresMouseEvents = Defaults[.panelClickThrough]
     }
@@ -494,7 +494,7 @@ class Controller {
         debugLog("[Controller] runMacro: Executing step \(index + 1)/\(macroSteps.count)")
 
         // Execute the step action on the main thread
-        DispatchQueue.main.async {
+        ThreadOptimization.executeOnMain {
           self.runAction(step.action)
         }
       }
@@ -590,9 +590,9 @@ class Controller {
   }
 
   private func showAlert(title: String, message: String) {
-    // Run the alert asynchronously on the main thread
-    DispatchQueue.main.async {
-        debugLog("[Controller showAlert async] Displaying alert: Title='\(title)', Message='\(message)'")
+    // Run the alert on the main thread
+    ThreadOptimization.executeOnMain {
+        debugLog("[Controller showAlert] Displaying alert: Title='\(title)', Message='\(message)'")
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message

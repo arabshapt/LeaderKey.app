@@ -3,7 +3,9 @@
     "allow": [
       "Bash(xcodebuild:*)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": []
   }

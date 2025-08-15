@@ -86,10 +86,19 @@ extension UserConfig {
     internal func decodeConfig(from filePath: String, suppressAlerts: Bool = false, isDefaultConfig: Bool) -> Group? {
         let configName = (filePath as NSString).lastPathComponent
         print("[UserConfig] Attempting to decode config: \(configName)")
+        
+        // Check cache first
+        let fileURL = URL(fileURLWithPath: filePath)
+        let fileModDate = try? fileManager.attributesOfItem(atPath: filePath)[.modificationDate] as? Date
+        
+        if let cachedGroup = configCache.getConfig(for: filePath, fileModificationDate: fileModDate) {
+            print("[UserConfig] Using cached config for: \(configName)")
+            return cachedGroup
+        }
 
         let data: Data
         do {
-            data = try Data(contentsOf: URL(fileURLWithPath: filePath))
+            data = try Data(contentsOf: fileURL)
             print("[UserConfig] Successfully read data from: \(configName)")
         } catch {
             // Handle file reading errors (permissions, not found etc.)
@@ -124,6 +133,10 @@ extension UserConfig {
                     print("[UserConfig] Validation issues found in app-specific config: \(configName)")
                 }
             }
+            
+            // Cache successfully parsed config
+            configCache.setConfig(decodedRoot, for: filePath, fileModificationDate: fileModDate)
+            
             return decodedRoot
         } catch let decodingError as DecodingError {
             // Handle JSON Decoding errors specifically

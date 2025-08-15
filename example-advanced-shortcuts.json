@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "key": "a",
+      "label": "App Switch (with delays)",
+      "type": "shortcut",
+      "value": "keydown:left_command tab delay:300 tab delay:300 tab delay:300 keyup:left_command"
+    },
+    {
+      "key": "q",
+      "label": "Quick Switch (no delay)",
+      "type": "shortcut",
+      "value": "keydown:left_command delay:0 tab delay:0 tab delay:0 tab keyup:left_command"
+    },
+    {
+      "key": "c",
+      "label": "Copy-Paste (with processing time)",
+      "type": "shortcut",
+      "value": "Cc delay:1000 Cv"
+    },
+    {
+      "key": "t",
+      "label": "Type Hello World (natural rhythm)",
+      "type": "shortcut",
+      "value": "h e l l o delay:200 spacebar delay:100 w o r l d"
+    },
+    {
+      "key": "v",
+      "label": "Vim Save & Quit",
+      "type": "shortcut",
+      "value": "escape delay:100 : w q delay:50 return_or_enter"
+    },
+    {
+      "key": "s",
+      "label": "Select Line (hold shift + end)",
+      "type": "shortcut",
+      "value": "keydown:left_shift end keyup:left_shift"
+    },
+    {
+      "key": "m",
+      "label": "Mission Control Navigation",
+      "type": "shortcut",
+      "value": "Tf3 delay:500 right_arrow delay:200 right_arrow delay:200 return_or_enter"
+    },
+    {
+      "key": "w",
+      "label": "Close Window (with confirm delay)",
+      "type": "shortcut",
+      "value": "Cw delay:2000 return_or_enter"
+    },
+    {
+      "key": "d",
+      "label": "Desktop Switch",
+      "type": "shortcut",
+      "value": "keydown:left_control right_arrow delay:500 keyup:left_control"
+    },
+    {
+      "key": "r",
+      "label": "Refresh Page (F5 with delay)",
+      "type": "shortcut",
+      "value": "f5 delay:3000"
+    }
+  ]
+}

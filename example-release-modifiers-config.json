@@ -1,0 +1,36 @@
+{
+  "type": "group",
+  "label": "Example with Modifier Release",
+  "actions": [
+    {
+      "key": "t",
+      "type": "shortcut",
+      "value": "Ctab vk_none",
+      "label": "Switch Apps (releases Cmd)"
+    },
+    {
+      "key": "a",
+      "type": "shortcut",
+      "value": "CSa release_modifiers",
+      "label": "Select All (releases modifiers)"
+    },
+    {
+      "key": "r",
+      "type": "shortcut",
+      "value": "release_modifiers",
+      "label": "Release All Modifiers"
+    },
+    {
+      "key": "n",
+      "type": "shortcut",
+      "value": "vk_none",
+      "label": "Clear Modifiers (Karabiner style)"
+    },
+    {
+      "key": "s",
+      "type": "shortcut",
+      "value": "Ctab Ctab vk_none",
+      "label": "Switch 2x then release"
+    }
+  ]
+}

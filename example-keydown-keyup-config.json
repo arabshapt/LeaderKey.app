@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "key": "a",
+      "label": "App Switcher (Hold Cmd)",
+      "type": "shortcut",
+      "value": "keydown:left_command tab tab tab keyup:left_command"
+    },
+    {
+      "key": "s",
+      "label": "Select Words (Hold Shift)",
+      "type": "shortcut",
+      "value": "keydown:left_shift right_arrow right_arrow right_arrow keyup:left_shift"
+    },
+    {
+      "key": "c",
+      "label": "Complex Sequence",
+      "type": "shortcut",
+      "value": "keydown:left_command keydown:left_shift tab keyup:left_shift tab keyup:left_command"
+    },
+    {
+      "key": "t",
+      "label": "Regular Tab (with release)",
+      "type": "shortcut",
+      "value": "Ctab release_modifiers"
+    },
+    {
+      "key": "h",
+      "label": "Hold Multiple Modifiers",
+      "type": "shortcut",
+      "value": "keydown:left_command keydown:left_option a keyup:left_option keyup:left_command"
+    }
+  ]
+}
