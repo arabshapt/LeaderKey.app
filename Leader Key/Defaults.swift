@@ -18,7 +18,7 @@ extension Defaults.Keys {
   static let modifierKeyConfiguration = Key<ModifierKeyConfig>(
     "modifierKeyConfiguration", default: .controlGroupOptionSticky, suite: defaultsSuite)
   static let theme = Key<Theme>(
-    "theme", default: .mysteryBox, suite: defaultsSuite)
+    "theme", default: .cheater, suite: defaultsSuite)
   static let automaticallyChecksForUpdates = Key<Bool>(
     "automaticallyChecksForUpdates", default: false, suite: defaultsSuite)
 
