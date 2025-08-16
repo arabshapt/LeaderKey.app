@@ -70,6 +70,26 @@ extension Defaults.Keys {
   static let loadShellRCFiles = Key<Bool>("loadShellRCFiles", default: true, suite: defaultsSuite)
   /// Custom shell path when using custom shell preference
   static let customShellPath = Key<String>("customShellPath", default: "", suite: defaultsSuite)
+  /// Custom environment variables for command execution
+  static let commandEnvironmentVariables = Key<[String: String]>("commandEnvironmentVariables", default: [:], suite: defaultsSuite)
+  /// Working directory mode for command execution
+  static let commandWorkingDirectory = Key<WorkingDirectoryMode>("commandWorkingDirectory", default: .home, suite: defaultsSuite)
+  /// Custom working directory path
+  static let customWorkingDirectoryPath = Key<String>("customWorkingDirectoryPath", default: "", suite: defaultsSuite)
+  /// Command execution timeout in seconds
+  static let commandTimeoutSeconds = Key<Int>("commandTimeoutSeconds", default: 30, suite: defaultsSuite)
+  /// Output handling mode for commands
+  static let commandOutputMode = Key<CommandOutputMode>("commandOutputMode", default: .silent, suite: defaultsSuite)
+  /// Whether to use interactive mode for shell commands
+  static let useInteractiveShell = Key<Bool>("useInteractiveShell", default: false, suite: defaultsSuite)
+  /// Custom shell arguments
+  static let customShellArguments = Key<String>("customShellArguments", default: "", suite: defaultsSuite)
+  /// Pre-command hook - runs before the main command
+  static let preCommandHook = Key<String>("preCommandHook", default: "", suite: defaultsSuite)
+  /// Post-command hook - runs after the main command
+  static let postCommandHook = Key<String>("postCommandHook", default: "", suite: defaultsSuite)
+  /// Whether to enable command hooks
+  static let enableCommandHooks = Key<Bool>("enableCommandHooks", default: false, suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -149,6 +169,67 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
     var isDirectory: ObjCBool = false
     let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
     return exists && !isDirectory.boolValue && fileManager.isExecutableFile(atPath: path)
+  }
+}
+
+enum WorkingDirectoryMode: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case home
+  case config
+  case current
+  case custom
+  
+  var id: Self { self }
+  
+  var description: String {
+    switch self {
+    case .home:
+      return "Home Directory"
+    case .config:
+      return "Config Directory"
+    case .current:
+      return "Current Directory"
+    case .custom:
+      return "Custom Path"
+    }
+  }
+  
+  var path: String {
+    switch self {
+    case .home:
+      return NSHomeDirectory()
+    case .config:
+      return Defaults[.configDir]
+    case .current:
+      return FileManager.default.currentDirectoryPath
+    case .custom:
+      let customPath = Defaults[.customWorkingDirectoryPath]
+      return customPath.isEmpty ? NSHomeDirectory() : customPath
+    }
+  }
+}
+
+enum CommandOutputMode: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case silent
+  case notification
+  case clipboard
+  case log
+  case window
+  
+  var id: Self { self }
+  
+  var description: String {
+    switch self {
+    case .silent:
+      return "Silent (No Output)"
+    case .notification:
+      return "Show as Notification"
+    case .clipboard:
+      return "Copy to Clipboard"
+    case .log:
+      return "Log to Console"
+    case .window:
+      return "Show in Window"
+    }
   }
 }
 

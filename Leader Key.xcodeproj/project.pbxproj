@@ -35,6 +35,7 @@
 		42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */; };
 		425495402D75EFAD0020300E /* ForTheHorde.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4254953F2D75EFAD0020300E /* ForTheHorde.swift */; };
 		426E625B2D2E6A98009FD2F2 /* CommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */; };
+		426E625C2D2E6A99009FD2F2 /* CommandHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426E625B2D2E6A99009FD2F2 /* CommandHistory.swift */; };
 		4279AFED2C6A175500952A83 /* LaunchAtLogin in Frameworks */ = {isa = PBXBuildFile; productRef = 4279AFEC2C6A175500952A83 /* LaunchAtLogin */; };
 		427C17EF2BD311B500955B98 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 427C17EE2BD311B500955B98 /* Assets.xcassets */; };
 		427C17F22BD311B500955B98 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 427C17F12BD311B500955B98 /* Preview Assets.xcassets */; };
@@ -109,6 +110,7 @@
 		42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidatorTests.swift; sourceTree = "<group>"; };
 		4254953F2D75EFAD0020300E /* ForTheHorde.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ForTheHorde.swift; sourceTree = "<group>"; };
 		426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRunner.swift; sourceTree = "<group>"; };
+		426E625B2D2E6A99009FD2F2 /* CommandHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHistory.swift; sourceTree = "<group>"; };
 		4279AFEA2C6A08B100952A83 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = "Leader Key/Support/Info.plist"; sourceTree = SOURCE_ROOT; };
 		427C17E72BD311B400955B98 /* Leader Key.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Leader Key.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		427C17EE2BD311B500955B98 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -223,6 +225,7 @@
 				427C181F2BD31C3D00955B98 /* AppDelegate.swift */,
 				42F4CDCE2D46E2B300D0DD76 /* Cheatsheet.swift */,
 				426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */,
+				426E625B2D2E6A99009FD2F2 /* CommandHistory.swift */,
 				427C181B2BD314B500955B98 /* Constants.swift */,
 				427C18272BD31E2E00955B98 /* Controller.swift */,
 				427C184C2BD65C5C00955B98 /* Defaults.swift */,
@@ -500,6 +503,7 @@
 				263613962E3F202B0078036F /* UserConfig+Metadata.swift in Sources */,
 				427C182D2BD31F9500955B98 /* Settings.swift in Sources */,
 				426E625B2D2E6A98009FD2F2 /* CommandRunner.swift in Sources */,
+				426E625C2D2E6A99009FD2F2 /* CommandHistory.swift in Sources */,
 				427C18382BD3262100955B98 /* VisualEffectBackground.swift in Sources */,
 				42B21FBC2D67566100F4A2C7 /* Alerts.swift in Sources */,
 				427C183B2BD329F900955B98 /* UserConfig.swift in Sources */,

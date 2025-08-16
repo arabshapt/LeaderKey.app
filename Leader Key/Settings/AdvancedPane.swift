@@ -27,9 +27,22 @@ struct AdvancedPane: View {
   @Default(.commandShellPreference) var commandShellPreference
   @Default(.loadShellRCFiles) var loadShellRCFiles
   @Default(.customShellPath) var customShellPath
+  @Default(.commandEnvironmentVariables) var commandEnvironmentVariables
+  @Default(.commandWorkingDirectory) var commandWorkingDirectory
+  @Default(.customWorkingDirectoryPath) var customWorkingDirectoryPath
+  @Default(.commandTimeoutSeconds) var commandTimeoutSeconds
+  @Default(.commandOutputMode) var commandOutputMode
+  @Default(.useInteractiveShell) var useInteractiveShell
+  @Default(.customShellArguments) var customShellArguments
+  @Default(.preCommandHook) var preCommandHook
+  @Default(.postCommandHook) var postCommandHook
+  @Default(.enableCommandHooks) var enableCommandHooks
 
   @State private var hasAccessibilityPermissions = false
   @State private var isCustomShellValid = false
+  @State private var newEnvKey = ""
+  @State private var newEnvValue = ""
+  @State private var isCustomWorkingDirValid = true
 
   var body: some View {
     ScrollView {
@@ -360,77 +373,263 @@ struct AdvancedPane: View {
       }
 
       Settings.Section(title: "Command Execution", bottomDivider: true) {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+          // Shell Selection
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Shell:")
+              Picker("", selection: $commandShellPreference) {
+                ForEach(ShellPreference.allCases) { shell in
+                  Text(shell.description).tag(shell)
+                }
+              }
+              .frame(width: 200)
+              .labelsHidden()
+            }
+            
+            // Show custom shell path field when Custom is selected
+            if commandShellPreference == .custom {
+              HStack {
+                Text("Path:")
+                TextField("e.g., /opt/homebrew/bin/fish", text: $customShellPath)
+                  .textFieldStyle(.roundedBorder)
+                  .frame(width: 300)
+                  .onChange(of: customShellPath) { newPath in
+                    isCustomShellValid = ShellPreference.isValidShellPath(newPath)
+                  }
+                
+                // Validation indicator
+                if !customShellPath.isEmpty {
+                  Image(systemName: isCustomShellValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(isCustomShellValid ? .green : .orange)
+                    .help(isCustomShellValid ? "Valid shell executable" : "Invalid or non-executable path")
+                }
+                
+                Button("Browse…") {
+                  let panel = NSOpenPanel()
+                  panel.allowsMultipleSelection = false
+                  panel.canChooseDirectories = false
+                  panel.canChooseFiles = true
+                  panel.directoryURL = URL(fileURLWithPath: "/")
+                  panel.message = "Select a shell executable"
+                  
+                  if panel.runModal() == .OK, let url = panel.url {
+                    customShellPath = url.path
+                    isCustomShellValid = ShellPreference.isValidShellPath(customShellPath)
+                  }
+                }
+              }
+              
+              if !customShellPath.isEmpty && !isCustomShellValid {
+                Text("The specified path is not a valid executable. Commands will fall back to the system shell.")
+                  .font(.caption)
+                  .foregroundColor(.orange)
+              }
+            }
+          }
+          
+          // Shell Configuration
+          VStack(alignment: .leading, spacing: 8) {
+            Defaults.Toggle(
+              "Load shell configuration files (RC files)",
+              key: .loadShellRCFiles
+            )
+            .help("When enabled, commands run with login shell mode to load .zshrc, .bashrc, and other shell configuration files")
+            
+            Defaults.Toggle(
+              "Use interactive shell mode",
+              key: .useInteractiveShell
+            )
+            .help("Enable interactive mode (-i flag) for commands that require TTY or user input")
+            
+            HStack {
+              Text("Custom arguments:")
+              TextField("e.g., --noprofile", text: $customShellArguments)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .help("Additional shell arguments (space-separated)")
+            }
+          }
+          
+          Divider()
+          
+          // Working Directory
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Working Directory:")
+              Picker("", selection: $commandWorkingDirectory) {
+                ForEach(WorkingDirectoryMode.allCases) { mode in
+                  Text(mode.description).tag(mode)
+                }
+              }
+              .frame(width: 180)
+              .labelsHidden()
+            }
+            
+            if commandWorkingDirectory == .custom {
+              HStack {
+                Text("Path:")
+                TextField("e.g., /Users/name/projects", text: $customWorkingDirectoryPath)
+                  .textFieldStyle(.roundedBorder)
+                  .frame(width: 300)
+                  .onChange(of: customWorkingDirectoryPath) { newPath in
+                    let fm = FileManager.default
+                    var isDir: ObjCBool = false
+                    isCustomWorkingDirValid = fm.fileExists(atPath: newPath, isDirectory: &isDir) && isDir.boolValue
+                  }
+                
+                if !customWorkingDirectoryPath.isEmpty {
+                  Image(systemName: isCustomWorkingDirValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(isCustomWorkingDirValid ? .green : .orange)
+                    .help(isCustomWorkingDirValid ? "Valid directory" : "Directory does not exist")
+                }
+                
+                Button("Browse…") {
+                  let panel = NSOpenPanel()
+                  panel.allowsMultipleSelection = false
+                  panel.canChooseDirectories = true
+                  panel.canChooseFiles = false
+                  panel.message = "Select working directory"
+                  
+                  if panel.runModal() == .OK, let url = panel.url {
+                    customWorkingDirectoryPath = url.path
+                  }
+                }
+              }
+            }
+          }
+          
+          // Command Timeout
           HStack {
-            Text("Shell:")
-            Picker("", selection: $commandShellPreference) {
-              ForEach(ShellPreference.allCases) { shell in
-                Text(shell.description).tag(shell)
+            Text("Command timeout:")
+            TextField("", value: $commandTimeoutSeconds, formatter: NumberFormatter())
+              .frame(width: 60)
+              .textFieldStyle(.roundedBorder)
+            Text("seconds (0 = no timeout)")
+            Spacer()
+          }
+          
+          // Output Handling
+          HStack {
+            Text("Output handling:")
+            Picker("", selection: $commandOutputMode) {
+              ForEach(CommandOutputMode.allCases) { mode in
+                Text(mode.description).tag(mode)
               }
             }
             .frame(width: 200)
             .labelsHidden()
           }
           
-          // Show custom shell path field when Custom is selected
-          if commandShellPreference == .custom {
+          Divider()
+          
+          // Environment Variables
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Environment Variables:")
+              .font(.subheadline)
+              .fontWeight(.medium)
+            
+            // Display existing environment variables
+            ForEach(Array(commandEnvironmentVariables.keys.sorted()), id: \.self) { key in
+              HStack {
+                Text(key)
+                  .frame(width: 120, alignment: .leading)
+                  .lineLimit(1)
+                Text("=")
+                  .foregroundColor(.secondary)
+                Text(commandEnvironmentVariables[key] ?? "")
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+                Spacer()
+                Button(action: {
+                  commandEnvironmentVariables.removeValue(forKey: key)
+                }) {
+                  Image(systemName: "minus.circle.fill")
+                    .foregroundColor(.red)
+                }
+                .buttonStyle(BorderlessButtonStyle())
+                .help("Remove this environment variable")
+              }
+              .padding(.vertical, 2)
+            }
+            
+            // Add new environment variable
             HStack {
-              Text("Path:")
-              TextField("e.g., /opt/homebrew/bin/fish", text: $customShellPath)
+              TextField("Name", text: $newEnvKey)
+                .frame(width: 120)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 300)
-                .onChange(of: customShellPath) { newPath in
-                  isCustomShellValid = ShellPreference.isValidShellPath(newPath)
+              Text("=")
+                .foregroundColor(.secondary)
+              TextField("Value", text: $newEnvValue)
+                .textFieldStyle(.roundedBorder)
+              Button(action: {
+                if !newEnvKey.isEmpty && !newEnvValue.isEmpty {
+                  commandEnvironmentVariables[newEnvKey] = newEnvValue
+                  newEnvKey = ""
+                  newEnvValue = ""
                 }
-              
-              // Validation indicator
-              if !customShellPath.isEmpty {
-                Image(systemName: isCustomShellValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                  .foregroundColor(isCustomShellValid ? .green : .orange)
-                  .help(isCustomShellValid ? "Valid shell executable" : "Invalid or non-executable path")
+              }) {
+                Image(systemName: "plus.circle.fill")
+                  .foregroundColor(.green)
               }
-              
-              Button("Browse…") {
-                let panel = NSOpenPanel()
-                panel.allowsMultipleSelection = false
-                panel.canChooseDirectories = false
-                panel.canChooseFiles = true
-                panel.directoryURL = URL(fileURLWithPath: "/")
-                panel.message = "Select a shell executable"
-                
-                if panel.runModal() == .OK, let url = panel.url {
-                  customShellPath = url.path
-                  isCustomShellValid = ShellPreference.isValidShellPath(customShellPath)
-                }
-              }
+              .buttonStyle(BorderlessButtonStyle())
+              .disabled(newEnvKey.isEmpty || newEnvValue.isEmpty)
+              .help("Add environment variable")
             }
             
-            if !customShellPath.isEmpty && !isCustomShellValid {
-              Text("The specified path is not a valid executable. Commands will fall back to the system shell.")
-                .font(.caption)
-                .foregroundColor(.orange)
-            }
-            
-            Text("Common custom shell paths: /opt/homebrew/bin/fish, /usr/local/bin/zsh, /opt/homebrew/bin/nu")
+            Text("Environment variables are passed to all command executions")
               .font(.caption)
               .foregroundColor(.secondary)
           }
           
-          Defaults.Toggle(
-            "Load shell configuration files",
-            key: .loadShellRCFiles
-          )
-          .help("When enabled, commands run with login shell mode to load .zshrc, .bashrc, and other shell configuration files")
+          Divider()
           
-          Text("Shell configuration files provide access to aliases, custom functions, and environment variables defined in your shell's RC files.")
-            .font(.callout)
-            .foregroundColor(.secondary)
-            .padding(.top, 4)
+          // Command Hooks
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Defaults.Toggle("Enable command hooks", key: .enableCommandHooks)
+                .help("Run custom commands before and after each command execution")
+              Spacer()
+            }
+            
+            if enableCommandHooks {
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Pre-command:")
+                    .frame(width: 100, alignment: .leading)
+                  TextField("e.g., source ~/.profile", text: $preCommandHook)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Command to run before the main command")
+                }
+                
+                HStack {
+                  Text("Post-command:")
+                    .frame(width: 100, alignment: .leading)
+                  TextField("e.g., echo 'Done'", text: $postCommandHook)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Command to run after the main command")
+                }
+                
+                Text("Hooks run in the same shell session. Use $COMMAND to reference the main command in hooks.")
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+                
+                Text("Example: Pre: 'export PATH=/custom/bin:$PATH', Post: 'notify-send \"Command completed\"'")
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+              }
+            }
+          }
         }
         .onAppear {
-          // Validate custom shell path on view appear
+          // Validate custom paths on view appear
           if commandShellPreference == .custom {
             isCustomShellValid = ShellPreference.isValidShellPath(customShellPath)
+          }
+          if commandWorkingDirectory == .custom {
+            let fm = FileManager.default
+            var isDir: ObjCBool = false
+            isCustomWorkingDirValid = fm.fileExists(atPath: customWorkingDirectoryPath, isDirectory: &isDir) && isDir.boolValue
           }
         }
       }
