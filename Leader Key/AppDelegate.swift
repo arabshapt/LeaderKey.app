@@ -243,13 +243,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
-    print("[AppDelegate] applicationWillTerminate: Stopping event tap and saving config...")
-    stopEventTapMonitoring() // Defined in Event Tap Handling extension
-    config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
-    stateRecoveryTimer?.invalidate() // Stop state recovery timer
-    eventTapHealthTimer?.invalidate() // Stop event tap health timer
-    permissionPollingTimer?.invalidate() // Stop permission polling timer
-    print("[AppDelegate] applicationWillTerminate completed.")
+    print("[AppDelegate] applicationWillTerminate: Starting comprehensive cleanup...")
+    
+    // 1. Stop all timers
+    stateRecoveryTimer?.invalidate()
+    eventTapHealthTimer?.invalidate()
+    permissionPollingTimer?.invalidate()
+    cpuMonitorTimer?.invalidate()
+    
+    // 2. Clean up ThreadOptimization timers
+    ThreadOptimization.cleanupAllTimers()
+    
+    // 3. Stop event tap monitoring
+    stopEventTapMonitoring()
+    
+    // 4. Clean up controller resources
+    controller?.cleanup()
+    
+    // 5. Save configuration
+    config.saveCurrentlyEditingConfig()
+    
+    // 6. Clear all caches to free memory
+    config.configCache.clearCache()
+    ViewSizeCache.shared.clear()
+    KingfisherManager.shared.cache.clearMemoryCache()
+    KingfisherManager.shared.cache.clearDiskCache()
+    
+    // 7. Clear error history
+    ErrorHistory.shared.clear()
+    
+    // 8. Stop file monitor
+    fileMonitor?.stopMonitoring()
+    
+    // 9. Unregister keyboard shortcuts
+    KeyboardShortcuts.disable(.activateDefaultOnly)
+    KeyboardShortcuts.disable(.activateAppSpecific)
+    KeyboardShortcuts.disable(.forceReset)
+    
+    print("[AppDelegate] applicationWillTerminate: Cleanup completed.")
   }
   
   // MARK: - State Recovery
@@ -349,7 +380,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       config.loadConfigForEditing(key: configKeyToFocus)
       
       // Store the navigation path to be used after config loads
-      let userStateNavigationPath = controller.userState.navigationPath
+      let userStateNavigationPath = MainActor.assumeIsolated {
+          controller.userState.navigationPath
+      }
       let hasNavigationPath = !userStateNavigationPath.isEmpty
       if hasNavigationPath {
           print("[AppDelegate] User has navigation path with \(userStateNavigationPath.count) groups to restore")
@@ -425,40 +458,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Determine which config to focus on based on current state
     private func determineConfigToFocus() -> String {
-        // First check if UserState has a stored config key
-        if let activeConfigKey = controller.userState.activeConfigKey {
-            print("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
-            return activeConfigKey
-        }
-        
-        // Fallback: check if we have an active sequence state
-        if let activeRoot = self.activeRootGroup {
-            print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
-            return findConfigKeyForGroup(activeRoot)
-        }
-
-        // Check if the Controller's UserState has an active root (without stored key)
-        if let userStateActiveRoot = controller.userState.activeRoot {
-            print("[AppDelegate] Using UserState activeRoot to determine config")
-            return findConfigKeyForGroup(userStateActiveRoot)
-        }
-
-        // Check frontmost application to determine if we should use app-specific config
-        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-           let bundleId = frontmostApp.bundleIdentifier {
-            print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
-
-            // Check if an app-specific config exists for this bundle ID
-            let appConfig = config.getConfig(for: bundleId)
-            // If the returned config is not the default root, then an app-specific config exists
-            if !areGroupsEqual(appConfig, config.root) {
-                return findConfigKeyForGroup(appConfig)
+        // Use MainActor.assumeIsolated for synchronous access
+        return MainActor.assumeIsolated {
+            // First check if UserState has a stored config key
+            if let activeConfigKey = controller.userState.activeConfigKey {
+                print("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
+                return activeConfigKey
             }
-        }
+            
+            // Fallback: check if we have an active sequence state
+            if let activeRoot = self.activeRootGroup {
+                print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
+                return findConfigKeyForGroup(activeRoot)
+            }
 
-        // Default fallback - use global default
-        print("[AppDelegate] Falling back to global default config")
-        return globalDefaultDisplayName
+            // Check if the Controller's UserState has an active root (without stored key)
+            if let userStateActiveRoot = controller.userState.activeRoot {
+                print("[AppDelegate] Using UserState activeRoot to determine config")
+                return findConfigKeyForGroup(userStateActiveRoot)
+            }
+
+            // Check frontmost application to determine if we should use app-specific config
+            if let frontmostApp = NSWorkspace.shared.frontmostApplication,
+               let bundleId = frontmostApp.bundleIdentifier {
+                print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
+
+                // Check if an app-specific config exists for this bundle ID
+                let appConfig = config.getConfig(for: bundleId)
+                // If the returned config is not the default root, then an app-specific config exists
+                if !areGroupsEqual(appConfig, config.root) {
+                    return findConfigKeyForGroup(appConfig)
+                }
+            }
+
+            // Default fallback - use global default
+            print("[AppDelegate] Falling back to global default config")
+            return globalDefaultDisplayName
+        }
     }
 
     // Find the configuration key for a given Group
@@ -595,7 +631,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Build navigation path from UserState's navigationPath to indices (legacy method kept for compatibility)
     private func buildNavigationPath() -> [Int]? {
-        let navigationPath = controller.userState.navigationPath
+        let navigationPath = MainActor.assumeIsolated {
+            controller.userState.navigationPath
+        }
         guard !navigationPath.isEmpty else {
             return nil
         }
@@ -755,7 +793,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   controller.window.orderFront(nil) // Just bring to front without making key
               }
               // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
-              controller.userState.clear()
+              MainActor.assumeIsolated {
+                  controller.userState.clear()
+              }
               self.currentSequenceGroup = nil
               self.activeRootGroup = nil
               self.stickyModeToggled = false
@@ -772,7 +812,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
                   newRoot = self.config.getConfig(for: configKey)
                 }
-                self.controller.userState.activeRoot = newRoot
+                MainActor.assumeIsolated {
+                    self.controller.userState.activeRoot = newRoot
+                }
               }
               print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
               controller.repositionWindowNearMouse()
@@ -1609,7 +1651,8 @@ extension AppDelegate {
 
         // Get the root group determined by the show() method via the controller's UserState
         // UserState.activeRoot should have been set by Controller.show() just before this.
-        guard let rootGroup = controller.userState.activeRoot else {
+        let rootGroup = MainActor.assumeIsolated { controller.userState.activeRoot }
+        guard let rootGroup = rootGroup else {
             // This should ideally not happen if Controller.show() worked correctly.
             print("[AppDelegate] startSequence: ERROR - controller.userState.activeRoot is nil! Falling back to default config root.")
             // Fallback logic, though this indicates a potential issue elsewhere

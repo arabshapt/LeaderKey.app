@@ -2,6 +2,8 @@ import Combine
 import Foundation
 import SwiftUI
 
+/// Thread-safe user state management
+@MainActor
 final class UserState: ObservableObject {
   var userConfig: UserConfig!
 
@@ -10,6 +12,9 @@ final class UserState: ObservableObject {
   @Published var navigationPath: [Group] = []
   @Published var activeRoot: Group? // Root group for the current context (app-specific or default)
   var activeConfigKey: String? // The config key that was used to load activeRoot
+  
+  // State snapshot for debugging
+  private var lastSnapshot: StateSnapshot?
 
   var currentGroup: Group? {
     return navigationPath.last
@@ -25,19 +30,36 @@ final class UserState: ObservableObject {
     self.isShowingRefreshState = isShowingRefreshState
     self.navigationPath = []
     self.activeRoot = userConfig.root // Initialize with default root
+    createSnapshot()
   }
 
   func clear() {
+    // Validate state before clearing
+    validateState()
+    
     display = nil
     navigationPath = []
     isShowingRefreshState = false
     // Reset activeRoot to the default when clearing
     activeRoot = userConfig.root
     activeConfigKey = nil
+    
+    createSnapshot()
   }
 
   func navigateToGroup(_ group: Group) {
-    navigationPath.append(group)
+    // Validate navigation is allowed
+    let validation = StateValidator.validateNavigation(
+      navigationPath: navigationPath,
+      activeRoot: activeRoot,
+      currentGroup: currentGroup
+    )
+    validation.log(context: "navigateToGroup")
+    
+    if validation.isValid {
+      navigationPath.append(group)
+      createSnapshot()
+    }
   }
 
   // Navigate to a group by building the full path to it
@@ -75,6 +97,50 @@ final class UserState: ObservableObject {
           return
         }
       }
+    }
+  }
+  
+  // MARK: - State Management
+  
+  /// Create a snapshot of current state
+  private func createSnapshot() {
+    lastSnapshot = StateValidator.createStateSnapshot(
+      windowVisible: false, // Will be set by controller
+      navigationDepth: navigationPath.count,
+      heldModifiers: 0, // Will be set by controller
+      activeConfig: activeConfigKey,
+      timestamp: Date()
+    )
+  }
+  
+  /// Validate current state consistency
+  private func validateState() {
+    let validation = StateValidator.validateNavigation(
+      navigationPath: navigationPath,
+      activeRoot: activeRoot,
+      currentGroup: currentGroup
+    )
+    
+    if case .failure(let message) = validation {
+      print("[UserState] State validation failed: \(message)")
+      // Auto-recover by clearing navigation
+      navigationPath = []
+    }
+  }
+  
+  /// Get current state snapshot for debugging
+  func getSnapshot() -> StateSnapshot? {
+    return lastSnapshot
+  }
+  
+  /// Update active root with validation
+  func setActiveRoot(_ root: Group?, configKey: String?) {
+    // Validate transition
+    if let newRoot = root {
+      activeRoot = newRoot
+      activeConfigKey = configKey
+      navigationPath = [] // Clear navigation when changing root
+      createSnapshot()
     }
   }
 }

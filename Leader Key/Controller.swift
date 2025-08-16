@@ -52,12 +52,16 @@ class Controller {
       case .didReload:
         // This should all be handled by the themes
         ViewSizeCache.shared.clear() // invalidate cached sizes when config changes
-        self.userState.isShowingRefreshState = true
+        MainActor.assumeIsolated {
+          self.userState.isShowingRefreshState = true
+        }
         self.show()
         // Delay for 4 * 300ms to wait for animation to be noticeable
         delay(Int(Pulsate.singleDurationS * 1000) * 3) {
           self.hide()
-          self.userState.isShowingRefreshState = false
+          MainActor.assumeIsolated {
+            self.userState.isShowingRefreshState = false
+          }
         }
       default: break
       }
@@ -117,8 +121,10 @@ class Controller {
     // Now send activation events after detection is complete
     Events.send(.willActivate)
 
-    userState.activeRoot = configToLoad // Update UserState with the selected config
-    userState.activeConfigKey = configKeyForSettings // Store the config key for settings
+    MainActor.assumeIsolated {
+      userState.activeRoot = configToLoad // Update UserState with the selected config
+      userState.activeConfigKey = configKeyForSettings // Store the config key for settings
+    }
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
     var calculatedOrigin: NSPoint? // Store calculated origin
@@ -175,7 +181,7 @@ class Controller {
         self.window.ignoresMouseEvents = Defaults[.panelClickThrough]
     }
 
-    if !window.hasCheatsheet || userState.isShowingRefreshState {
+    if !window.hasCheatsheet || MainActor.assumeIsolated({ userState.isShowingRefreshState }) {
       return
     }
 
@@ -267,10 +273,11 @@ class Controller {
     }
 
     // Use the activeRoot from UserState, fallback to default userConfig.root if needed
-    let activeList = userState.activeRoot ?? userConfig.root
-    let list =
+    let activeList = MainActor.assumeIsolated { userState.activeRoot } ?? userConfig.root
+    let list = MainActor.assumeIsolated {
       (userState.currentGroup != nil)
       ? userState.currentGroup : activeList // Start search from active root
+    }
 
     let hit = list?.actions.first { item in
       switch item {
@@ -311,8 +318,10 @@ class Controller {
           }
         }
 
-        userState.display = group.key
-        userState.navigateToGroup(group)
+        MainActor.assumeIsolated {
+          userState.display = group.key
+          userState.navigateToGroup(group)
+        }
       }
     case .none:
       window.notFound()
@@ -504,7 +513,9 @@ class Controller {
   }
 
   private func clear() {
-    userState.clear() // This now also resets activeRoot in UserState
+    MainActor.assumeIsolated {
+      userState.clear() // This now also resets activeRoot in UserState
+    }
   }
 
   // --- Repositioning Function --- START ---
@@ -1197,6 +1208,35 @@ class Controller {
       return flags
   }
   // --- Shortcut Execution Helpers --- END ---
+  
+  // MARK: - Cleanup
+  
+  /// Clean up resources when app is terminating
+  func cleanup() {
+    print("[Controller] Starting cleanup...")
+    
+    // 1. Invalidate timers
+    cheatsheetTimer?.invalidate()
+    cheatsheetTimer = nil
+    
+    // 2. Cancel all Combine subscriptions
+    cancellables.removeAll()
+    
+    // 3. Release held modifiers if any
+    releaseAllHeldModifiers()
+    
+    // 4. Hide windows
+    window.hide(after: nil)
+    cheatsheetWindow?.close()
+    cheatsheetWindow = nil
+    
+    // 5. Clear state
+    MainActor.assumeIsolated {
+      userState.clear()
+    }
+    
+    print("[Controller] Cleanup completed")
+  }
 }
 
 class DontActivateConfiguration {

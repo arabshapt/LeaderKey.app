@@ -51,9 +51,42 @@ enum ThreadOptimization {
         repeats: false
       ) { _ in
         executeOnMain(action)
+        // Clean up timer reference after execution
+        debounceQueue.async {
+          debounceTimers.removeValue(forKey: identifier)
+        }
       }
       debounceTimers[identifier] = timer
       RunLoop.current.add(timer, forMode: .common)
+    }
+  }
+
+  /// Clean up all pending debounce timers
+  static func cleanupAllTimers() {
+    debounceQueue.async {
+      for (_, timer) in debounceTimers {
+        timer.invalidate()
+      }
+      debounceTimers.removeAll()
+      print("[ThreadOptimization] Cleaned up \(debounceTimers.count) timers")
+    }
+  }
+
+  /// Clean up a specific timer
+  static func cleanupTimer(identifier: String) {
+    debounceQueue.async {
+      if let timer = debounceTimers[identifier] {
+        timer.invalidate()
+        debounceTimers.removeValue(forKey: identifier)
+        print("[ThreadOptimization] Cleaned up timer: \(identifier)")
+      }
+    }
+  }
+
+  /// Get count of active timers (for debugging)
+  static func activeTimerCount() -> Int {
+    debounceQueue.sync {
+      return debounceTimers.count
     }
   }
 }
