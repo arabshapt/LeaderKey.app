@@ -30,9 +30,9 @@
 		423632282D6A806700878D92 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632272D6A806700878D92 /* Theme.swift */; };
 		42454DDB2D71CB39004E1374 /* ConfigValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDA2D71CB39004E1374 /* ConfigValidator.swift */; };
 		42454DDC2E71CB39004E1376 /* ConfigCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDB2E71CB39004E1375 /* ConfigCache.swift */; };
+		42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */; };
 		42454DDE2E71CB39004E1378 /* ThreadOptimization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDD2E71CB39004E1377 /* ThreadOptimization.swift */; };
 		42454DE02E71CB39004E1380 /* StateValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDF2E71CB39004E1379 /* StateValidator.swift */; };
-		42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */; };
 		425495402D75EFAD0020300E /* ForTheHorde.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4254953F2D75EFAD0020300E /* ForTheHorde.swift */; };
 		426E625B2D2E6A98009FD2F2 /* CommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */; };
 		426E625C2D2E6A99009FD2F2 /* CommandHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426E625B2D2E6A99009FD2F2 /* CommandHistory.swift */; };
@@ -105,9 +105,9 @@
 		423632272D6A806700878D92 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		42454DDA2D71CB39004E1374 /* ConfigValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidator.swift; sourceTree = "<group>"; };
 		42454DDB2E71CB39004E1375 /* ConfigCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigCache.swift; sourceTree = "<group>"; };
+		42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidatorTests.swift; sourceTree = "<group>"; };
 		42454DDD2E71CB39004E1377 /* ThreadOptimization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadOptimization.swift; sourceTree = "<group>"; };
 		42454DDF2E71CB39004E1379 /* StateValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateValidator.swift; sourceTree = "<group>"; };
-		42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidatorTests.swift; sourceTree = "<group>"; };
 		4254953F2D75EFAD0020300E /* ForTheHorde.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ForTheHorde.swift; sourceTree = "<group>"; };
 		426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRunner.swift; sourceTree = "<group>"; };
 		426E625B2D2E6A99009FD2F2 /* CommandHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHistory.swift; sourceTree = "<group>"; };

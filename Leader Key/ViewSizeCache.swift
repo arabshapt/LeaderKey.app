@@ -7,7 +7,7 @@ final class ViewSizeCache {
     static let shared = ViewSizeCache()
     private var cache: [UUID: NSSize] = [:]
     private let lock = NSLock()
-    private let maxEntries = 256
+    private let maxEntries = 64 // Reduced from 256 to 64 for aggressive memory optimization
 
     private init() {}
 

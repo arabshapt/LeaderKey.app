@@ -48,7 +48,7 @@ private struct QueuedKeyEvent {
     let modifiers: NSEvent.ModifierFlags
 }
 
-private let maxQueueSize = 10 // Prevent memory issues with extremely fast typing
+private let maxQueueSize = 5 // Reduced from 10 to prevent memory accumulation
 
 // MARK: - Associated Object Helpers
 
@@ -170,6 +170,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     debugLog("[AppDelegate] applicationDidFinishLaunching: Starting up...")
 
+    // Elevate process priority for maximum responsiveness under system stress
+    elevateProcessPriority()
+    
+    // Initialize critical memory pool with mlock() for ultimate reliability
+    ThreadOptimization.initializeCriticalMemoryPool()
+
     // Setup Notifications
     UNUserNotificationCenter.current().delegate = self // Conformance is in extension
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -195,6 +201,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Configure global image cache to keep memory tight
     configureImageCaching()
+    
+    // Start resource optimization monitoring
+    ThreadOptimization.startResourceOptimization()
+    
+    // Start simple watchdog monitoring
+    startWatchdogMonitoring()
 
     // Check initial permission state
     lastPermissionCheck = checkAccessibilityPermissions()
@@ -251,8 +263,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     permissionPollingTimer?.invalidate()
     cpuMonitorTimer?.invalidate()
     
-    // 2. Clean up ThreadOptimization timers
+    // 2. Clean up ThreadOptimization timers and resource optimization
     ThreadOptimization.cleanupAllTimers()
+    ThreadOptimization.stopResourceOptimization()
     
     // 3. Stop event tap monitoring
     stopEventTapMonitoring()
@@ -280,6 +293,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     KeyboardShortcuts.disable(.activateAppSpecific)
     KeyboardShortcuts.disable(.forceReset)
     
+    // 10. Cleanup critical memory pool
+    ThreadOptimization.cleanupCriticalMemoryPool()
+    
     print("[AppDelegate] applicationWillTerminate: Cleanup completed.")
   }
   
@@ -290,6 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var lastPermissionCheck: Bool? = nil
   private var permissionPollingTimer: Timer?
   private var permissionPollingStartTime: Date?
+  private var lastEventTapActivity = Date()
   
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
@@ -297,9 +314,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       self?.checkAndRecoverWindowState()
     }
     
-    // Check event tap health every 2 seconds by default; this is robust while reducing wakeups
-    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-      self?.checkEventTapHealth()
+    // Start adaptive health checking
+    setupAdaptiveHealthCheck()
+  }
+  
+  /// Setup adaptive health check that increases frequency under system stress
+  private func setupAdaptiveHealthCheck() {
+    // Start with normal interval (2 seconds)
+    scheduleNextHealthCheck(interval: 2.0)
+  }
+  
+  private func scheduleNextHealthCheck(interval: TimeInterval) {
+    eventTapHealthTimer?.invalidate()
+    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+      guard let self = self else { return }
+      
+      // Execute health check with high priority
+      ThreadOptimization.executeRealtime {
+        self.checkEventTapHealth()
+      }
+      
+      // Calculate next interval based on system pressure
+      let nextInterval = self.calculateHealthCheckInterval()
+      self.scheduleNextHealthCheck(interval: nextInterval)
+    }
+  }
+  
+  /// Calculate adaptive health check interval based on system conditions
+  private func calculateHealthCheckInterval() -> TimeInterval {
+    let thermalState = ProcessInfo.processInfo.thermalState
+    let isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    let hasActiveSequence = (currentSequenceGroup != nil || activeRootGroup != nil)
+    
+    // Under stress conditions, check more frequently
+    if thermalState == .critical || thermalState == .serious {
+      return 0.1 // 100ms under critical thermal stress
+    } else if isLowPowerMode || !isMonitoring {
+      return 0.5 // 500ms when not monitoring or in low power mode
+    } else if hasActiveSequence {
+      return 0.2 // 200ms when user is actively using Leader Key
+    } else {
+      return 2.0 // Normal 2-second interval
     }
   }
   
@@ -356,9 +411,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // First stop the existing tap
     stopEventTapMonitoring()
     
-    // Hide any stuck window
+    // Hide any stuck window - must run on main thread for UI safety
     if controller?.window.isVisible == true {
-      hide()
+      ThreadOptimization.executeOnMain {
+        self.hide()
+      }
     }
     
     // Restart after a brief delay to ensure cleanup
@@ -695,6 +752,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Convenience method to hide the main Leader Key window
     func hide() {
+      // Thread safety guard - UI operations must run on main thread
+      guard Thread.isMainThread else {
+        print("[AppDelegate] hide() called from background thread - dispatching to main thread")
+        ThreadOptimization.executeOnMain {
+          self.hide()
+        }
+        return
+      }
+      
       print("[AppDelegate] hide() called.") // Log entry into hide()
 
       controller.hide(afterClose: { [weak self] in
@@ -935,13 +1001,1114 @@ private extension AppDelegate {
     }
 
     func configureImageCaching() {
-        // Kingfisher: reduce memory footprint and avoid caching huge originals
+        // Kingfisher: aggressive memory reduction for ultimate efficiency (<50MB target)
         let cache = KingfisherManager.shared.cache
-        cache.memoryStorage.config.totalCostLimit = 25 * 1024 * 1024 // ~25MB in-RAM images
-        cache.memoryStorage.config.countLimit = 1024
+        cache.memoryStorage.config.totalCostLimit = 5 * 1024 * 1024 // Reduced from 25MB to 5MB
+        cache.memoryStorage.config.countLimit = 256 // Reduced from 1024 to 256 items
         cache.memoryStorage.config.expiration = .seconds(600)
         cache.diskStorage.config.sizeLimit = 100 * 1024 * 1024 // 100MB on disk
         cache.diskStorage.config.expiration = .days(14)
+    }
+    
+    /// Elevate process priority for maximum responsiveness under system stress
+    func elevateProcessPriority() {
+        // Set process nice value to highest priority (-20)
+        let currentNice = getpriority(PRIO_PROCESS, 0)
+        print("[AppDelegate] Current nice value: \(currentNice)")
+        
+        let result = setpriority(PRIO_PROCESS, 0, -20)
+        if result == 0 {
+            let newNice = getpriority(PRIO_PROCESS, 0)
+            print("[AppDelegate] Successfully set nice value: \(newNice)")
+        } else {
+            // Try a moderate approach
+            let moderateResult = setpriority(PRIO_PROCESS, 0, -10)
+            if moderateResult == 0 {
+                let newNice = getpriority(PRIO_PROCESS, 0)
+                print("[AppDelegate] Set moderate nice value: \(newNice)")
+            } else {
+                print("[AppDelegate] Failed to adjust nice value. Error: \(errno)")
+            }
+        }
+        
+        // Set main thread to high priority
+        let originalPriority = Thread.current.threadPriority
+        Thread.current.threadPriority = 1.0
+        print("[AppDelegate] Set main thread priority from \(originalPriority) to 1.0")
+        
+        // Advanced: Set real-time scheduling for ultimate priority
+        setRealtimeScheduling()
+    }
+    
+    /// Set real-time scheduling for ultimate system priority
+    private func setRealtimeScheduling() {
+        // Get current thread
+        let thread = mach_thread_self()
+        
+        // Set time constraint policy for real-time scheduling
+        var timeConstraintPolicy = thread_time_constraint_policy_data_t()
+        timeConstraintPolicy.period = 0 // No specific period
+        timeConstraintPolicy.computation = 1000 // 1ms of computation time
+        timeConstraintPolicy.constraint = 2000 // 2ms constraint
+        timeConstraintPolicy.preemptible = 1 // Allow preemption
+        
+        let policyResult = withUnsafeMutablePointer(to: &timeConstraintPolicy) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: MemoryLayout<thread_time_constraint_policy_data_t>.size / MemoryLayout<integer_t>.size) {
+                thread_policy_set(
+                    thread,
+                    thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY),
+                    $0,
+                    mach_msg_type_number_t(4) // THREAD_TIME_CONSTRAINT_POLICY_COUNT = 4
+                )
+            }
+        }
+        
+        if policyResult == KERN_SUCCESS {
+            print("[AppDelegate] Successfully set real-time scheduling policy")
+        } else {
+            print("[AppDelegate] Failed to set real-time scheduling. Error: \(policyResult)")
+            
+            // Fallback: Try setting extended policy for high priority
+            setExtendedPolicy()
+        }
+    }
+    
+    /// Fallback: Set extended thread policy for high priority
+    private func setExtendedPolicy() {
+        let thread = mach_thread_self()
+        
+        var extendedPolicy = thread_extended_policy_data_t()
+        extendedPolicy.timeshare = 0 // Non-timeshare (higher priority)
+        
+        let extResult = withUnsafeMutablePointer(to: &extendedPolicy) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: MemoryLayout<thread_extended_policy_data_t>.size / MemoryLayout<integer_t>.size) {
+                thread_policy_set(
+                    thread,
+                    thread_policy_flavor_t(THREAD_EXTENDED_POLICY),
+                    $0,
+                    mach_msg_type_number_t(1) // THREAD_EXTENDED_POLICY_COUNT = 1
+                )
+            }
+        }
+        
+        if extResult == KERN_SUCCESS {
+            print("[AppDelegate] Successfully set extended thread policy")
+        } else {
+            print("[AppDelegate] Failed to set extended thread policy. Error: \(extResult)")
+        }
+    }
+    
+    // MARK: - Simple Watchdog Monitoring
+    
+    func startWatchdogMonitoring() {
+        // Simplified watchdog that checks for stuck states every 30 seconds (reduced from 10s to save memory)
+        Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            self?.performWatchdogCheck()
+        }
+        print("[AppDelegate] Started simplified watchdog monitoring (30s interval)")
+    }
+    
+    func updateEventTapActivity() {
+        lastEventTapActivity = Date()
+    }
+    
+    private func performWatchdogCheck() {
+        let inactivityDuration = Date().timeIntervalSince(lastEventTapActivity)
+        
+        // If event tap has been inactive for > 60 seconds (increased from 30s) and we should be monitoring
+        if inactivityDuration > 60.0 && isMonitoring {
+            print("[AppDelegate] Watchdog detected inactive event tap for \(inactivityDuration)s")
+            
+            // Attempt recovery - separate UI from non-UI operations for thread safety
+            ThreadOptimization.executeOnMain {
+                self.hide()
+            }
+            
+            ThreadOptimization.executeRealtime {
+                self.forceResetState()
+                self.restartEventTap()
+            }
+        }
+        
+        // Proactive memory monitoring with aggressive cleanup thresholds
+        let currentMemory = ThreadOptimization.getCurrentMemoryUsage()
+        
+        if currentMemory > 50 { // Lowered threshold from 100MB to 50MB for proactive monitoring
+            print("[AppDelegate] Watchdog: Memory usage \(currentMemory)MB")
+            
+            if currentMemory > 100 { // Emergency threshold - simplified cleanup
+                print("[AppDelegate] 🚨 High memory: \(currentMemory)MB - performing emergency cleanup")
+                ThreadOptimization.emergencyCleanup()
+            } else if currentMemory > 75 { // Aggressive cleanup threshold
+                print("[AppDelegate] ⚠️ Elevated memory: \(currentMemory)MB - performing aggressive cleanup")
+                ThreadOptimization.aggressiveCleanup()
+            } else if currentMemory > 50 { // Proactive cleanup threshold
+                print("[AppDelegate] 💡 Memory approaching limit: \(currentMemory)MB - performing proactive cleanup")
+                ThreadOptimization.proactiveCleanup()
+            }
+        }
+    }
+    
+}
+
+// MARK: - Performance Testing
+extension AppDelegate {
+    @objc func runQuickStressTest(_ sender: Any?) {
+        runStressTest(name: "Quick Test", cpuThreads: 4, memoryMB: 500, duration: 30.0)
+    }
+    
+    @objc func runNodeJSStressTest(_ sender: Any?) {
+        showAlert(title: "NodeJS Workload Test", message: "Simulating NodeJS heavy workload: async I/O, event loop saturation, GC pressure. Testing Leader Key responsiveness...")
+        runNodeJSRealisticWorkload()
+    }
+    
+    @objc func runIntelliJStressTest(_ sender: Any?) {
+        showAlert(title: "IntelliJ Workload Test", message: "Simulating IntelliJ heavy operations: indexing, compilation, large file processing. Testing Leader Key responsiveness...")
+        runIntelliJRealisticWorkload()
+    }
+    
+    @objc func runComprehensiveStressTests(_ sender: Any?) {
+        showAlert(title: "Comprehensive Tests", message: "Running all stress test scenarios. This will take about 10 minutes.")
+        runStressTest(name: "Light", cpuThreads: 2, memoryMB: 100, duration: 20.0) {
+            self.runStressTest(name: "Moderate", cpuThreads: 4, memoryMB: 500, duration: 30.0) {
+                self.runStressTest(name: "Heavy", cpuThreads: 8, memoryMB: 1000, duration: 45.0) {
+                    self.showAlert(title: "Tests Complete", message: "All stress tests completed. Check Console.app for detailed results.")
+                }
+            }
+        }
+    }
+    
+    @objc func showWatchdogStatus(_ sender: Any?) {
+        let memoryUsage = ThreadOptimization.getCurrentMemoryUsage()
+        let thermalState = ProcessInfo.processInfo.thermalState
+        
+        let message = """
+        Memory Usage: \(memoryUsage)MB
+        Thermal State: \(thermalState)
+        Event Tap Monitoring: \(isMonitoring)
+        Low Power Mode: \(ProcessInfo.processInfo.isLowPowerModeEnabled)
+        """
+        
+        showAlert(title: "System Status", message: message)
+    }
+    
+    @objc func showMemoryBreakdown(_ sender: Any?) {
+        let memoryReport = ThreadOptimization.getMemoryReportString()
+        showAlert(title: "Memory Breakdown Report", message: memoryReport)
+        
+        // Also print to console for detailed analysis
+        print("[AppDelegate] Memory Breakdown Report:")
+        ThreadOptimization.printMemoryReport()
+    }
+    
+    @objc func showMemoryLockingStatus(_ sender: Any?) {
+        let status = ThreadOptimization.getMemoryLockingStatus()
+        
+        let message: String
+        switch status {
+        case .available:
+            message = """
+            ✅ Memory Locking: ACTIVE
+            Status: 10MB critical memory pool is locked in physical RAM
+            Benefit: Critical operations will never be swapped to disk
+            Reliability: Maximum system responsiveness guaranteed
+            """
+        case .privilegesRequired:
+            message = """
+            ⚠️ Memory Locking: PRIVILEGES REQUIRED
+            Status: mlock() failed due to insufficient privileges
+            Impact: App functions normally but critical memory may be swapped
+            Solution: Run with elevated privileges for maximum reliability
+            """
+        case .systemLimit:
+            message = """
+            ⚠️ Memory Locking: SYSTEM LIMIT
+            Status: mlock() failed due to system limits
+            Impact: App functions normally but critical memory may be swapped
+            Info: System has reached its locked memory limit
+            """
+        case .unavailable:
+            message = """
+            ❌ Memory Locking: UNAVAILABLE
+            Status: Memory locking is not available on this system
+            Impact: App functions normally but critical memory may be swapped
+            Info: This reduces ultimate reliability under extreme system stress
+            """
+        }
+        
+        showAlert(title: "Memory Locking Status", message: message)
+        print("[AppDelegate] Memory Locking Status: \(status)")
+    }
+    
+    // MARK: - Extreme Stress Testing Framework
+    
+    @objc func runExtremeStressTests(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "⚠️ EXTREME STRESS TESTS WARNING"
+        alert.informativeText = """
+        These tests will severely stress your system:
+        • Swap Thrashing Test (8GB memory allocation)
+        • CPU Saturation Test (all cores 100% for 5 minutes)
+        • Combined Resource Exhaustion
+        
+        This may temporarily slow down your system significantly.
+        Continue?
+        """
+        alert.addButton(withTitle: "Run Extreme Tests")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            runExtremeStressTestSuite()
+        }
+    }
+    
+    @objc func runSystemExhaustionTest(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "🔥 SYSTEM EXHAUSTION TEST WARNING"
+        alert.informativeText = """
+        This test will attempt to completely exhaust system resources:
+        • Force swap thrashing (16GB+ memory allocation)
+        • Saturate all CPU cores
+        • Flood disk I/O
+        • Network stress
+        
+        ⚠️ WARNING: This may make your system temporarily unresponsive!
+        Only proceed if you understand the risks.
+        """
+        alert.addButton(withTitle: "I Understand - Run Test")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .critical
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            runSystemExhaustionTestSuite()
+        }
+    }
+    
+    private func runExtremeStressTestSuite() {
+        showAlert(title: "Extreme Stress Tests", message: "Starting extreme stress test suite. Monitor system performance closely.")
+        
+        // Test 1: Swap Thrashing Test
+        runSwapThrashingTest { [weak self] in
+            // Test 2: CPU Saturation Test  
+            self?.runCPUSaturationTest { [weak self] in
+                // Test 3: Combined Extreme Test
+                self?.runCombinedExtremeTest { [weak self] in
+                    self?.showAlert(title: "Extreme Tests Complete", message: "All extreme stress tests completed. Check system logs for results.")
+                }
+            }
+        }
+    }
+    
+    private func runSystemExhaustionTestSuite() {
+        showAlert(title: "System Exhaustion Test", message: "🔥 STARTING SYSTEM EXHAUSTION TEST - Monitor system carefully!")
+        
+        runSystemExhaustionTest { [weak self] in
+            self?.showAlert(title: "System Exhaustion Complete", message: "System exhaustion test completed. Check Console.app for detailed results.")
+        }
+    }
+    
+    private func runSwapThrashingTest(completion: @escaping () -> Void) {
+        print("[AppDelegate] 🔥 Starting Swap Thrashing Test - allocating 8GB memory")
+        
+        let testQueue = DispatchQueue(label: "swap-thrashing-test", qos: .background)
+        testQueue.async {
+            var hugeMalloc: [Data] = []
+            let chunkSize = 100 * 1024 * 1024 // 100MB chunks
+            let totalChunks = 80 // 8GB total
+            
+            var successCount = 0
+            var totalTests = 0
+            
+            // Test Leader Key responsiveness during memory pressure
+            let responseTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                totalTests += 1
+                let startTime = CACurrentMediaTime()
+                
+                DispatchQueue.main.async {
+                    // Test that UI remains responsive
+                    let endTime = CACurrentMediaTime()
+                    let responseTime = (endTime - startTime) * 1000
+                    
+                    if responseTime < 100 { // Less than 100ms is good
+                        successCount += 1
+                    }
+                    
+                    print("[SwapThrashing] Response time: \(String(format: "%.1f", responseTime))ms")
+                }
+            }
+            
+            // Allocate memory aggressively to force swapping
+            for i in 0..<totalChunks {
+                autoreleasepool {
+                    hugeMalloc.append(Data(count: chunkSize))
+                    // Write to the memory to ensure it's actually allocated
+                    if !hugeMalloc.isEmpty {
+                        hugeMalloc[i][chunkSize/2] = UInt8(i % 256)
+                    }
+                }
+                
+                print("[SwapThrashing] Allocated chunk \(i+1)/\(totalChunks) (\((i+1)*100)MB)")
+                usleep(100000) // 100ms delay between allocations
+            }
+            
+            print("[SwapThrashing] Memory allocated. Testing under extreme memory pressure for 60 seconds...")
+            
+            // Hold memory for 60 seconds while testing responsiveness
+            Thread.sleep(forTimeInterval: 60.0)
+            
+            responseTimer.invalidate()
+            
+            // Cleanup
+            hugeMalloc.removeAll()
+            
+            let successRate = totalTests > 0 ? (Double(successCount) / Double(totalTests)) * 100 : 0
+            print("[SwapThrashing] RESULTS: \(successCount)/\(totalTests) responsive operations (\(String(format: "%.1f", successRate))%)")
+            
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+    
+    private func runCPUSaturationTest(completion: @escaping () -> Void) {
+        print("[AppDelegate] 🔥 Starting CPU Saturation Test - all cores 100% for 5 minutes")
+        
+        let cpuCount = ProcessInfo.processInfo.processorCount
+        var stressActive = true
+        var successCount = 0
+        var totalTests = 0
+        
+        // Create CPU stress on all cores
+        for i in 0..<cpuCount {
+            let queue = DispatchQueue(label: "extreme-cpu-\(i)", qos: .background)
+            queue.async {
+                while stressActive {
+                    // Intensive computation without any breaks
+                    for _ in 0..<1000000 {
+                        _ = sqrt(Double.random(in: 0...10000)) * sin(Double.random(in: 0...100))
+                    }
+                }
+            }
+        }
+        
+        // Test Leader Key responsiveness during CPU saturation
+        let responseTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            totalTests += 1
+            let startTime = CACurrentMediaTime()
+            
+            ThreadOptimization.executeRealtime {
+                // Test that real-time operations remain responsive
+                let endTime = CACurrentMediaTime()
+                let responseTime = (endTime - startTime) * 1000
+                
+                if responseTime < 50 { // Less than 50ms for real-time operations
+                    successCount += 1
+                }
+                
+                print("[CPUSaturation] Real-time response: \(String(format: "%.1f", responseTime))ms")
+            }
+        }
+        
+        // Run for 5 minutes (300 seconds)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300.0) {
+            stressActive = false
+            responseTimer.invalidate()
+            
+            let successRate = totalTests > 0 ? (Double(successCount) / Double(totalTests)) * 100 : 0
+            print("[CPUSaturation] RESULTS: \(successCount)/\(totalTests) responsive real-time operations (\(String(format: "%.1f", successRate))%)")
+            
+            completion()
+        }
+    }
+    
+    private func runCombinedExtremeTest(completion: @escaping () -> Void) {
+        print("[AppDelegate] 🔥 Starting Combined Extreme Test - CPU + Memory + Disk stress")
+        
+        var stressActive = true
+        let cpuCount = ProcessInfo.processInfo.processorCount
+        
+        // CPU Stress (all cores)
+        for i in 0..<cpuCount {
+            let queue = DispatchQueue(label: "extreme-combined-cpu-\(i)", qos: .background)
+            queue.async {
+                while stressActive {
+                    for _ in 0..<500000 {
+                        _ = sqrt(Double.random(in: 0...1000)) * cos(Double.random(in: 0...100))
+                    }
+                    usleep(1000) // Tiny break to allow system scheduling
+                }
+            }
+        }
+        
+        // Memory Stress (4GB allocation with constant access)
+        let memoryQueue = DispatchQueue(label: "extreme-combined-memory", qos: .background)
+        memoryQueue.async {
+            var memory: [Data] = []
+            
+            // Allocate 4GB in 50MB chunks
+            for i in 0..<80 {
+                if stressActive {
+                    autoreleasepool {
+                        memory.append(Data(count: 50 * 1024 * 1024))
+                        // Access memory to ensure it's actually allocated
+                        if !memory.isEmpty {
+                            memory[i][25 * 1024 * 1024] = UInt8(i % 256)
+                        }
+                    }
+                }
+                usleep(50000) // 50ms between allocations
+            }
+            
+            // Keep accessing memory randomly
+            while stressActive {
+                if !memory.isEmpty {
+                    let randomIndex = Int.random(in: 0..<memory.count)
+                    let randomOffset = Int.random(in: 0..<(25 * 1024 * 1024))
+                    _ = memory[randomIndex][randomOffset]
+                }
+                usleep(10000) // 10ms
+            }
+        }
+        
+        // Disk I/O Stress
+        let diskQueue = DispatchQueue(label: "extreme-combined-disk", qos: .background)
+        diskQueue.async {
+            let tempDir = NSTemporaryDirectory()
+            var fileCount = 0
+            
+            while stressActive {
+                autoreleasepool {
+                    let fileName = "extreme_stress_\(fileCount).tmp"
+                    let filePath = (tempDir as NSString).appendingPathComponent(fileName)
+                    
+                    // Write 10MB file
+                    let data = Data(count: 10 * 1024 * 1024)
+                    try? data.write(to: URL(fileURLWithPath: filePath))
+                    
+                    // Read it back
+                    _ = try? Data(contentsOf: URL(fileURLWithPath: filePath))
+                    
+                    // Delete it
+                    try? FileManager.default.removeItem(atPath: filePath)
+                    
+                    fileCount += 1
+                }
+                usleep(100000) // 100ms between I/O operations
+            }
+        }
+        
+        var successCount = 0
+        var totalTests = 0
+        
+        // Test Leader Key under combined extreme stress
+        let responseTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            totalTests += 1
+            let startTime = CACurrentMediaTime()
+            
+            ThreadOptimization.executeRealtime {
+                let endTime = CACurrentMediaTime()
+                let responseTime = (endTime - startTime) * 1000
+                
+                if responseTime < 100 { // Less than 100ms under extreme stress
+                    successCount += 1
+                }
+                
+                print("[CombinedExtreme] Response time: \(String(format: "%.1f", responseTime))ms")
+            }
+        }
+        
+        // Run combined stress for 3 minutes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180.0) {
+            stressActive = false
+            responseTimer.invalidate()
+            
+            let successRate = totalTests > 0 ? (Double(successCount) / Double(totalTests)) * 100 : 0
+            print("[CombinedExtreme] RESULTS: \(successCount)/\(totalTests) responsive operations under extreme stress (\(String(format: "%.1f", successRate))%)")
+            
+            completion()
+        }
+    }
+    
+    private func runSystemExhaustionTest(completion: @escaping () -> Void) {
+        print("[AppDelegate] 🔥🔥 STARTING SYSTEM EXHAUSTION TEST - Maximum resource consumption")
+        
+        var stressActive = true
+        let cpuCount = ProcessInfo.processInfo.processorCount
+        
+        // Maximum CPU stress (higher priority than other apps)
+        for i in 0..<cpuCount * 2 { // Oversubscribe CPU
+            let queue = DispatchQueue(label: "exhaustion-cpu-\(i)", qos: .userInitiated) // Higher QoS
+            queue.async {
+                while stressActive {
+                    // Maximum intensity computation with no breaks
+                    for _ in 0..<2000000 {
+                        _ = sqrt(Double.random(in: 0...100000)) * sin(Double.random(in: 0...1000)) * cos(Double.random(in: 0...1000))
+                    }
+                }
+            }
+        }
+        
+        // Massive memory allocation to force heavy swapping
+        let memoryQueue = DispatchQueue(label: "exhaustion-memory", qos: .userInitiated)
+        memoryQueue.async {
+            var massiveMemory: [Data] = []
+            
+            // Try to allocate 16GB (this will definitely cause swapping on most systems)
+            for i in 0..<160 {
+                if stressActive {
+                    autoreleasepool {
+                        let chunk = Data(count: 100 * 1024 * 1024) // 100MB chunks
+                        massiveMemory.append(chunk)
+                        
+                        // Ensure memory is actually used (write pattern)
+                        let lastIndex = massiveMemory.count - 1
+                        for j in stride(from: 0, to: chunk.count, by: 4096) { // Write every page
+                            massiveMemory[lastIndex][j] = UInt8(i % 256)
+                        }
+                        
+                        print("[SystemExhaustion] Allocated \((i+1)*100)MB (Total: \((i+1)*100)MB)")
+                    }
+                }
+                usleep(25000) // 25ms between allocations for maximum pressure
+            }
+            
+            // Continuously access memory to prevent optimization
+            while stressActive {
+                if !massiveMemory.isEmpty {
+                    for _ in 0..<100 {
+                        let randomChunk = Int.random(in: 0..<massiveMemory.count)
+                        let randomOffset = Int.random(in: 0..<(50 * 1024 * 1024))
+                        _ = massiveMemory[randomChunk][randomOffset]
+                    }
+                }
+                usleep(1000) // 1ms between memory accesses
+            }
+        }
+        
+        // Extreme disk I/O to saturate storage
+        for i in 0..<4 { // Multiple concurrent disk stress threads
+            let diskQueue = DispatchQueue(label: "exhaustion-disk-\(i)", qos: .userInitiated)
+            diskQueue.async {
+                let tempDir = NSTemporaryDirectory()
+                var fileCount = 0
+                
+                while stressActive {
+                    autoreleasepool {
+                        let fileName = "exhaustion_\(i)_\(fileCount).tmp"
+                        let filePath = (tempDir as NSString).appendingPathComponent(fileName)
+                        
+                        // Large file operations (50MB files)
+                        let largeData = Data(count: 50 * 1024 * 1024)
+                        
+                        // Write
+                        try? largeData.write(to: URL(fileURLWithPath: filePath))
+                        
+                        // Read back
+                        _ = try? Data(contentsOf: URL(fileURLWithPath: filePath))
+                        
+                        // Delete
+                        try? FileManager.default.removeItem(atPath: filePath)
+                        
+                        fileCount += 1
+                    }
+                    usleep(10000) // 10ms between operations for maximum I/O pressure
+                }
+            }
+        }
+        
+        var successCount = 0
+        var totalTests = 0
+        
+        // Test Leader Key under complete system exhaustion
+        let responseTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            totalTests += 1
+            let startTime = CACurrentMediaTime()
+            
+            ThreadOptimization.executeRealtime {
+                let endTime = CACurrentMediaTime()
+                let responseTime = (endTime - startTime) * 1000
+                
+                // Under system exhaustion, even 500ms response is acceptable
+                if responseTime < 500 {
+                    successCount += 1
+                }
+                
+                print("[SystemExhaustion] Response time: \(String(format: "%.1f", responseTime))ms (Target: <500ms)")
+                
+                // Also test memory locking status
+                let lockingStatus = ThreadOptimization.getMemoryLockingStatus()
+                print("[SystemExhaustion] Memory locking status: \(lockingStatus)")
+            }
+        }
+        
+        // Run system exhaustion for 5 minutes (this is extreme!)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300.0) {
+            stressActive = false
+            responseTimer.invalidate()
+            
+            let successRate = totalTests > 0 ? (Double(successCount) / Double(totalTests)) * 100 : 0
+            print("[SystemExhaustion] FINAL RESULTS: \(successCount)/\(totalTests) responsive operations under SYSTEM EXHAUSTION (\(String(format: "%.1f", successRate))%)")
+            
+            // Clean up any remaining temp files
+            DispatchQueue.global().async {
+                ThreadOptimization.cleanupTempFiles()
+            }
+            
+            completion()
+        }
+    }
+    
+    // MARK: - Long-Term Stability Testing
+    
+    @objc func run24HourStabilityTest(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "⏱️ 24-HOUR STABILITY TEST"
+        alert.informativeText = """
+        This test will run for 24 hours (1440 minutes) and includes:
+        • Continuous operation monitoring
+        • Periodic moderate stress cycles
+        • Memory leak detection over time
+        • Recovery testing from simulated failures
+        • Performance degradation tracking
+        
+        The test will run in the background. Check Console.app for progress.
+        Continue?
+        """
+        alert.addButton(withTitle: "Start 24-Hour Test")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            run24HourStabilityTestSuite()
+        }
+    }
+    
+    @objc func run48HourEnduranceTest(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "🔋 48-HOUR ENDURANCE TEST"
+        alert.informativeText = """
+        This test will run for 48 hours (2880 minutes) and includes:
+        • Extended operation under varying load
+        • Stress cycles every 4 hours
+        • Comprehensive memory monitoring
+        • System resource impact assessment
+        • Long-term reliability validation
+        
+        ⚠️ This is an extensive test. Ensure your system can run uninterrupted.
+        Continue?
+        """
+        alert.addButton(withTitle: "Start 48-Hour Test")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .critical
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            run48HourEnduranceTestSuite()
+        }
+    }
+    
+    private func run24HourStabilityTestSuite() {
+        let startTime = Date()
+        showAlert(title: "24-Hour Stability Test", message: "Starting 24-hour stability test. Monitor progress in Console.app.")
+        
+        print("[24HourTest] 🕐 STARTING 24-HOUR STABILITY TEST")
+        print("[24HourTest] Start time: \(startTime)")
+        
+        runLongTermStabilityTest(
+            duration: 24 * 60 * 60, // 24 hours in seconds
+            testName: "24-Hour Stability",
+            stressCycleInterval: 2 * 60 * 60, // Stress cycle every 2 hours
+            monitoringInterval: 5 * 60 // Monitor every 5 minutes
+        ) { [weak self] results in
+            self?.showAlert(
+                title: "24-Hour Test Complete",
+                message: "24-hour stability test completed.\n\nResults:\n\(results)"
+            )
+        }
+    }
+    
+    private func run48HourEnduranceTestSuite() {
+        let startTime = Date()
+        showAlert(title: "48-Hour Endurance Test", message: "Starting 48-hour endurance test. This is a comprehensive long-term test.")
+        
+        print("[48HourTest] 🔋 STARTING 48-HOUR ENDURANCE TEST")
+        print("[48HourTest] Start time: \(startTime)")
+        
+        runLongTermStabilityTest(
+            duration: 48 * 60 * 60, // 48 hours in seconds
+            testName: "48-Hour Endurance",
+            stressCycleInterval: 4 * 60 * 60, // Stress cycle every 4 hours
+            monitoringInterval: 10 * 60 // Monitor every 10 minutes
+        ) { [weak self] results in
+            self?.showAlert(
+                title: "48-Hour Test Complete",
+                message: "48-hour endurance test completed.\n\nResults:\n\(results)"
+            )
+        }
+    }
+    
+    private func runLongTermStabilityTest(
+        duration: TimeInterval,
+        testName: String,
+        stressCycleInterval: TimeInterval,
+        monitoringInterval: TimeInterval,
+        completion: @escaping (String) -> Void
+    ) {
+        let startTime = Date()
+        var totalMonitoringChecks = 0
+        var successfulChecks = 0
+        var memoryLeakDetections = 0
+        var stressCyclesCompleted = 0
+        var maxMemoryUsage: UInt64 = 0
+        var minMemoryUsage: UInt64 = UInt64.max
+        var memoryGrowthDetected = false
+        
+        // Monitoring timer
+        let monitorTimer = Timer.scheduledTimer(withTimeInterval: monitoringInterval, repeats: true) { _ in
+            totalMonitoringChecks += 1
+            
+            let currentTime = Date()
+            let elapsed = currentTime.timeIntervalSince(startTime)
+            let remaining = duration - elapsed
+            
+            // Memory monitoring
+            let currentMemory = ThreadOptimization.getCurrentMemoryUsage()
+            maxMemoryUsage = max(maxMemoryUsage, currentMemory)
+            if minMemoryUsage == UInt64.max {
+                minMemoryUsage = currentMemory
+            } else {
+                minMemoryUsage = min(minMemoryUsage, currentMemory)
+            }
+            
+            // Check for memory leaks
+            if let leakWarning = ThreadOptimization.detectMemoryLeaks() {
+                memoryLeakDetections += 1
+                print("[\(testName)] 🚨 MEMORY LEAK DETECTED: \(leakWarning)")
+            }
+            
+            // Check memory growth pattern
+            if currentMemory > minMemoryUsage * 2 { // More than 2x initial memory
+                if !memoryGrowthDetected {
+                    memoryGrowthDetected = true
+                    print("[\(testName)] ⚠️ Significant memory growth detected: \(minMemoryUsage)MB → \(currentMemory)MB")
+                }
+            }
+            
+            // Test responsiveness
+            let responseStartTime = CACurrentMediaTime()
+            ThreadOptimization.executeRealtime {
+                let responseTime = (CACurrentMediaTime() - responseStartTime) * 1000
+                
+                if responseTime < 100 { // Less than 100ms is acceptable for long-term tests
+                    successfulChecks += 1
+                }
+                
+                print("[\(testName)] Check \(totalMonitoringChecks): Memory \(currentMemory)MB, Response \(String(format: "%.1f", responseTime))ms, Remaining \(String(format: "%.1f", remaining / 3600))h")
+            }
+            
+            // Memory locking status check
+            let lockingStatus = ThreadOptimization.getMemoryLockingStatus()
+            if lockingStatus != .available {
+                print("[\(testName)] ⚠️ Memory locking status changed: \(lockingStatus)")
+            }
+        }
+        
+        // Stress cycle timer
+        let stressTimer = Timer.scheduledTimer(withTimeInterval: stressCycleInterval, repeats: true) { _ in
+            stressCyclesCompleted += 1
+            print("[\(testName)] 🔥 Starting stress cycle \(stressCyclesCompleted)")
+            
+            // Run a moderate stress test for 5 minutes
+            self.runStressTest(
+                name: "\(testName)-Cycle-\(stressCyclesCompleted)",
+                cpuThreads: 4,
+                memoryMB: 1000,
+                duration: 5 * 60 // 5 minutes
+            ) {
+                print("[\(testName)] ✅ Stress cycle \(stressCyclesCompleted) completed")
+            }
+        }
+        
+        // Test completion timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            monitorTimer.invalidate()
+            stressTimer.invalidate()
+            
+            let endTime = Date()
+            let totalHours = duration / 3600
+            let successRate = totalMonitoringChecks > 0 ? (Double(successfulChecks) / Double(totalMonitoringChecks)) * 100 : 0
+            let memoryGrowth = maxMemoryUsage - minMemoryUsage
+            
+            let results = """
+            Duration: \(String(format: "%.1f", totalHours)) hours
+            Monitoring Checks: \(successfulChecks)/\(totalMonitoringChecks) successful (\(String(format: "%.2f", successRate))%)
+            Memory Usage: \(minMemoryUsage)MB - \(maxMemoryUsage)MB (Growth: \(memoryGrowth)MB)
+            Memory Leaks Detected: \(memoryLeakDetections)
+            Stress Cycles: \(stressCyclesCompleted)
+            Memory Growth Warning: \(memoryGrowthDetected ? "YES" : "NO")
+            """
+            
+            print("[\(testName)] 🏁 LONG-TERM TEST COMPLETED")
+            print("[\(testName)] Results:\n\(results)")
+            
+            // Final memory analysis
+            ThreadOptimization.printMemoryReport()
+            
+            completion(results)
+        }
+        
+        print("[\(testName)] Long-term test initialized - duration: \(duration/3600)h, monitoring every \(monitoringInterval/60)min, stress every \(stressCycleInterval/3600)h")
+    }
+    
+    private func runStressTest(name: String, cpuThreads: Int, memoryMB: Int, duration: TimeInterval, completion: (() -> Void)? = nil) {
+        print("[AppDelegate] Starting \(name) stress test: \(cpuThreads) CPU threads, \(memoryMB)MB memory, \(duration)s duration")
+        
+        var stressActive = true
+        var successCount = 0
+        var totalTests = 0
+        
+        // CPU stress
+        for i in 0..<cpuThreads {
+            let queue = DispatchQueue(label: "stress-cpu-\(i)", qos: .background)
+            queue.async {
+                while stressActive {
+                    for _ in 0..<100000 { _ = sqrt(Double.random(in: 0...1000)) }
+                    usleep(1000)
+                }
+            }
+        }
+        
+        // Memory stress with explicit cleanup
+        let memoryQueue = DispatchQueue(label: "stress-memory", qos: .background)
+        memoryQueue.async {
+            var memory: [Data] = []
+            
+            // Allocation phase
+            while stressActive && memory.count < memoryMB {
+                memory.append(Data(count: 1024 * 1024))
+                usleep(10000)
+            }
+            
+            print("[StressTest] Allocated \(memory.count)MB for \(name)")
+            
+            // Usage phase
+            while stressActive {
+                if !memory.isEmpty { _ = memory[Int.random(in: 0..<memory.count)].count }
+                usleep(100000)
+            }
+            
+            // Explicit cleanup when test ends
+            print("[StressTest] Cleaning up \(memory.count)MB allocated memory for \(name)")
+            memory.removeAll()
+            memory = [] // Explicit deallocation
+            
+            // Force memory pressure to encourage garbage collection
+            autoreleasepool {
+                let dummy = Array(repeating: Data(count: 1024), count: 10)
+                _ = dummy.count
+            }
+        }
+        
+        // Test responsiveness
+        let testTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            let start = CFAbsoluteTimeGetCurrent()
+            ThreadOptimization.executeRealtime {
+                let latency = CFAbsoluteTimeGetCurrent() - start
+                totalTests += 1
+                if latency < 0.1 { successCount += 1 }
+                if latency > 0.1 { print("[StressTest] High latency: \(latency * 1000)ms") }
+            }
+        }
+        
+        // End test
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            stressActive = false
+            testTimer.invalidate()
+            
+            let successRate = totalTests > 0 ? Double(successCount) / Double(totalTests) : 0
+            print("[AppDelegate] \(name) test complete: \(String(format: "%.1f", successRate * 100))% success rate")
+            
+            completion?()
+        }
+    }
+    
+    // MARK: - Real-World Workload Simulations
+    
+    private func runNodeJSRealisticWorkload() {
+        print("[AppDelegate] 🟢 Starting NodeJS realistic workload simulation")
+        
+        var isActive = true
+        let duration: TimeInterval = 60.0 // 60 second test
+        var responseTimes: [TimeInterval] = []
+        
+        // Simulate NodeJS event loop saturation with async operations
+        let eventLoopQueue = DispatchQueue(label: "nodejs-eventloop", qos: .userInitiated)
+        for i in 0..<8 { // Multiple async operations
+            eventLoopQueue.async {
+                while isActive {
+                    // Simulate async I/O operations (file reads, network requests)
+                    autoreleasepool {
+                        let data = Data(count: Int.random(in: 1024...102400)) // 1KB-100KB chunks
+                        _ = data.withUnsafeBytes { bytes in
+                            // Simulate JSON parsing/processing
+                            return bytes.reduce(0) { $0 + Int($1) }
+                        }
+                    }
+                    
+                    // Simulate network latency variability
+                    usleep(UInt32.random(in: 1000...10000)) // 1-10ms delays
+                    
+                    // Simulate garbage collection pressure
+                    if i % 100 == 0 {
+                        autoreleasepool {
+                            let temp = Array(repeating: Data(count: 1024), count: 50)
+                            _ = temp.count
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Test Leader Key responsiveness during NodeJS workload
+        let responseTestTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+            let start = CFAbsoluteTimeGetCurrent()
+            ThreadOptimization.executeRealtime {
+                let responseTime = CFAbsoluteTimeGetCurrent() - start
+                responseTimes.append(responseTime)
+                if responseTime > 0.05 { // >50ms is concerning
+                    print("[NodeJS Test] Slow response: \(responseTime * 1000)ms")
+                }
+            }
+        }
+        
+        // End test after duration
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            isActive = false
+            responseTestTimer.invalidate()
+            
+            let avgResponse = responseTimes.isEmpty ? 0 : responseTimes.reduce(0, +) / Double(responseTimes.count)
+            let maxResponse = responseTimes.max() ?? 0
+            let slowResponses = responseTimes.filter { $0 > 0.05 }.count
+            
+            let results = """
+            🟢 NodeJS Workload Test Results:
+            Duration: \(duration)s
+            Response Tests: \(responseTimes.count)
+            Average Response: \(String(format: "%.2f", avgResponse * 1000))ms
+            Max Response: \(String(format: "%.2f", maxResponse * 1000))ms
+            Slow Responses (>50ms): \(slowResponses) (\(String(format: "%.1f", Double(slowResponses) / Double(responseTimes.count) * 100))%)
+            Success Rate: \(String(format: "%.1f", Double(responseTimes.count - slowResponses) / Double(responseTimes.count) * 100))%
+            """
+            
+            print(results)
+            self.showAlert(title: "NodeJS Test Complete", message: results)
+        }
+    }
+    
+    private func runIntelliJRealisticWorkload() {
+        print("[AppDelegate] 🔵 Starting IntelliJ realistic workload simulation")
+        
+        var isActive = true
+        let duration: TimeInterval = 90.0 // 90 second test (IntelliJ operations are longer)
+        var responseTimes: [TimeInterval] = []
+        
+        // Simulate IntelliJ indexing operations (heavy disk I/O)
+        let indexingQueue = DispatchQueue(label: "intellij-indexing", qos: .utility)
+        indexingQueue.async {
+            let fileManager = FileManager.default
+            let tempDir = NSTemporaryDirectory()
+            
+            while isActive {
+                autoreleasepool {
+                    // Simulate indexing large files
+                    for i in 0..<10 {
+                        let fileName = "intellij_temp_\(i)_\(UUID().uuidString).tmp"
+                        let filePath = (tempDir as NSString).appendingPathComponent(fileName)
+                        
+                        // Create and write large temporary files (simulating source files)
+                        let content = String(repeating: "class Example { public void method() { /* content */ } }", count: 1000)
+                        try? content.write(toFile: filePath, atomically: true, encoding: .utf8)
+                        
+                        // Simulate parsing/analysis (CPU intensive)
+                        _ = content.components(separatedBy: " ").count
+                        
+                        // Clean up
+                        try? fileManager.removeItem(atPath: filePath)
+                    }
+                }
+                
+                // Simulate compilation pauses
+                usleep(50000) // 50ms between file processing
+            }
+        }
+        
+        // Simulate background compilation (CPU + memory intensive)
+        let compilationQueue = DispatchQueue(label: "intellij-compilation", qos: .background)
+        compilationQueue.async {
+            var compilationData: [Data] = []
+            
+            while isActive {
+                autoreleasepool {
+                    // Simulate compilation memory usage (growing then shrinking)
+                    if compilationData.count < 100 {
+                        compilationData.append(Data(count: 1024 * 1024)) // 1MB chunks
+                    } else {
+                        compilationData.removeAll()
+                    }
+                    
+                    // Simulate heavy computation (parsing, optimization)
+                    for _ in 0..<10000 {
+                        _ = sqrt(Double.random(in: 0...1000)) + sin(Double.random(in: 0...1000))
+                    }
+                }
+                
+                usleep(100000) // 100ms compilation cycles
+            }
+        }
+        
+        // Test Leader Key responsiveness during IntelliJ workload
+        let responseTestTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
+            let start = CFAbsoluteTimeGetCurrent()
+            ThreadOptimization.executeRealtime {
+                let responseTime = CFAbsoluteTimeGetCurrent() - start
+                responseTimes.append(responseTime)
+                if responseTime > 0.1 { // >100ms is concerning for IntelliJ scenario
+                    print("[IntelliJ Test] Slow response: \(responseTime * 1000)ms")
+                }
+            }
+        }
+        
+        // End test after duration
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            isActive = false
+            responseTestTimer.invalidate()
+            
+            let avgResponse = responseTimes.isEmpty ? 0 : responseTimes.reduce(0, +) / Double(responseTimes.count)
+            let maxResponse = responseTimes.max() ?? 0
+            let slowResponses = responseTimes.filter { $0 > 0.1 }.count
+            
+            let results = """
+            🔵 IntelliJ Workload Test Results:
+            Duration: \(duration)s
+            Response Tests: \(responseTimes.count)
+            Average Response: \(String(format: "%.2f", avgResponse * 1000))ms
+            Max Response: \(String(format: "%.2f", maxResponse * 1000))ms
+            Slow Responses (>100ms): \(slowResponses) (\(String(format: "%.1f", Double(slowResponses) / Double(responseTimes.count) * 100))%)
+            Success Rate: \(String(format: "%.1f", Double(responseTimes.count - slowResponses) / Double(responseTimes.count) * 100))%
+            """
+            
+            print(results)
+            self.showAlert(title: "IntelliJ Test Complete", message: results)
+        }
+    }
+    
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
@@ -1347,8 +2514,11 @@ extension AppDelegate {
             
             // Check queue size limit to prevent memory issues
             if keyEventQueue.count >= maxQueueSize {
-                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space.")
-                keyEventQueue.removeFirst()
+                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Clearing queue to prevent memory accumulation.")
+                // Clear entire queue rather than just removing first to prevent memory leaks
+                autoreleasepool {
+                    keyEventQueue.removeAll()
+                }
             }
             
             let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
@@ -1363,17 +2533,29 @@ extension AppDelegate {
             processQueuedEvents()
         }
 
-        // Try to convert CGEvent to NSEvent to easily access key code and modifiers
-        guard let nsEvent = NSEvent(cgEvent: event) else {
-             debugLog("[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
-             return Unmanaged.passRetained(event)
+        // Wrap event processing in autoreleasepool for better memory management
+        let handled = autoreleasepool { () -> Bool in
+            // Try to convert CGEvent to NSEvent to easily access key code and modifiers
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                 debugLog("[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
+                 return false
+            }
+            // Process the key event using our main logic function with high priority
+            // Let's get the mapped key string here for better logging
+            let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
+            let modsDescription = describeModifiers(nsEvent.modifierFlags)
+            debugLog("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
+            
+            // Use high-priority execution for critical event processing
+            let originalPriority = Thread.current.threadPriority
+            Thread.current.threadPriority = 1.0
+            defer { Thread.current.threadPriority = originalPriority }
+            
+            return processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
         }
-        // Process the key event using our main logic function
-        // Let's get the mapped key string here for better logging
-        let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
-        let modsDescription = describeModifiers(nsEvent.modifierFlags)
-        debugLog("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
-        let handled = processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
+        
+        // Update watchdog activity
+        updateEventTapActivity()
 
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
          debugLog("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
@@ -1399,8 +2581,15 @@ extension AppDelegate {
                 }
             }
             
-            // Process the queued event using the same logic as handleKeyDownEvent
-            let handled = processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
+            // Wrap queued event processing in autoreleasepool for better memory management
+            let handled = autoreleasepool { () -> Bool in
+                // Process the queued event using the same logic as handleKeyDownEvent with high priority
+                let originalPriority = Thread.current.threadPriority
+                Thread.current.threadPriority = 1.0
+                defer { Thread.current.threadPriority = originalPriority }
+                
+                return processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
+            }
             
             debugLog("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
             
@@ -1412,7 +2601,11 @@ extension AppDelegate {
     private func clearKeyEventQueue() {
         if !keyEventQueue.isEmpty {
             debugLog("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
-            keyEventQueue.removeAll()
+            // Explicit memory cleanup for event queue
+            autoreleasepool {
+                keyEventQueue.removeAll()
+            }
+            print("[AppDelegate] clearKeyEventQueue: Queue cleared, memory released")
         }
     }
 

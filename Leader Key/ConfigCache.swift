@@ -4,7 +4,7 @@ import Foundation
 final class ConfigCache {
     private let cache = NSCache<NSString, CacheEntry>()
     private let queue = DispatchQueue(label: "com.leaderkey.configcache", attributes: .concurrent)
-    private let maxCacheAge: TimeInterval = 60 // Cache for 1 minute
+    private let maxCacheAge: TimeInterval = 30 // Reduced from 60s to 30s for aggressive memory management
     
     /// Wrapper to store both the config and its timestamp
     private class CacheEntry {
@@ -18,15 +18,15 @@ final class ConfigCache {
             self.fileModificationDate = fileModificationDate
         }
         
-        var isExpired: Bool {
-            Date().timeIntervalSince(timestamp) > 60 // 1 minute expiry
+        func isExpired(maxAge: TimeInterval) -> Bool {
+            Date().timeIntervalSince(timestamp) > maxAge
         }
     }
     
     init() {
-        // Configure cache limits
-        cache.countLimit = 50 // Max 50 configs in memory
-        cache.totalCostLimit = 10 * 1024 * 1024 // 10MB max
+        // Aggressive cache limits for memory optimization
+        cache.countLimit = 10 // Reduced from 50 to 10 configs in memory
+        cache.totalCostLimit = 2 * 1024 * 1024 // Reduced from 10MB to 2MB max
     }
     
     /// Get cached config if available and not expired
@@ -35,7 +35,7 @@ final class ConfigCache {
             guard let entry = cache.object(forKey: path as NSString) else { return nil }
             
             // Check if cache is expired
-            if entry.isExpired {
+            if entry.isExpired(maxAge: maxCacheAge) {
                 cache.removeObject(forKey: path as NSString)
                 return nil
             }

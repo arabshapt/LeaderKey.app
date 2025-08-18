@@ -35,7 +35,60 @@ class MainMenu: NSMenu {
       NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
     ]
 
-    items = [appMenu, editMenu]
+    let debugMenu = NSMenuItem()
+    debugMenu.submenu = NSMenu(title: "Debug")
+    debugMenu.submenu?.items = [
+      NSMenuItem(
+        title: "Quick Stress Test", 
+        action: #selector(AppDelegate.runQuickStressTest(_:)), 
+        keyEquivalent: "t"),
+      NSMenuItem(
+        title: "NodeJS Scenario Test", 
+        action: #selector(AppDelegate.runNodeJSStressTest(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "IntelliJ Scenario Test", 
+        action: #selector(AppDelegate.runIntelliJStressTest(_:)), 
+        keyEquivalent: ""),
+      .separator(),
+      NSMenuItem(
+        title: "Comprehensive Test Suite", 
+        action: #selector(AppDelegate.runComprehensiveStressTests(_:)), 
+        keyEquivalent: "T"),
+      .separator(),
+      NSMenuItem(
+        title: "⚠️ Extreme Stress Tests", 
+        action: #selector(AppDelegate.runExtremeStressTests(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "🔥 System Exhaustion Test", 
+        action: #selector(AppDelegate.runSystemExhaustionTest(_:)), 
+        keyEquivalent: ""),
+      .separator(),
+      NSMenuItem(
+        title: "⏱️ 24-Hour Stability Test", 
+        action: #selector(AppDelegate.run24HourStabilityTest(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "🔋 48-Hour Endurance Test", 
+        action: #selector(AppDelegate.run48HourEnduranceTest(_:)), 
+        keyEquivalent: ""),
+      .separator(),
+      NSMenuItem(
+        title: "Watchdog Status", 
+        action: #selector(AppDelegate.showWatchdogStatus(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "Memory Breakdown Report", 
+        action: #selector(AppDelegate.showMemoryBreakdown(_:)), 
+        keyEquivalent: "M"),
+      NSMenuItem(
+        title: "Memory Locking Status", 
+        action: #selector(AppDelegate.showMemoryLockingStatus(_:)), 
+        keyEquivalent: "L"),
+    ]
+
+    items = [appMenu, editMenu, debugMenu]
   }
 
   required init(coder: NSCoder) {
