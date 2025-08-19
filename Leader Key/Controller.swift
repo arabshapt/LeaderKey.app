@@ -428,6 +428,7 @@ class Controller {
   }
 
   func runAction(_ action: Action) {
+    debugLog("[Controller] runAction: \(action.type) - \(action.value)")
     switch action.type {
     case .application:
       NSWorkspace.shared.openApplication(
@@ -623,6 +624,7 @@ class Controller {
           showAlert(title: "Typing Error", message: "Could not create event source.")
           return
       }
+      source.userData = leaderKeySyntheticEventTag
       let tapLocation = CGEventTapLocation.cghidEventTap
 
       // Loop through each character in the string
@@ -640,6 +642,7 @@ class Controller {
           }
           var charCode = UniChar(utf16Values)
           eventDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
+          eventDown.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
           eventDown.post(tap: tapLocation)
 
           // Tiny delay (adjust as needed)
@@ -651,6 +654,7 @@ class Controller {
               continue
           }
           eventUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &charCode)
+          eventUp.setIntegerValueField(.eventSourceUserData, value: leaderKeySyntheticEventTag)
           eventUp.post(tap: tapLocation)
 
           // Add a small delay between characters (optional, makes typing feel more natural)

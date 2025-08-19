@@ -2683,6 +2683,7 @@ extension AppDelegate {
     }
 
     private func handleKeyDownEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let startTime = CFAbsoluteTimeGetCurrent()
         // ----> Check if the event is tagged as synthetic <----
         let userData = event.getIntegerValueField(.eventSourceUserData)
         if userData == leaderKeySyntheticEventTag {
@@ -2701,11 +2702,8 @@ extension AppDelegate {
             
             // Check queue size limit to prevent memory issues
             if keyEventQueue.count >= maxQueueSize {
-                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Clearing queue to prevent memory accumulation.")
-                // Clear entire queue rather than just removing first to prevent memory leaks
-                autoreleasepool {
-                    keyEventQueue.removeAll()
-                }
+                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event.")
+                keyEventQueue.removeFirst()
             }
             
             let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
@@ -2743,6 +2741,10 @@ extension AppDelegate {
         
         // Update watchdog activity
         updateEventTapActivity()
+
+        let endTime = CFAbsoluteTimeGetCurrent()
+        let duration = (endTime - startTime) * 1000
+        debugLog(String(format: "[AppDelegate] handleKeyDownEvent: Total processing time %.2fms", duration))
 
         // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
          debugLog("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
@@ -2855,11 +2857,15 @@ extension AppDelegate {
     }
 
     private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let startTime = CFAbsoluteTimeGetCurrent()
         // 1. Check for force reset shortcut FIRST (highest priority)
         let shortcutForceReset = KeyboardShortcuts.getShortcut(for: .forceReset)
         if let shortcut = shortcutForceReset, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
             debugLog("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
             forceResetState()
+            let endTime = CFAbsoluteTimeGetCurrent()
+            let duration = (endTime - startTime) * 1000
+            debugLog(String(format: "[AppDelegate] processKeyEvent: time %.2fms", duration))
             return true // Consume the force reset shortcut press
         }
 
@@ -2940,10 +2946,14 @@ extension AppDelegate {
 
         // 5. If NOT activation, Escape, or in a sequence, let the event pass through
         debugLog("[AppDelegate] processKeyEvent: No activation shortcut, Escape, or active sequence matched. Passing event through.")
+        let endTime = CFAbsoluteTimeGetCurrent()
+        let duration = (endTime - startTime) * 1000
+        debugLog(String(format: "[AppDelegate] processKeyEvent: time %.2fms", duration))
         return false
     }
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let startTime = CFAbsoluteTimeGetCurrent()
         debugLog("[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))")
 
         // Get the single character string representation for the key event
@@ -2952,10 +2962,16 @@ extension AppDelegate {
             let isStickyModeActive = isInStickyMode(modifiers)
             if isStickyModeActive {
                 debugLog("[AppDelegate] processKeyInSequence: Could not map event to keyString, but sticky mode ACTIVE – passing event through.")
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return false // Event NOT handled – let it propagate
             } else {
                 debugLog("[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
                 DispatchQueue.main.async { self.controller.window.shake() }
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return true // Event handled (by shaking)
             }
         }
@@ -2979,6 +2995,9 @@ extension AppDelegate {
                 } else {
                     debugLog("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
                 }
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return true // Event handled
 
             case .group(let subgroup):
@@ -2998,6 +3017,9 @@ extension AppDelegate {
                     activateStickyMode()
                 }
                 
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return true // Event handled
             }
         } else {
@@ -3009,10 +3031,16 @@ extension AppDelegate {
             if isStickyModeActive {
                 // In sticky mode: pass the event through so the underlying app receives the key/shortcut.
                 debugLog("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE -> passing event through.")
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return false // Event NOT handled – let it propagate
             } else {
                 // Not in sticky mode: indicate error by shaking the window and consuming the event.
                 DispatchQueue.main.async { self.controller.window.shake() }
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = (endTime - startTime) * 1000
+                debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
                 return true // Event handled (by shaking)
             }
         }
