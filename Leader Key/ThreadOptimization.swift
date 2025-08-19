@@ -264,7 +264,7 @@ enum ThreadOptimization {
   }
   
   /// Set real-time thread policy for the current thread
-  private static func setRealtimeThreadPolicy() {
+  static func setRealtimeThreadPolicy() {
     let thread = mach_thread_self()
     
     // Set time constraint policy for real-time scheduling

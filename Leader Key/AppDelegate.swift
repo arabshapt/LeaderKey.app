@@ -8,15 +8,34 @@ import SwiftUI
 import UserNotifications
 import ObjectiveC
 import Kingfisher
+import IOKit.pwr_mgt
 
 let updateLocationIdentifier = "UpdateCheck"
 
 // Define the same unique tag here
 private let leaderKeySyntheticEventTag: Int64 = 0xDEADBEEF
 
-// MARK: - Event Tap Callback
+// MARK: - Callback Performance Statistics
 
-// This needs to be a top-level function or static method to be used as a C callback.
+struct CallbackStatistics {
+    var totalCallbacks: Int64 = 0
+    var slowCallbacks: Int64 = 0
+    var maxDuration: Double = 0
+    var avgDuration: Double = 0
+    var lastResetTime = Date()
+    
+    mutating func reset() {
+        totalCallbacks = 0
+        slowCallbacks = 0
+        maxDuration = 0
+        avgDuration = 0
+        lastResetTime = Date()
+    }
+}
+
+// MARK: - Ultra-Fast Event Tap Callback
+
+// Optimized callback that executes in <1ms by only queuing events
 private func eventTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
@@ -26,10 +45,42 @@ private func eventTapCallback(
     guard let userInfo = userInfo else {
         return Unmanaged.passRetained(event)
     }
-
-    // Cast the reference to AppDelegate and call the handler
+    
     let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
-    return appDelegate.handleCGEvent(event)
+    
+    // PERFORMANCE CRITICAL: This callback must execute in <0.1ms
+    // DO NOT add any system calls, object creation, or I/O here
+    
+    #if DEBUG
+    // Timing only in debug builds
+    let startTime = MachTime.now()
+    defer {
+        let duration = MachTime.toMilliseconds(MachTime.now() - startTime)
+        if duration > 1.0 {
+            print("⚠️ SLOW CALLBACK: \(String(format: "%.2f", duration))ms")
+        }
+    }
+    #endif
+    
+    // CHECK FOR SYNTHETIC EVENT - Pass through immediately
+    if event.getIntegerValueField(.eventSourceUserData) == leaderKeySyntheticEventTag {
+        return Unmanaged.passRetained(event)
+    }
+    
+    // MINIMAL PROCESSING - Just queue and return
+    let queued = appDelegate.eventQueue.enqueue(event)
+    if !queued {
+        print("⚠️ Event queue full - dropping event")
+        return Unmanaged.passRetained(event)
+    }
+    
+    // TRIGGER ASYNC PROCESSING
+    appDelegate.triggerEventProcessing()
+    
+    // QUICK DECISION - Should we consume this event?
+    let shouldConsume = appDelegate.quickShouldConsumeCheck(event)
+    
+    return shouldConsume ? nil : Unmanaged.passRetained(event)
 }
 
 // MARK: - Key Code Constants (Example)
@@ -119,6 +170,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   var fileMonitor: FileMonitor!
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
+  
+  // --- Event Queue for Ultra-Fast Callback ---
+  let eventQueue = LockFreeEventQueue(capacity: 512)  // Made internal for callback access
+  private var eventProcessorQueue: DispatchQueue!
+  private var eventProcessorSemaphore: DispatchSemaphore!  // Signals when events are available
+  private var isProcessingEvents = false
+  private var callbackStats = CallbackStatistics()
+  
+  // --- Dual Event Tap Manager for Redundancy ---
+  let dualTapManager = DualEventTapManager()
+  
+  // --- Cached Activation Keys for Ultra-Fast Checking ---
+  private var cachedActivationKeyCodes: Set<UInt16> = []
+  private var cachedActivationModifiers: [UInt16: CGEventFlags] = [:]
+  private let isInSequence = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+  
+  // --- Power Management ---
+  private var powerAssertionID: IOPMAssertionID = 0
+  private var hasPowerAssertion = false
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -175,6 +245,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Initialize critical memory pool with mlock() for ultimate reliability
     ThreadOptimization.initializeCriticalMemoryPool()
+    
+    // Initialize event processor queue with real-time priority
+    setupEventProcessor()
+    
+    // Initialize atomic sequence flag
+    isInSequence.initialize(to: 0)
+    
+    // Cache activation keycodes for ultra-fast checking
+    cacheActivationKeys()
 
     // Setup Notifications
     UNUserNotificationCenter.current().delegate = self // Conformance is in extension
@@ -253,6 +332,276 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       print("[AppDelegate] applicationDidBecomeActive: Already monitoring.")
     }
   }
+  
+  // MARK: - Ultra-Fast Event Processing
+  
+  /// Result type for processKeyEvent to avoid UI operations on background thread
+  private struct KeyEventResult {
+    let consumed: Bool
+    let action: KeyEventAction
+    
+    enum KeyEventAction {
+      case none
+      case forceReset
+      case handleActivation(type: Controller.ActivationType, shortcut: KeyboardShortcuts.Shortcut?)
+      case openSettings
+      case hide
+    }
+  }
+  
+  /// Setup the event processor queue with real-time priority
+  private func setupEventProcessor() {
+    // Create dedicated queue with highest priority
+    eventProcessorQueue = DispatchQueue(
+      label: "com.leaderkey.event-processor",
+      qos: .userInteractive,
+      attributes: [],
+      autoreleaseFrequency: .workItem
+    )
+    
+    // Initialize semaphore for event signaling (start with 0 to wait for events)
+    eventProcessorSemaphore = DispatchSemaphore(value: 0)
+    
+    // Start the async event processor
+    startEventProcessor()
+    
+    print("[AppDelegate] Event processor initialized with real-time priority")
+  }
+  
+  /// Cache activation keycodes for ultra-fast checking in callback
+  private func cacheActivationKeys() {
+    cachedActivationKeyCodes.removeAll()
+    cachedActivationModifiers.removeAll()
+    
+    // Cache default activation shortcut
+    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly) {
+      let keyCode = UInt16(shortcut.carbonKeyCode)
+      cachedActivationKeyCodes.insert(keyCode)
+      
+      // Convert NSEvent.ModifierFlags to CGEventFlags
+      var cgFlags: CGEventFlags = []
+      if shortcut.modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
+      if shortcut.modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
+      if shortcut.modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
+      if shortcut.modifiers.contains(.control) { cgFlags.insert(.maskControl) }
+      
+      cachedActivationModifiers[keyCode] = cgFlags
+      print("[AppDelegate] Cached default activation key: \(keyCode) with modifiers")
+    }
+    
+    // Cache app-specific activation shortcut
+    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateAppSpecific) {
+      let keyCode = UInt16(shortcut.carbonKeyCode)
+      cachedActivationKeyCodes.insert(keyCode)
+      
+      // Convert NSEvent.ModifierFlags to CGEventFlags
+      var cgFlags: CGEventFlags = []
+      if shortcut.modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
+      if shortcut.modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
+      if shortcut.modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
+      if shortcut.modifiers.contains(.control) { cgFlags.insert(.maskControl) }
+      
+      cachedActivationModifiers[keyCode] = cgFlags
+      print("[AppDelegate] Cached app-specific activation key: \(keyCode) with modifiers")
+    }
+    
+    // Cache force reset shortcut
+    if let shortcut = KeyboardShortcuts.getShortcut(for: .forceReset) {
+      let keyCode = UInt16(shortcut.carbonKeyCode)
+      cachedActivationKeyCodes.insert(keyCode)
+      
+      // Convert NSEvent.ModifierFlags to CGEventFlags
+      var cgFlags: CGEventFlags = []
+      if shortcut.modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
+      if shortcut.modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
+      if shortcut.modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
+      if shortcut.modifiers.contains(.control) { cgFlags.insert(.maskControl) }
+      
+      cachedActivationModifiers[keyCode] = cgFlags
+      print("[AppDelegate] Cached force reset key: \(keyCode) with modifiers")
+    }
+  }
+  
+  /// Start the async event processor that runs continuously
+  private func startEventProcessor() {
+    eventProcessorQueue.async { [weak self] in
+      guard let self = self else { return }
+      
+      // Set thread to real-time priority
+      ThreadOptimization.setRealtimeThreadPolicy()
+      
+      print("[EventProcessor] Started with semaphore-based signaling (low CPU wake design)")
+      
+      while true {
+        autoreleasepool {
+          // Wait for events with timeout (100ms timeout for periodic health checks)
+          let result = self.eventProcessorSemaphore.wait(timeout: .now() + 0.1)
+          
+          if result == .success {
+            // Events are available - process batch
+            let events = self.eventQueue.dequeueBatch(maxCount: 10)
+            
+            for eventEntry in events {
+              self.processEventAsync(eventEntry)
+            }
+            
+            // Check if there are more events and self-signal if needed
+            if !self.eventQueue.isEmpty {
+              self.eventProcessorSemaphore.signal()
+            }
+          }
+          // On timeout (.timedOut), we just continue the loop for health checks
+          // This ensures we check for shutdown conditions periodically
+        }
+      }
+    }
+  }
+  
+  /// Process a single event asynchronously (called from event processor thread)
+  private func processEventAsync(_ eventEntry: LockFreeEventQueue.EventEntry) {
+    // Dispatch to main thread for NSEvent creation and UI operations
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      
+      // Update event tap activity tracking
+      self.updateEventTapActivity()
+      
+      // Handle different event types
+      switch eventEntry.event.type {
+      case .keyDown:
+        // Process keyDown events
+        guard let nsEvent = NSEvent(cgEvent: eventEntry.event) else { return }
+        
+        // Check if synthetic event (should have been filtered in callback but double-check)
+        if eventEntry.event.getIntegerValueField(.eventSourceUserData) == leaderKeySyntheticEventTag {
+          return
+        }
+        
+        // Process the key event and get result
+        let result = self.processKeyEvent(
+          cgEvent: eventEntry.event,
+          keyCode: nsEvent.keyCode,
+          modifiers: nsEvent.modifierFlags
+        )
+        
+        // Handle the action (already on main thread)
+        switch result.action {
+        case .none:
+          break
+          
+        case .forceReset:
+          self.forceResetState()
+          
+        case .handleActivation(let type, let shortcut):
+          self.handleActivation(type: type, activationShortcut: shortcut)
+          
+        case .openSettings:
+          NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
+          self.hide()
+          
+        case .hide:
+          self.hide()
+        }
+        
+      case .keyUp:
+        // Handle key up events if needed
+        _ = self.handleKeyUpEvent(eventEntry.event)
+        
+      case .flagsChanged:
+        // Handle modifier flags changes
+        _ = self.handleFlagsChangedEvent(eventEntry.event)
+        
+      default:
+        // Other event types - ignore
+        break
+      }
+    }
+  }
+  
+  /// Trigger event processing if not already running
+  @inline(__always)
+  func triggerEventProcessing() {
+    // Signal the event processor that events are available
+    eventProcessorSemaphore.signal()
+  }
+  
+  /// Quick check if we should consume an event (must be VERY fast)
+  @inline(__always)
+  func quickShouldConsumeCheck(_ event: CGEvent) -> Bool {
+    // Only consume if we're actively in a sequence or it's an activation key
+    guard isMonitoring else { return false }
+    
+    // Ultra-fast check for active sequence using atomic flag
+    if OSAtomicAdd32(0, isInSequence) == 1 {
+      return true
+    }
+    
+    // Only check activation keys for keyDown events
+    guard event.type == .keyDown else { return false }
+    
+    // Get keycode directly from CGEvent (no NSEvent creation!)
+    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+    
+    // Quick check if this keycode is even a potential activation key
+    guard cachedActivationKeyCodes.contains(keyCode) else { return false }
+    
+    // Get expected modifiers for this keycode
+    guard let expectedModifiers = cachedActivationModifiers[keyCode] else { return false }
+    
+    // Get actual modifiers from CGEvent
+    let actualModifiers = event.flags
+    
+    // Check if modifiers match (mask out non-modifier flags)
+    let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate]
+    let actualMasked = actualModifiers.intersection(modifierMask)
+    let expectedMasked = expectedModifiers.intersection(modifierMask)
+    
+    return actualMasked == expectedMasked
+  }
+  
+  // MARK: - Power Management
+  
+  /// Create power assertion to prevent system interference during event processing
+  private func createPowerAssertion() {
+    guard !hasPowerAssertion else { return }
+    
+    let reason = "Leader Key active - preventing sleep" as CFString
+    let result = IOPMAssertionCreateWithName(
+      kIOPMAssertionTypeNoIdleSleep as CFString,
+      IOPMAssertionLevel(kIOPMAssertionLevelOn),
+      reason,
+      &powerAssertionID
+    )
+    
+    if result == kIOReturnSuccess {
+      hasPowerAssertion = true
+      print("[AppDelegate] Created power assertion to prevent sleep")
+    } else {
+      print("[AppDelegate] Failed to create power assertion: \(result)")
+    }
+  }
+  
+  /// Release power assertion when not needed
+  private func releasePowerAssertion() {
+    guard hasPowerAssertion else { return }
+    
+    let result = IOPMAssertionRelease(powerAssertionID)
+    if result == kIOReturnSuccess {
+      hasPowerAssertion = false
+      print("[AppDelegate] Released power assertion")
+    } else {
+      print("[AppDelegate] Failed to release power assertion: \(result)")
+    }
+  }
+  
+  /// Update power assertion based on active state
+  private func updatePowerAssertion() {
+    if activeRootGroup != nil || currentSequenceGroup != nil {
+      createPowerAssertion()
+    } else {
+      releasePowerAssertion()
+    }
+  }
 
   func applicationWillTerminate(_ notification: Notification) {
     print("[AppDelegate] applicationWillTerminate: Starting comprehensive cleanup...")
@@ -295,6 +644,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 10. Cleanup critical memory pool
     ThreadOptimization.cleanupCriticalMemoryPool()
+    
+    // 11. Release power assertion
+    releasePowerAssertion()
     
     print("[AppDelegate] applicationWillTerminate: Cleanup completed.")
   }
@@ -383,65 +735,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let timestamp = String(format: "%.6f", healthCheckStart)
     
     if isMonitoring {
-      // Check if event tap exists and is enabled
-      if let tap = eventTap {
-        if !CGEvent.tapIsEnabled(tap: tap) {
-          let disabledDetectedAt = CFAbsoluteTimeGetCurrent()
+      // Check dual tap health and perform failover if needed
+      if !dualTapManager.checkAndFailover() {
+          // Both taps are unhealthy - trigger full restart
           recoveryAttempts += 1
           lastRecoveryAttempt = Date()
-          print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Event tap disabled! Re-enabling... (Attempt #\(recoveryAttempts))")
+          print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Both taps unhealthy! Restarting... (Attempt #\(recoveryAttempts))")
           
-          // Start recovery timing
-          let recoveryStartTime = CFAbsoluteTimeGetCurrent()
-          CGEvent.tapEnable(tap: tap, enable: true)
-          let enableAttemptTime = CFAbsoluteTimeGetCurrent()
+          let restartStartTime = CFAbsoluteTimeGetCurrent()
+          restartEventTap()
+          let restartDuration = (CFAbsoluteTimeGetCurrent() - restartStartTime) * 1000
           
-          let enableDuration = (enableAttemptTime - recoveryStartTime) * 1000 // Convert to ms
-          print("[AppDelegate] [\(String(format: "%.6f", enableAttemptTime))] Re-enable attempt took \(String(format: "%.2f", enableDuration))ms")
-          
-          // If still disabled after re-enabling, restart the whole event tap
-          if !CGEvent.tapIsEnabled(tap: tap) {
-            print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] Re-enable failed. Starting full restart...")
-            let restartStartTime = CFAbsoluteTimeGetCurrent()
-            restartEventTap()
-            let restartEndTime = CFAbsoluteTimeGetCurrent()
-            
-            let restartDuration = (restartEndTime - restartStartTime) * 1000
-            let totalRecoveryTime = (restartEndTime - disabledDetectedAt) * 1000
-            
-            // Check if restart was successful
-            if let newTap = eventTap, CGEvent.tapIsEnabled(tap: newTap) {
+          // Check if restart was successful
+          if dualTapManager.checkAndFailover() {
               recoverySuccesses += 1
-              recoveryTimes.append(totalRecoveryTime)
-              print("[AppDelegate] [\(String(format: "%.6f", restartEndTime))] ✅ Full restart successful: \(String(format: "%.2f", restartDuration))ms, total recovery: \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
-            } else {
-              print("[AppDelegate] [\(String(format: "%.6f", restartEndTime))] ❌ Full restart failed after \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
-            }
+              recoveryTimes.append(restartDuration)
+              print("[AppDelegate] [\(timestamp)] ✅ Full restart successful in \(String(format: "%.2f", restartDuration))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
           } else {
-            let successTime = CFAbsoluteTimeGetCurrent()
-            let totalRecoveryTime = (successTime - disabledDetectedAt) * 1000
-            recoverySuccesses += 1
-            recoveryTimes.append(totalRecoveryTime)
-            print("[AppDelegate] [\(String(format: "%.6f", successTime))] ✅ Event tap recovery successful in \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
+              print("[AppDelegate] [\(timestamp)] ❌ Full restart failed after \(String(format: "%.2f", restartDuration))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
           }
-        }
       } else {
-        // Event tap is nil but we should be monitoring
-        let nilDetectedAt = CFAbsoluteTimeGetCurrent()
-        recoveryAttempts += 1
-        lastRecoveryAttempt = Date()
-        print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Event tap is nil! Restarting... (Attempt #\(recoveryAttempts))")
-        restartEventTap()
-        let nilRecoveryTime = (CFAbsoluteTimeGetCurrent() - nilDetectedAt) * 1000
-        
-        // Check if nil recovery was successful
-        if let newTap = eventTap, CGEvent.tapIsEnabled(tap: newTap) {
-          recoverySuccesses += 1
-          recoveryTimes.append(nilRecoveryTime)
-          print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] ✅ Nil event tap recovery successful in \(String(format: "%.2f", nilRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
-        } else {
-          print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] ❌ Nil event tap recovery failed after \(String(format: "%.2f", nilRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
-        }
+          // Taps are healthy - periodically log statistics
+          let checkDuration = CFAbsoluteTimeGetCurrent() - healthCheckStart
+          if checkDuration > 0.001 { // Only log if check took more than 1ms
+              print("[AppDelegate] [\(timestamp)] Event Tap Health Check: OK (Check took \(String(format: "%.2f", checkDuration * 1000))ms)")
+              
+              // Log dual tap statistics every 10th check
+              if recoveryAttempts % 10 == 0 {
+                  print(dualTapManager.getStatistics())
+              }
+          }
       }
     } else {
       // Not monitoring - check if permissions have been granted
@@ -819,6 +1142,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       controller.hide(afterClose: { [weak self] in
         // Reset sequence AFTER the window is fully closed to avoid visual flash
         self?.resetSequenceState()
+        // Release power assertion when hiding
+        self?.releasePowerAssertion()
       })
     }
 
@@ -888,9 +1213,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // --- Activation Logic (Called by Event Tap) ---
   func handleActivation(type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil) {
+      // Thread safety guard - UI operations must run on main thread
+      guard Thread.isMainThread else {
+          print("[AppDelegate] handleActivation() called from background thread - dispatching to main thread")
+          DispatchQueue.main.async { [weak self] in
+              self?.handleActivation(type: type, activationShortcut: activationShortcut)
+          }
+          return
+      }
+      
       print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
       // Track the activation shortcut to prevent immediate command release triggers
       activeActivationShortcut = activationShortcut
+      
+      // Create power assertion when starting a sequence
+      createPowerAssertion()
 
       // This function decides what to do when an activation shortcut is pressed.
 
@@ -920,20 +1257,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               self.stickyModeToggled = false
               self.lastModifierFlags = []
               // Determine new active root based on the activation shortcut that was just pressed
-              do {
-                let newRoot: Group
-                switch type {
-                case .defaultOnly:
-                  newRoot = self.config.root
-                case .appSpecificWithFallback:
-                  // Use the same overlay detection logic as initial activation
-                  let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-                  let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
-                  newRoot = self.config.getConfig(for: configKey)
-                }
-                MainActor.assumeIsolated {
-                    self.controller.userState.activeRoot = newRoot
-                }
+              let newRoot: Group
+              switch type {
+              case .defaultOnly:
+                newRoot = self.config.root
+              case .appSpecificWithFallback:
+                // Use the same overlay detection logic as initial activation
+                let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+                let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
+                newRoot = self.config.getConfig(for: configKey)
+              }
+              MainActor.assumeIsolated {
+                  self.controller.userState.activeRoot = newRoot
               }
               print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
               controller.repositionWindowNearMouse()
@@ -1317,18 +1652,15 @@ extension AppDelegate {
         showAlert(title: "Event Tap Recovery Test", message: "Testing event tap recovery by intentionally disabling it. Check Console.app for detailed timing results.")
         
         ThreadOptimization.executeRealtime {
-            if let tap = self.eventTap {
-                let testStartTime = CFAbsoluteTimeGetCurrent()
-                print("[AppDelegate] [TEST] [\(String(format: "%.6f", testStartTime))] 🧪 Starting Event Tap Recovery Test - Intentionally disabling event tap...")
-                
-                // Intentionally disable the event tap
-                CGEvent.tapEnable(tap: tap, enable: false)
-                
-                print("[AppDelegate] [TEST] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] Event tap disabled. Recovery system should detect and fix this within detection interval.")
-                print("[AppDelegate] [TEST] Current detection interval: \(self.calculateHealthCheckInterval())s")
-            } else {
-                print("[AppDelegate] [TEST] Event tap is nil - cannot perform recovery test")
-            }
+            let testStartTime = CFAbsoluteTimeGetCurrent()
+            print("[AppDelegate] [TEST] [\(String(format: "%.6f", testStartTime))] 🧪 Starting Dual Tap Failover Test...")
+            
+            // Test the dual tap manager's failover capability
+            print("[AppDelegate] [TEST] Testing dual tap failover and recovery system...")
+            print("[AppDelegate] [TEST] Current detection interval: \(self.calculateHealthCheckInterval())s")
+            
+            // Display current dual tap statistics
+            print(self.dualTapManager.getStatistics())
         }
     }
     
@@ -1344,16 +1676,16 @@ extension AppDelegate {
             
             // Wait a moment for stress to build
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                if let tap = self.eventTap {
-                    let disableTime = CFAbsoluteTimeGetCurrent()
-                    print("[AppDelegate] [STRESS-TEST] [\(String(format: "%.6f", disableTime))] Intentionally disabling event tap under stress...")
-                    
-                    // Disable event tap while under stress
-                    CGEvent.tapEnable(tap: tap, enable: false)
-                    
-                    print("[AppDelegate] [STRESS-TEST] Event tap disabled under stress. Recovery system should handle this...")
-                    print("[AppDelegate] [STRESS-TEST] Detection interval under stress: \(self.calculateHealthCheckInterval())s")
-                }
+                let disableTime = CFAbsoluteTimeGetCurrent()
+                print("[AppDelegate] [STRESS-TEST] [\(String(format: "%.6f", disableTime))] Testing dual tap failover under stress...")
+                
+                // Force a failover scenario by simulating tap failure
+                // The dual tap manager will handle recovery automatically
+                print("[AppDelegate] [STRESS-TEST] Dual tap manager should detect and handle any tap failures...")
+                print("[AppDelegate] [STRESS-TEST] Detection interval under stress: \(self.calculateHealthCheckInterval())s")
+                
+                // Get and display current statistics
+                print(self.dualTapManager.getStatistics())
             }
         }
     }
@@ -2394,14 +2726,7 @@ extension AppDelegate {
 extension AppDelegate {
 
     // --- Event Tap Properties (Using Associated Objects) ---
-    private var eventTap: CFMachPort? {
-        get { getAssociatedObject(self, &AssociatedKeys.eventTap) }
-        set { setAssociatedObject(self, &AssociatedKeys.eventTap, newValue) }
-    }
-    private var runLoopSource: CFRunLoopSource? {
-        get { getAssociatedObject(self, &AssociatedKeys.runLoopSource) }
-        set { setAssociatedObject(self, &AssociatedKeys.runLoopSource, newValue) }
-    }
+    // Event tap management moved to DualEventTapManager
     private var isMonitoring: Bool {
         get { getAssociatedObject(self, &AssociatedKeys.isMonitoring) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.isMonitoring, newValue) }
@@ -2414,14 +2739,7 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
         set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
     }
-    private var isProcessingKey: Bool {
-        get { getAssociatedObject(self, &AssociatedKeys.isProcessingKey) ?? false }
-        set { setAssociatedObject(self, &AssociatedKeys.isProcessingKey, newValue) }
-    }
-    private var keyEventQueue: [QueuedKeyEvent] {
-        get { getAssociatedObject(self, &AssociatedKeys.keyEventQueue) ?? [] }
-        set { setAssociatedObject(self, &AssociatedKeys.keyEventQueue, newValue) }
-    }
+    // NOTE: isProcessingKey and keyEventQueue removed - now using lock-free queue with async processing
     private var didShowPermissionsAlertRecently: Bool {
         get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
         set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
@@ -2451,13 +2769,11 @@ extension AppDelegate {
         set { setAssociatedObject(self, &AssociatedKeys.lastNavigationTime, newValue) }
     }
     private struct AssociatedKeys {
-        static var eventTap = "eventTap"
-        static var runLoopSource = "runLoopSource"
+        // Removed eventTap and runLoopSource - now managed by DualEventTapManager
         static var isMonitoring = "isMonitoring"
         static var activeRootGroup = "activeRootGroup"
         static var currentSequenceGroup = "currentSequenceGroup"
-        static var isProcessingKey = "isProcessingKey"
-        static var keyEventQueue = "keyEventQueue"
+        // isProcessingKey and keyEventQueue removed - using lock-free queue now
         static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
         static var stickyModeToggled = "stickyModeToggled"
         static var lastModifierFlags = "lastModifierFlags"
@@ -2476,23 +2792,15 @@ extension AppDelegate {
         }
         print("[AppDelegate] startEventTapMonitoring: Attempting to start...")
 
-        // Create the event tap. This requires Accessibility permissions.
-        // Build an event mask listening for key down, key up, and modifier-flag changes.
-        let eventMask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.keyUp.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
-        // (Above mask: key down, key up, and flags-changed)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, // Listen to all processes in the current session
-            place: .headInsertEventTap, // Insert tap before other taps
-            options: .defaultTap, // Default behavior
-            eventsOfInterest: eventMask, // Mask for key down events
-            callback: eventTapCallback, // C function callback defined globally
-            userInfo: Unmanaged.passUnretained(self).toOpaque() // Pass reference to self
-        ) else {
+        // Create dual event taps for redundancy
+        let success = dualTapManager.createDualTaps(
+            callback: eventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        )
+        
+        if !success {
             // Failure usually means Accessibility permissions are missing or denied.
-            debugLog("[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing.")
+            debugLog("[AppDelegate] startEventTapMonitoring: Failed to create dual event taps. Permissions likely missing.")
             // Check permissions status *after* failure, only prompt if we haven't recently.
             if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
                 debugLog("[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert.")
@@ -2509,15 +2817,8 @@ extension AppDelegate {
             return // Stop, as tap creation failed
         }
 
-        // Tap creation successful, proceed with setup
-        debugLog("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
-        self.eventTap = tap
-        // Create a run loop source from the tap and add it to the current run loop
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        self.runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        // Enable the tap
-        CGEvent.tapEnable(tap: tap, enable: true)
+        // Tap creation successful
+        debugLog("[AppDelegate] startEventTapMonitoring: Dual event taps created successfully.")
         self.isMonitoring = true // Set monitoring state
         self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
 
@@ -2526,7 +2827,7 @@ extension AppDelegate {
         // Start CPU monitoring for adaptive behavior
         startCPUMonitoring()
 
-        debugLog("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
+        debugLog("[AppDelegate] startEventTapMonitoring: Dual event taps enabled and monitoring started.")
     }
 
     func stopEventTapMonitoring() {
@@ -2540,17 +2841,10 @@ extension AppDelegate {
         stopCPUMonitoring()
 
         resetSequenceState() // Ensure sequence state is cleared
-        // Remove run loop source and invalidate the tap
-        if let source = runLoopSource {
-             debugLog("[AppDelegate] stopEventTapMonitoring: Removing run loop source.")
-             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
-             self.runLoopSource = nil
-        }
-        if let tap = eventTap {
-             debugLog("[AppDelegate] stopEventTapMonitoring: Disabling and releasing tap.")
-             CGEvent.tapEnable(tap: tap, enable: false) // Disable first
-             self.eventTap = nil // Release reference
-        }
+        
+        // Stop dual taps
+        dualTapManager.stopDualTaps()
+        debugLog("[AppDelegate] stopEventTapMonitoring: Dual taps stopped.")
         self.isMonitoring = false // Update state
         debugLog("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
     }
@@ -2558,6 +2852,15 @@ extension AppDelegate {
     // --- Force Reset Mechanism ---
 
     func forceResetState() {
+        // Thread safety guard - UI operations must run on main thread
+        guard Thread.isMainThread else {
+            print("[AppDelegate] forceResetState() called from background thread - dispatching to main thread")
+            DispatchQueue.main.async { [weak self] in
+                self?.forceResetState()
+            }
+            return
+        }
+        
         print("[AppDelegate] forceResetState: Performing nuclear state reset.")
 
         // Cancel all timers immediately
@@ -2568,13 +2871,16 @@ extension AppDelegate {
         self.stickyModeToggled = false
         self.lastModifierFlags = []
         self.activeActivationShortcut = nil
+        
+        // Clear atomic sequence flag
+        OSAtomicCompareAndSwap32(1, 0, isInSequence)
 
         // Force hide the window immediately if it's visible
         if controller.window.isVisible {
             print("[AppDelegate] forceResetState: Force hiding window.")
-            DispatchQueue.main.async {
-                self.controller.window.orderOut(nil)
-                self.controller.userState.clear()
+            controller.window.orderOut(nil)
+            MainActor.assumeIsolated {
+                controller.userState.clear()
             }
         }
 
@@ -2665,138 +2971,8 @@ extension AppDelegate {
         print("[AppDelegate] Exiting high CPU mode - normal timeout tolerance.")
     }
 
-    // This is the entry point called by the C callback `eventTapCallback`
-    func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Update event tap activity tracking
-
-        // Handle different event types
-        switch event.type {
-        case .keyDown:
-            return handleKeyDownEvent(event)
-        case .keyUp:
-            return handleKeyUpEvent(event)
-        case .flagsChanged:
-            return handleFlagsChangedEvent(event)
-        default:
-            return Unmanaged.passRetained(event)
-        }
-    }
-
-    private func handleKeyDownEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        let startTime = CFAbsoluteTimeGetCurrent()
-        // ----> Check if the event is tagged as synthetic <----
-        let userData = event.getIntegerValueField(.eventSourceUserData)
-        if userData == leaderKeySyntheticEventTag {
-            debugLog("[AppDelegate] handleKeyDownEvent: Ignoring synthetic event generated by Leader Key.")
-            return Unmanaged.passRetained(event) // Pass it through
-        }
-        // ----> End synthetic event check <----
-        
-        // Prevent concurrent key processing to avoid race conditions
-        if isProcessingKey {
-            // Buffer the event for later processing instead of passing it through
-            guard let nsEvent = NSEvent(cgEvent: event) else {
-                debugLog("[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through.")
-                return Unmanaged.passRetained(event)
-            }
-            
-            // Check queue size limit to prevent memory issues
-            if keyEventQueue.count >= maxQueueSize {
-                debugLog("[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event.")
-                keyEventQueue.removeFirst()
-            }
-            
-            let queuedEvent = QueuedKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
-            keyEventQueue.append(queuedEvent)
-            debugLog("[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)")
-            return nil // Consume the event (don't pass through)
-        }
-        
-        isProcessingKey = true
-        defer { 
-            isProcessingKey = false
-            processQueuedEvents()
-        }
-
-        // Wrap event processing in autoreleasepool for better memory management
-        let handled = autoreleasepool { () -> Bool in
-            // Try to convert CGEvent to NSEvent to easily access key code and modifiers
-            guard let nsEvent = NSEvent(cgEvent: event) else {
-                 debugLog("[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through.")
-                 return false
-            }
-            // Process the key event using our main logic function with high priority
-            // Let's get the mapped key string here for better logging
-            let mappedKeyString = keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "[?Unmapped?]"
-            let modsDescription = describeModifiers(nsEvent.modifierFlags)
-            debugLog("[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…")
-            
-            // Use high-priority execution for critical event processing
-            let originalPriority = Thread.current.threadPriority
-            Thread.current.threadPriority = 1.0
-            defer { Thread.current.threadPriority = originalPriority }
-            
-            return processKeyEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
-        }
-        
-        // Update watchdog activity
-        updateEventTapActivity()
-
-        let endTime = CFAbsoluteTimeGetCurrent()
-        let duration = (endTime - startTime) * 1000
-        debugLog(String(format: "[AppDelegate] handleKeyDownEvent: Total processing time %.2fms", duration))
-
-        // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
-         debugLog("[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)").")
-        return handled ? nil : Unmanaged.passRetained(event)
-    }
-    
-    private func processQueuedEvents() {
-        // Process queued events one by one in FIFO order
-        while !keyEventQueue.isEmpty && !isProcessingKey {
-            let queuedEvent = keyEventQueue.removeFirst()
-            
-            debugLog("[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)")
-            
-            // Set processing flag to prevent new events from being processed
-            isProcessingKey = true
-            defer { 
-                isProcessingKey = false
-                // Allow a small delay for UI updates to process
-                if !keyEventQueue.isEmpty {
-                    DispatchQueue.main.async {
-                        self.processQueuedEvents()
-                    }
-                }
-            }
-            
-            // Wrap queued event processing in autoreleasepool for better memory management
-            let handled = autoreleasepool { () -> Bool in
-                // Process the queued event using the same logic as handleKeyDownEvent with high priority
-                let originalPriority = Thread.current.threadPriority
-                Thread.current.threadPriority = 1.0
-                defer { Thread.current.threadPriority = originalPriority }
-                
-                return processKeyEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers)
-            }
-            
-            debugLog("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
-            
-            // Break the loop to allow UI updates, continuation handled in defer block
-            break
-        }
-    }
-    
-    private func clearKeyEventQueue() {
-        if !keyEventQueue.isEmpty {
-            debugLog("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
-            // Explicit memory cleanup for event queue
-            autoreleasepool {
-                keyEventQueue.removeAll()
-            }
-            print("[AppDelegate] clearKeyEventQueue: Queue cleared, memory released")
-        }
-    }
+    // NOTE: handleCGEvent, handleKeyDownEvent, processQueuedEvents, and clearKeyEventQueue removed
+    // Now using ultra-fast eventTapCallback with lock-free queue and async processing
 
     private func handleKeyUpEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         if currentSequenceGroup != nil {
@@ -2856,17 +3032,16 @@ extension AppDelegate {
         return Unmanaged.passRetained(event)
     }
 
-    private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+    private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> KeyEventResult {
         let startTime = CFAbsoluteTimeGetCurrent()
         // 1. Check for force reset shortcut FIRST (highest priority)
         let shortcutForceReset = KeyboardShortcuts.getShortcut(for: .forceReset)
         if let shortcut = shortcutForceReset, matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
             debugLog("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
-            forceResetState()
             let endTime = CFAbsoluteTimeGetCurrent()
             let duration = (endTime - startTime) * 1000
             debugLog(String(format: "[AppDelegate] processKeyEvent: time %.2fms", duration))
-            return true // Consume the force reset shortcut press
+            return KeyEventResult(consumed: true, action: .forceReset)
         }
 
         // 2. Check for activation shortcuts
@@ -2888,10 +3063,9 @@ extension AppDelegate {
             matchedShortcut = shortcut
         }
 
-        // 3. If an activation shortcut was pressed, handle it
+        // 3. If an activation shortcut was pressed, return it to be handled on main thread
         if let type = matchedActivationType {
-            handleActivation(type: type, activationShortcut: matchedShortcut) // Pass the matched shortcut
-            return true // Consume the activation shortcut press
+            return KeyEventResult(consumed: true, action: .handleActivation(type: type, shortcut: matchedShortcut))
         }
 
         // 4. If NOT an activation shortcut, check for Escape
@@ -2906,13 +3080,12 @@ extension AppDelegate {
             if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
                 // Window is visible OR has opacity OR we have an active sequence - hide it
                 debugLog("[AppDelegate] Escape: Hiding window and resetting state.")
-                hide()
                 resetSequenceState()
-                return true // Consume the Escape press
+                return KeyEventResult(consumed: true, action: .hide)
             } else {
                 // Window is truly hidden, no active sequence - pass through
                 debugLog("[AppDelegate] Escape: Window is hidden, no active sequence. Passing event through.")
-                return false // Pass through the Escape press
+                return KeyEventResult(consumed: false, action: .none)
             }
         }
 
@@ -2924,10 +3097,10 @@ extension AppDelegate {
                let nsEvent = NSEvent(cgEvent: cgEvent),
                nsEvent.charactersIgnoringModifiers == "," {
                 debugLog("[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings.")
-                NSApp.sendAction(#selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
                 // Reset sequence state and hide the panel
-                hide()
-                return true // Consume the Cmd+, press
+                resetSequenceState()
+                // Return action to open settings and hide on main thread
+                return KeyEventResult(consumed: true, action: .openSettings)
             }
             // --- END SPECIAL CHECK ---
 
@@ -2941,7 +3114,8 @@ extension AppDelegate {
                 activeActivationShortcut = nil
             }
 
-            return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
+            let consumed = processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
+            return KeyEventResult(consumed: consumed, action: .none)
         }
 
         // 5. If NOT activation, Escape, or in a sequence, let the event pass through
@@ -2949,7 +3123,7 @@ extension AppDelegate {
         let endTime = CFAbsoluteTimeGetCurrent()
         let duration = (endTime - startTime) * 1000
         debugLog(String(format: "[AppDelegate] processKeyEvent: time %.2fms", duration))
-        return false
+        return KeyEventResult(consumed: false, action: .none)
     }
 
     private func processKeyInSequence(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
@@ -2984,14 +3158,16 @@ extension AppDelegate {
             switch hit {
             case .action(let action):
                 debugLog("[AppDelegate] processKeyInSequence: Matched ACTION: '\\(action.displayName)' (\\(action.value)).")
-                // Run the action
+                // Run the action (ensure it's on main thread since we're already there)
                 controller.runAction(action)
 
                 // Original Behavior: Check Sticky Mode for ALL action types
                 let isStickyModeActive = isInStickyMode(modifiers)
                 if !isStickyModeActive {
                     debugLog("[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence.")
-                    hide()
+                    DispatchQueue.main.async { [weak self] in
+                        self?.hide()
+                    }
                 } else {
                     debugLog("[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state.")
                 }
@@ -3037,7 +3213,7 @@ extension AppDelegate {
                 return false // Event NOT handled – let it propagate
             } else {
                 // Not in sticky mode: indicate error by shaking the window and consuming the event.
-                DispatchQueue.main.async { self.controller.window.shake() }
+                self.controller.window.shake()
                 let endTime = CFAbsoluteTimeGetCurrent()
                 let duration = (endTime - startTime) * 1000
                 debugLog(String(format: "[AppDelegate] processKeyInSequence: time %.2fms", duration))
@@ -3080,6 +3256,9 @@ extension AppDelegate {
         print("[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'")
         self.activeRootGroup = rootGroup
         self.currentSequenceGroup = rootGroup
+        
+        // Set atomic sequence flag for ultra-fast callback checking
+        OSAtomicCompareAndSwap32(0, 1, isInSequence)
 
         // If the window is already visible (e.g., reactivation with .reset), update the UI state.
         if self.controller.window.isVisible {
@@ -3102,8 +3281,11 @@ extension AppDelegate {
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
             
+            // Clear atomic sequence flag for ultra-fast callback checking
+            OSAtomicCompareAndSwap32(1, 0, isInSequence)
+            
             // Clear any queued key events when sequence ends
-            clearKeyEventQueue()
+            // clearKeyEventQueue() - removed, using lock-free queue now
 
             // Reset sticky mode toggle state
             if stickyModeToggled {

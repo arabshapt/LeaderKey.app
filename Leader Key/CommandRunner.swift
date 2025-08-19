@@ -123,7 +123,7 @@ class CommandRunner {
             print("[CommandRunner] Command timed out after \(timeout) seconds")
           }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem!)
+        DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeout), execute: timeoutWorkItem!)
       }
 
       let startTime = Date()
