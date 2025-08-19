@@ -56,7 +56,7 @@ brew install --cask leader-key-enhanced
 Download the enhanced version from [Google Drive](https://drive.google.com/file/d/1E6BcdelZ6FYXwM4fTGTyyY5_PBEsLOxb/view?usp=sharing).
 
 **Option 3: Build from Source**
-Clone this repository and build using Xcode or the command line tools documented in `CLAUDE.md`.
+See the [Building from Source](#building-from-source) section below for detailed instructions.
 
 **Option 4: Original via Homebrew** *(installs the upstream version)*
 ```sh
@@ -64,6 +64,138 @@ brew install --cask leader-key
 ```
 
 *Note: The original Homebrew formula installs the upstream version. For the enhanced features, use Option 1 above.*
+
+## Building from Source
+
+### Prerequisites
+
+- **macOS**: 13.0 or later
+- **Xcode**: 15.0 or later with macOS SDK
+- **Command Line Tools**: `xcode-select --install`
+
+### Development Builds
+
+For development and testing:
+
+```bash
+# Clone the repository
+git clone https://github.com/arabshapt/LeaderKeyapp.git
+cd LeaderKeyapp
+
+# Build and run Debug configuration
+xcodebuild -scheme "Leader Key" -configuration Debug build
+
+# Or open in Xcode
+open "Leader Key.xcodeproj"
+```
+
+### Release Builds
+
+#### Quick Release (Recommended)
+
+Use the provided release script:
+
+```bash
+# Bump version and create release
+bin/bump
+bin/release
+```
+
+The `bin/release` script will:
+1. Archive the app in Release configuration
+2. Export it to the `Updates/` directory
+3. Create a versioned zip file
+4. Generate release metadata
+
+#### Manual Release Build
+
+For manual control over the build process:
+
+```bash
+# 1. Build Release configuration
+xcodebuild -scheme "Leader Key" -configuration Release build
+
+# 2. Create archive
+xcodebuild -scheme "Leader Key" -configuration Release archive \
+    -archivePath "build/Leader Key.xcarchive"
+
+# 3. Export app bundle
+xcodebuild -exportArchive \
+    -archivePath "build/Leader Key.xcarchive" \
+    -exportPath "Updates" \
+    -exportOptionsPlist exportOptions.plist
+```
+
+The exported app will be available at `Updates/Leader Key.app`.
+
+### Build Configuration Notes
+
+#### Code Signing & Hardened Runtime
+
+This project uses **ad-hoc signing** for local distribution. Key configuration details:
+
+- **Release builds**: Hardened Runtime is **disabled** to avoid framework loading conflicts
+- **Debug builds**: Hardened Runtime is **enabled** for development security
+- **Signing**: Uses manual ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`)
+
+#### Why Hardened Runtime is Disabled for Release
+
+During development, we discovered that enabling Hardened Runtime with ad-hoc signing caused framework loading failures:
+
+```
+Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle
+Reason: mapping process and mapped file (non-platform) have different Team IDs
+```
+
+**Root Cause**: Hardened Runtime enforces strict validation between the main app and embedded frameworks. With ad-hoc signing (no Team ID), macOS treats each component as having different signing identities.
+
+**Solution**: Hardened Runtime is disabled for Release builds while maintaining ad-hoc signing for local distribution.
+
+For **App Store distribution**, you would need:
+- Valid Apple Developer certificate
+- Proper Team ID configuration
+- Hardened Runtime enabled
+- App Store signing configuration
+
+### Troubleshooting
+
+#### Framework Loading Errors
+
+**Problem**: App fails to launch with Sparkle framework errors
+**Solution**: Ensure hardened runtime is disabled for Release configuration
+
+#### Code Signing Issues
+
+**Problem**: "No signing certificate found" errors
+**Solution**: The project is configured for ad-hoc signing - no developer certificate required
+
+#### Build Failures
+
+**Problem**: Swift format warnings during build
+**Solution**: These are linting warnings and don't prevent building. Fix with:
+```bash
+# Auto-format Swift files
+find "Leader Key" -name "*.swift" -exec swift format --in-place {} \;
+```
+
+#### Accessibility Permissions
+
+**Problem**: App doesn't capture key events
+**Solution**: Grant accessibility permissions in System Preferences → Privacy & Security → Accessibility
+
+### Testing Your Build
+
+After building, verify the app works correctly:
+
+```bash
+# Launch the app
+open "Updates/Leader Key.app"
+
+# Check if it's running
+ps aux | grep "Leader Key" | grep -v grep
+```
+
+The app should appear in your menu bar and respond to your configured leader key.
 
 ## Why Leader Key?
 

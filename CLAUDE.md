@@ -1,7 +1,10 @@
 # Leader Key Development Guide
 
 ## Build & Test Commands
-- Build and run: `xcodebuild -scheme "Leader Key" -configuration Debug build`
+- Build and run (Debug): `xcodebuild -scheme "Leader Key" -configuration Debug build`
+- Build Release: `xcodebuild -scheme "Leader Key" -configuration Release build`
+- Archive for Release: `xcodebuild -scheme "Leader Key" -configuration Release archive -archivePath "build/Leader Key.xcarchive"`
+- Export Archive: `xcodebuild -exportArchive -archivePath "build/Leader Key.xcarchive" -exportPath "Updates" -exportOptionsPlist exportOptions.plist`
 - Run all tests: `xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test`
 - Run single test: `xcodebuild -scheme "Leader Key" -testPlan "TestPlan" -only-testing:Leader KeyTests/UserConfigTests/testInitializesWithDefaults test`
 - Bump version: `bin/bump`

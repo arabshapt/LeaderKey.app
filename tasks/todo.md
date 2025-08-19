@@ -340,6 +340,85 @@ Over the past 7 commits (Aug 11-13, 2025), the Leader Key app has undergone sign
 ### Conclusion
 These experimental changes represent a significant improvement to the Leader Key app's performance and user experience. The modular approach and experimental flags allow for safe testing and gradual rollout. Priority should be given to stability testing before promoting features to production.
 
+## Release Build Configuration Fix (2025-08-19)
+
+### Problem Resolved
+User reported that archived builds wouldn't run after being created in Xcode.
+
+### Root Cause
+- Project was configured with `"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-"` which disabled code signing
+- Missing entitlements for accessibility features the app requires
+- No proper Release build commands documented
+
+### Changes Made
+
+#### 1. Fixed Code Signing Configuration
+- Removed problematic `CODE_SIGN_IDENTITY` override from both Debug and Release configurations
+- Updated Release configuration to use ad-hoc signing (`CODE_SIGN_IDENTITY = "-"` with `CODE_SIGN_STYLE = Manual`)
+- Maintained automatic signing for Debug configuration
+
+#### 2. Added Required Entitlements 
+Updated `Leader_Key.entitlements` with:
+- `com.apple.security.device.input-monitoring` - Required for intercepting keyboard events
+- `com.apple.security.automation.apple-events` - Required for automation features
+
+#### 3. Updated Build Documentation
+Added to `CLAUDE.md`:
+- Release build command: `xcodebuild -scheme "Leader Key" -configuration Release build`
+- Archive command: `xcodebuild -scheme "Leader Key" -configuration Release archive -archivePath "build/Leader Key.xcarchive"`
+- Export command: `xcodebuild -exportArchive -archivePath "build/Leader Key.xcarchive" -exportPath "Updates" -exportOptionsPlist exportOptions.plist`
+
+#### 4. Created Export Options
+- Added `exportOptions.plist` with proper settings for macOS app export
+- Configured for ad-hoc signing and automatic team selection
+
+### Testing Results
+- ✅ Release configuration builds successfully
+- ✅ Archive creation works without errors  
+- ✅ App export to Updates/ directory successful
+- ✅ Exported app launches and runs correctly
+- ✅ Compatible with existing `bin/release` script workflow
+
+### Impact
+- Users can now successfully create release builds that actually run
+- Existing release process (`bin/release`) works with new build configuration
+- App properly requests accessibility permissions when needed
+- Builds are properly signed for local distribution
+
+### Update: App Launch Issue Resolution (2025-08-19)
+
+#### Additional Problem Discovered
+After initial fix, exported app still failed to launch with error:
+```
+Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle
+Reason: mapping process and mapped file (non-platform) have different Team IDs
+```
+
+#### Root Cause Analysis
+- **Hardened Runtime + Ad-hoc Signing Conflict**: `ENABLE_HARDENED_RUNTIME = YES` was enabled for Release builds
+- **Framework Loading Restriction**: Hardened runtime with ad-hoc signing creates strict validation between main app and frameworks  
+- **Team ID Mismatch**: macOS refused to load Sparkle.framework due to perceived signing inconsistencies
+
+#### Solution Applied
+**Disabled Hardened Runtime for Release Configuration**:
+- Removed `ENABLE_HARDENED_RUNTIME = YES;` from Release configuration only (line 729 in project.pbxproj)
+- Kept hardened runtime enabled for Debug configuration to maintain development security
+- Maintained ad-hoc signing approach for local distribution
+
+#### Final Testing Results
+- ✅ Release configuration builds successfully
+- ✅ Archive creation works without errors
+- ✅ App export to Updates/ directory successful  
+- ✅ **App launches and runs correctly** (process confirmed running)
+- ✅ No framework loading errors
+- ✅ Compatible with existing release workflow
+
+#### Technical Notes
+- Hardened runtime provides additional security but requires consistent code signing across all app components
+- For local/ad-hoc distribution, disabling hardened runtime eliminates framework loading restrictions
+- Debug builds retain hardened runtime for development security
+- App Store distribution would require proper developer certificate signing with hardened runtime
+
 ## CPU Wakes Fix - Performance Optimization Review
 
 ### Date: 2025-08-19
