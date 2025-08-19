@@ -22,6 +22,12 @@ class StatusItem {
   var handleRevealConfig: (() -> Void)?
   var handleCheckForUpdates: (() -> Void)?
   var handleForceReset: (() -> Void)?
+  
+  // Developer Tools handlers
+  var handleNodeJSStressTest: (() -> Void)?
+  var handleIntelliJStressTest: (() -> Void)?
+  var handleRecoveryUnderStress: (() -> Void)?
+  var handleShowRecoveryStatistics: (() -> Void)?
 
   func enable() {
     statusItem = NSStatusBar.system.statusItem(
@@ -77,6 +83,43 @@ class StatusItem {
 
     menu.addItem(NSMenuItem.separator())
 
+    // Developer Tools submenu
+    let developerToolsItem = NSMenuItem(
+      title: "Developer Tools", action: nil, keyEquivalent: ""
+    )
+    let developerToolsSubmenu = NSMenu()
+    
+    let nodeJSTestItem = NSMenuItem(
+      title: "NodeJS Scenario Test", action: #selector(runNodeJSStressTest), keyEquivalent: ""
+    )
+    nodeJSTestItem.target = self
+    developerToolsSubmenu.addItem(nodeJSTestItem)
+    
+    let intelliJTestItem = NSMenuItem(
+      title: "IntelliJ Scenario Test", action: #selector(runIntelliJStressTest), keyEquivalent: ""
+    )
+    intelliJTestItem.target = self
+    developerToolsSubmenu.addItem(intelliJTestItem)
+    
+    let recoveryTestItem = NSMenuItem(
+      title: "🔥 Test Recovery Under Stress", action: #selector(testRecoveryUnderStress), keyEquivalent: ""
+    )
+    recoveryTestItem.target = self
+    developerToolsSubmenu.addItem(recoveryTestItem)
+    
+    developerToolsSubmenu.addItem(NSMenuItem.separator())
+    
+    let recoveryStatsItem = NSMenuItem(
+      title: "📊 Show Recovery Statistics", action: #selector(showRecoveryStatistics), keyEquivalent: ""
+    )
+    recoveryStatsItem.target = self
+    developerToolsSubmenu.addItem(recoveryStatsItem)
+    
+    developerToolsItem.submenu = developerToolsSubmenu
+    menu.addItem(developerToolsItem)
+
+    menu.addItem(NSMenuItem.separator())
+
     menu.addItem(
       NSMenuItem(
         title: "Quit Leader Key",
@@ -126,6 +169,22 @@ class StatusItem {
 
   @objc func forceReset() {
     handleForceReset?()
+  }
+
+  @objc func runNodeJSStressTest() {
+    handleNodeJSStressTest?()
+  }
+
+  @objc func runIntelliJStressTest() {
+    handleIntelliJStressTest?()
+  }
+
+  @objc func testRecoveryUnderStress() {
+    handleRecoveryUnderStress?()
+  }
+
+  @objc func showRecoveryStatistics() {
+    handleShowRecoveryStatistics?()
   }
 
   private func updateStatusItemAppearance() {

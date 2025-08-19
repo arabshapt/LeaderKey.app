@@ -86,6 +86,19 @@ class MainMenu: NSMenu {
         title: "Memory Locking Status", 
         action: #selector(AppDelegate.showMemoryLockingStatus(_:)), 
         keyEquivalent: "L"),
+      .separator(),
+      NSMenuItem(
+        title: "🧪 Test Event Tap Recovery", 
+        action: #selector(AppDelegate.testEventTapRecovery(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "🔥 Test Recovery Under Stress", 
+        action: #selector(AppDelegate.testRecoveryUnderStress(_:)), 
+        keyEquivalent: ""),
+      NSMenuItem(
+        title: "📊 Show Recovery Statistics", 
+        action: #selector(AppDelegate.showRecoveryStatistics(_:)), 
+        keyEquivalent: "R"),
     ]
 
     items = [appMenu, editMenu, debugMenu]

@@ -308,6 +308,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var permissionPollingStartTime: Date?
   private var lastEventTapActivity = Date()
   
+  // MARK: - Event Tap Recovery Performance Tracking
+  
+  private var recoveryAttempts: Int = 0
+  private var recoverySuccesses: Int = 0
+  private var recoveryTimes: [Double] = [] // Store recovery times in milliseconds
+  private var lastRecoveryAttempt: Date?
+  
   private func setupStateRecoveryTimer() {
     // Check state every 5 seconds
     stateRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -372,23 +379,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
   
   private func checkEventTapHealth() {
+    let healthCheckStart = CFAbsoluteTimeGetCurrent()
+    let timestamp = String(format: "%.6f", healthCheckStart)
+    
     if isMonitoring {
       // Check if event tap exists and is enabled
       if let tap = eventTap {
         if !CGEvent.tapIsEnabled(tap: tap) {
-          print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
+          let disabledDetectedAt = CFAbsoluteTimeGetCurrent()
+          recoveryAttempts += 1
+          lastRecoveryAttempt = Date()
+          print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Event tap disabled! Re-enabling... (Attempt #\(recoveryAttempts))")
+          
+          // Start recovery timing
+          let recoveryStartTime = CFAbsoluteTimeGetCurrent()
           CGEvent.tapEnable(tap: tap, enable: true)
+          let enableAttemptTime = CFAbsoluteTimeGetCurrent()
+          
+          let enableDuration = (enableAttemptTime - recoveryStartTime) * 1000 // Convert to ms
+          print("[AppDelegate] [\(String(format: "%.6f", enableAttemptTime))] Re-enable attempt took \(String(format: "%.2f", enableDuration))ms")
           
           // If still disabled after re-enabling, restart the whole event tap
           if !CGEvent.tapIsEnabled(tap: tap) {
-            print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting event tap...")
+            print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] Re-enable failed. Starting full restart...")
+            let restartStartTime = CFAbsoluteTimeGetCurrent()
             restartEventTap()
+            let restartEndTime = CFAbsoluteTimeGetCurrent()
+            
+            let restartDuration = (restartEndTime - restartStartTime) * 1000
+            let totalRecoveryTime = (restartEndTime - disabledDetectedAt) * 1000
+            
+            // Check if restart was successful
+            if let newTap = eventTap, CGEvent.tapIsEnabled(tap: newTap) {
+              recoverySuccesses += 1
+              recoveryTimes.append(totalRecoveryTime)
+              print("[AppDelegate] [\(String(format: "%.6f", restartEndTime))] ✅ Full restart successful: \(String(format: "%.2f", restartDuration))ms, total recovery: \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
+            } else {
+              print("[AppDelegate] [\(String(format: "%.6f", restartEndTime))] ❌ Full restart failed after \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
+            }
+          } else {
+            let successTime = CFAbsoluteTimeGetCurrent()
+            let totalRecoveryTime = (successTime - disabledDetectedAt) * 1000
+            recoverySuccesses += 1
+            recoveryTimes.append(totalRecoveryTime)
+            print("[AppDelegate] [\(String(format: "%.6f", successTime))] ✅ Event tap recovery successful in \(String(format: "%.2f", totalRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
           }
         }
       } else {
         // Event tap is nil but we should be monitoring
-        print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
+        let nilDetectedAt = CFAbsoluteTimeGetCurrent()
+        recoveryAttempts += 1
+        lastRecoveryAttempt = Date()
+        print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Event tap is nil! Restarting... (Attempt #\(recoveryAttempts))")
         restartEventTap()
+        let nilRecoveryTime = (CFAbsoluteTimeGetCurrent() - nilDetectedAt) * 1000
+        
+        // Check if nil recovery was successful
+        if let newTap = eventTap, CGEvent.tapIsEnabled(tap: newTap) {
+          recoverySuccesses += 1
+          recoveryTimes.append(nilRecoveryTime)
+          print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] ✅ Nil event tap recovery successful in \(String(format: "%.2f", nilRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
+        } else {
+          print("[AppDelegate] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] ❌ Nil event tap recovery failed after \(String(format: "%.2f", nilRecoveryTime))ms (Success rate: \(recoverySuccesses)/\(recoveryAttempts))")
+        }
       }
     } else {
       // Not monitoring - check if permissions have been granted
@@ -396,7 +449,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       
       // Detect permission change from false to true
       if lastPermissionCheck == false && hasPermissions {
-        print("[AppDelegate] Event Tap Health Check: Accessibility permissions newly granted! Starting event tap...")
+        print("[AppDelegate] [\(timestamp)] Event Tap Health Check: Accessibility permissions newly granted! Starting event tap...")
         startEventTapMonitoring()
       }
       
@@ -961,6 +1014,24 @@ private extension AppDelegate {
             print("[StatusItem] Force Reset clicked.")
             self.forceResetState()
         }
+        
+        // Developer Tools handlers
+        statusItem.handleNodeJSStressTest = {
+            print("[StatusItem] NodeJS Stress Test clicked.")
+            self.runNodeJSStressTest(nil)
+        }
+        statusItem.handleIntelliJStressTest = {
+            print("[StatusItem] IntelliJ Stress Test clicked.")
+            self.runIntelliJStressTest(nil)
+        }
+        statusItem.handleRecoveryUnderStress = {
+            print("[StatusItem] Recovery Under Stress Test clicked.")
+            self.testRecoveryUnderStress(nil)
+        }
+        statusItem.handleShowRecoveryStatistics = {
+            print("[StatusItem] Show Recovery Statistics clicked.")
+            self.showRecoveryStatistics(nil)
+        }
         // Observe changes to the preference for showing the menu bar icon
         Task {
             for await value in Defaults.updates(.showMenuBarIcon) {
@@ -1238,6 +1309,122 @@ extension AppDelegate {
         
         showAlert(title: "Memory Locking Status", message: message)
         print("[AppDelegate] Memory Locking Status: \(status)")
+    }
+    
+    // MARK: - Event Tap Recovery Testing Methods
+    
+    @objc func testEventTapRecovery(_ sender: Any?) {
+        showAlert(title: "Event Tap Recovery Test", message: "Testing event tap recovery by intentionally disabling it. Check Console.app for detailed timing results.")
+        
+        ThreadOptimization.executeRealtime {
+            if let tap = self.eventTap {
+                let testStartTime = CFAbsoluteTimeGetCurrent()
+                print("[AppDelegate] [TEST] [\(String(format: "%.6f", testStartTime))] 🧪 Starting Event Tap Recovery Test - Intentionally disabling event tap...")
+                
+                // Intentionally disable the event tap
+                CGEvent.tapEnable(tap: tap, enable: false)
+                
+                print("[AppDelegate] [TEST] [\(String(format: "%.6f", CFAbsoluteTimeGetCurrent()))] Event tap disabled. Recovery system should detect and fix this within detection interval.")
+                print("[AppDelegate] [TEST] Current detection interval: \(self.calculateHealthCheckInterval())s")
+            } else {
+                print("[AppDelegate] [TEST] Event tap is nil - cannot perform recovery test")
+            }
+        }
+    }
+    
+    @objc func testRecoveryUnderStress(_ sender: Any?) {
+        showAlert(title: "Recovery Under Stress Test", message: "Testing event tap recovery while applying system stress. This will stress CPU and memory for 30 seconds while testing recovery. Check Console.app for results.")
+        
+        ThreadOptimization.executeRealtime {
+            let testStartTime = CFAbsoluteTimeGetCurrent()
+            print("[AppDelegate] [STRESS-TEST] [\(String(format: "%.6f", testStartTime))] 🔥 Starting Recovery Under Stress Test...")
+            
+            // Apply system stress
+            self.applySystemStressForRecoveryTest()
+            
+            // Wait a moment for stress to build
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if let tap = self.eventTap {
+                    let disableTime = CFAbsoluteTimeGetCurrent()
+                    print("[AppDelegate] [STRESS-TEST] [\(String(format: "%.6f", disableTime))] Intentionally disabling event tap under stress...")
+                    
+                    // Disable event tap while under stress
+                    CGEvent.tapEnable(tap: tap, enable: false)
+                    
+                    print("[AppDelegate] [STRESS-TEST] Event tap disabled under stress. Recovery system should handle this...")
+                    print("[AppDelegate] [STRESS-TEST] Detection interval under stress: \(self.calculateHealthCheckInterval())s")
+                }
+            }
+        }
+    }
+    
+    @objc func showRecoveryStatistics(_ sender: Any?) {
+        let avgRecoveryTime = recoveryTimes.isEmpty ? 0 : recoveryTimes.reduce(0, +) / Double(recoveryTimes.count)
+        let maxRecoveryTime = recoveryTimes.max() ?? 0
+        let minRecoveryTime = recoveryTimes.min() ?? 0
+        let successRate = recoveryAttempts > 0 ? Double(recoverySuccesses) / Double(recoveryAttempts) * 100 : 0
+        
+        let lastAttemptText = lastRecoveryAttempt != nil ? 
+            DateFormatter.localizedString(from: lastRecoveryAttempt!, dateStyle: .none, timeStyle: .medium) : "Never"
+        
+        let message = """
+        📊 Event Tap Recovery Statistics:
+        
+        Total Attempts: \(recoveryAttempts)
+        Successful Recoveries: \(recoverySuccesses)
+        Success Rate: \(String(format: "%.1f", successRate))%
+        
+        Recovery Times:
+        Average: \(String(format: "%.2f", avgRecoveryTime))ms
+        Fastest: \(String(format: "%.2f", minRecoveryTime))ms
+        Slowest: \(String(format: "%.2f", maxRecoveryTime))ms
+        
+        Last Attempt: \(lastAttemptText)
+        Current Detection Interval: \(String(format: "%.3f", calculateHealthCheckInterval()))s
+        """
+        
+        showAlert(title: "Recovery Statistics", message: message)
+        print("[AppDelegate] Recovery Statistics: \(recoveryAttempts) attempts, \(recoverySuccesses) successes, \(String(format: "%.1f", successRate))% success rate")
+    }
+    
+    private func applySystemStressForRecoveryTest() {
+        print("[AppDelegate] [STRESS-TEST] Applying CPU and memory stress for recovery testing...")
+        
+        // CPU stress - create multiple high-priority threads
+        for i in 0..<4 {
+            let stressQueue = DispatchQueue(label: "recovery-test-cpu-\(i)", qos: .userInitiated)
+            stressQueue.async {
+                let endTime = CFAbsoluteTimeGetCurrent() + 30.0 // 30 second stress test
+                while CFAbsoluteTimeGetCurrent() < endTime {
+                    // High CPU computation
+                    for _ in 0..<50000 {
+                        _ = sqrt(Double.random(in: 0...1000)) + sin(Double.random(in: 0...1000))
+                    }
+                    usleep(1000) // Brief pause
+                }
+                print("[AppDelegate] [STRESS-TEST] CPU stress thread \(i) completed")
+            }
+        }
+        
+        // Memory pressure
+        let memoryStressQueue = DispatchQueue(label: "recovery-test-memory", qos: .background)
+        memoryStressQueue.async {
+            var memoryBlocks: [Data] = []
+            let endTime = CFAbsoluteTimeGetCurrent() + 30.0
+            
+            while CFAbsoluteTimeGetCurrent() < endTime {
+                // Allocate 10MB blocks
+                if memoryBlocks.count < 20 { // Up to 200MB
+                    memoryBlocks.append(Data(count: 10 * 1024 * 1024))
+                } else {
+                    memoryBlocks.removeAll() // Periodic cleanup to avoid excessive memory usage
+                }
+                usleep(100000) // 100ms delay
+            }
+            
+            memoryBlocks.removeAll()
+            print("[AppDelegate] [STRESS-TEST] Memory stress completed")
+        }
     }
     
     // MARK: - Extreme Stress Testing Framework
