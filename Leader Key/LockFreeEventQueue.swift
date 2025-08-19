@@ -28,6 +28,9 @@ final class LockFreeEventQueue {
     
     /// Initialize with power-of-2 capacity for fast modulo
     init(capacity: Int = 256) {
+        // Validate capacity
+        precondition(capacity > 0 && capacity <= 65536, "Capacity must be between 1 and 65536")
+        
         // Ensure capacity is power of 2
         var powerOf2 = 1
         while powerOf2 < capacity {
@@ -36,11 +39,10 @@ final class LockFreeEventQueue {
         self.capacity = powerOf2
         self.mask = powerOf2 - 1
         
-        // Allocate buffer
+        // Allocate and properly initialize buffer
         self.buffer = UnsafeMutablePointer<EventEntry?>.allocate(capacity: powerOf2)
-        for i in 0..<powerOf2 {
-            buffer[i] = nil
-        }
+        // IMPORTANT: Must initialize memory before use
+        self.buffer.initialize(repeating: nil, count: powerOf2)
         
         // Initialize atomic counters
         head.initialize(to: 0)
@@ -56,8 +58,11 @@ final class LockFreeEventQueue {
             // Drain queue
         }
         
-        // Deallocate memory
+        // Properly deinitialize and deallocate buffer
+        buffer.deinitialize(count: capacity)
         buffer.deallocate()
+        
+        // Deallocate atomic counters
         head.deallocate()
         tail.deallocate()
         enqueueCount.deallocate()
