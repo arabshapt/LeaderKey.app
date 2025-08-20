@@ -26,6 +26,7 @@ final class DualEventTapManager {
     
     /// Statistics
     private let failoverCount = UnsafeMutablePointer<Int64>.allocate(capacity: 1)
+    private let instantFailoverCount = UnsafeMutablePointer<Int64>.allocate(capacity: 1)
     private let recoveryAttempts = UnsafeMutablePointer<Int64>.allocate(capacity: 1)
     private let successfulRecoveries = UnsafeMutablePointer<Int64>.allocate(capacity: 1)
     
@@ -38,6 +39,7 @@ final class DualEventTapManager {
         secondaryHealthy.initialize(to: 0)
         isRecovering.initialize(to: 0)
         failoverCount.initialize(to: 0)
+        instantFailoverCount.initialize(to: 0)
         recoveryAttempts.initialize(to: 0)
         successfulRecoveries.initialize(to: 0)
     }
@@ -51,6 +53,7 @@ final class DualEventTapManager {
         secondaryHealthy.deallocate()
         isRecovering.deallocate()
         failoverCount.deallocate()
+        instantFailoverCount.deallocate()
         recoveryAttempts.deallocate()
         successfulRecoveries.deallocate()
     }
@@ -124,6 +127,60 @@ final class DualEventTapManager {
     func getActiveTap() -> CFMachPort? {
         let index = OSAtomicAdd32(0, activeTapIndex)
         return index == 0 ? primaryTap : secondaryTap
+    }
+    
+    /// Handle instant failover when tap disabled event is detected in callback
+    /// This is called from the event tap callback for ultra-fast response
+    @inline(__always)
+    func handleInstantFailover() {
+        // Atomic increment of instant failover counter
+        OSAtomicIncrement64(instantFailoverCount)
+        
+        // Get current active tap index
+        let currentIndex = OSAtomicAdd32(0, activeTapIndex)
+        
+        // Quick switch to backup tap
+        if currentIndex == 0 {
+            // Primary was active, switch to secondary
+            OSAtomicCompareAndSwap32(0, 1, activeTapIndex)
+            OSAtomicCompareAndSwap32(1, 0, primaryHealthy)
+            
+            // Queue async operations to avoid blocking callback
+            recoveryQueue.async { [weak self] in
+                guard let self = self else { return }
+                if let secondary = self.secondaryTap {
+                    CGEvent.tapEnable(tap: secondary, enable: true)
+                    print("[DualEventTapManager] ⚡ Instant failover to secondary tap (detected in callback)")
+                }
+                // Trigger recovery of primary
+                self.triggerRecovery()
+            }
+        } else {
+            // Secondary was active, switch to primary
+            OSAtomicCompareAndSwap32(1, 0, activeTapIndex)
+            OSAtomicCompareAndSwap32(1, 0, secondaryHealthy)
+            
+            // Queue async operations to avoid blocking callback
+            recoveryQueue.async { [weak self] in
+                guard let self = self else { return }
+                if let primary = self.primaryTap {
+                    CGEvent.tapEnable(tap: primary, enable: true)
+                    print("[DualEventTapManager] ⚡ Instant failover to primary tap (detected in callback)")
+                }
+                // Try to recover secondary
+                if let secondary = self.secondaryTap {
+                    for attempt in 1...3 {
+                        CGEvent.tapEnable(tap: secondary, enable: true)
+                        usleep(50_000 * UInt32(attempt))
+                        if CGEvent.tapIsEnabled(tap: secondary) {
+                            OSAtomicCompareAndSwap32(0, 1, self.secondaryHealthy)
+                            print("[DualEventTapManager] ✅ Secondary tap recovered after \(attempt) attempts")
+                            break
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /// Check tap health and perform instant failover if needed
@@ -274,6 +331,7 @@ final class DualEventTapManager {
     
     func getStatistics() -> String {
         let failovers = OSAtomicAdd64(0, failoverCount)
+        let instantFailovers = OSAtomicAdd64(0, instantFailoverCount)
         let attempts = OSAtomicAdd64(0, recoveryAttempts)
         let recoveries = OSAtomicAdd64(0, successfulRecoveries)
         let activeIndex = OSAtomicAdd32(0, activeTapIndex)
@@ -285,7 +343,8 @@ final class DualEventTapManager {
         - Active Tap: \(activeIndex == 0 ? "Primary" : "Secondary")
         - Primary Healthy: \(primaryOk)
         - Secondary Healthy: \(secondaryOk)
-        - Failovers: \(failovers)
+        - Timer-based Failovers: \(failovers)
+        - Instant Failovers (callback): \(instantFailovers)
         - Recovery Attempts: \(attempts)
         - Successful Recoveries: \(recoveries)
         """

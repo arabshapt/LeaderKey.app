@@ -48,6 +48,13 @@ private func eventTapCallback(
     
     let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
     
+    // INSTANT DETECTION - Handle tap disabled events immediately
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        print("[EventTap] ⚠️ Tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "user input") - triggering instant failover")
+        appDelegate.dualTapManager.handleInstantFailover()
+        return nil // Don't pass disabled events through
+    }
+    
     // PERFORMANCE CRITICAL: This callback must execute in <0.1ms
     // DO NOT add any system calls, object creation, or I/O here
     
@@ -781,7 +788,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
   
-    private func restartEventTap() {
+  private func restartEventTap() {
     print("[AppDelegate] Restarting event tap...")
     
     // First stop the existing tap
