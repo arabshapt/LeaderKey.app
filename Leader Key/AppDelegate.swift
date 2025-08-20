@@ -1707,6 +1707,9 @@ extension AppDelegate {
         let lastAttemptText = lastRecoveryAttempt != nil ? 
             DateFormatter.localizedString(from: lastRecoveryAttempt!, dateStyle: .none, timeStyle: .medium) : "Never"
         
+        // Get dual tap statistics
+        let dualTapStats = dualTapManager.getStatistics()
+        
         let message = """
         📊 Event Tap Recovery Statistics:
         
@@ -1720,11 +1723,17 @@ extension AppDelegate {
         Slowest: \(String(format: "%.2f", maxRecoveryTime))ms
         
         Last Attempt: \(lastAttemptText)
-        Current Detection Interval: \(String(format: "%.3f", calculateHealthCheckInterval()))s
+        
+        Detection Mechanisms:
+        • Instant Detection: Active (near-zero latency)
+        • Backup Timer Interval: \(String(format: "%.3f", calculateHealthCheckInterval()))s
+        
+        \(dualTapStats)
         """
         
         showAlert(title: "Recovery Statistics", message: message)
         print("[AppDelegate] Recovery Statistics: \(recoveryAttempts) attempts, \(recoverySuccesses) successes, \(String(format: "%.1f", successRate))% success rate")
+        print(dualTapStats)
     }
     
     private func applySystemStressForRecoveryTest() {
