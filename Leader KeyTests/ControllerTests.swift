@@ -27,7 +27,7 @@ class ControllerTests: XCTestCase {
         mockUserState = UserState(userConfig: mockUserConfig)
         
         // Set a default theme *before* initializing Controller
-        Defaults[.theme] = .mysteryBox // Set a default theme for testing
+        Defaults[.theme] = .cheater // Set a default theme for testing
         
         controller = Controller(userState: mockUserState, userConfig: mockUserConfig)
         

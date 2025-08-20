@@ -556,3 +556,31 @@ The theme implementations (MysteryBox, Mini, Breadcrumbs, ForTheHorde) were miss
 
 ### Business Impact:
 All themes now work correctly without runtime bugs, providing users with full choice of visual styles. Stealth mode enables users who want keyboard functionality without any visual overlay, improving accessibility for specific workflows.
+
+## Theme Availability Reduction (2025-08-20)
+
+### Type: Configuration Change
+### Status: Completed
+
+### Changes Made
+Disabled all themes except Cheater and Stealth, with Cheater as the primary theme and Stealth as secondary.
+
+### Implementation:
+1. **Theme.swift**: 
+   - Removed enum cases for mysteryBox, mini, breadcrumbs, forTheHorde
+   - Updated Theme.all to return only [.cheater, .stealth]
+   - Removed switch cases for disabled themes in classFor() and name() methods
+
+2. **ControllerTests.swift**:
+   - Changed default test theme from .mysteryBox to .cheater
+
+### Files Preserved:
+- MysteryBox.swift, Mini.swift, Breadcrumbs.swift, ForTheHorde.swift remain in codebase for future fixing
+
+### Testing:
+- ✅ Build successful
+- ✅ Only Cheater and Stealth themes available in picker
+- ✅ Tests updated to use valid theme
+
+### Business Impact:
+Simplified theme selection to only working themes while preserving code for future development. Users have a functional default theme (Cheater) and a stealth option for invisible operation.
