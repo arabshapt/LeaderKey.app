@@ -1254,6 +1254,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               }
               self.currentSequenceGroup = nil
               self.activeRootGroup = nil
+              self.currentGroupActionMap = nil // Clear the action map
               self.stickyModeToggled = false
               self.lastModifierFlags = []
               // Determine new active root based on the activation shortcut that was just pressed
@@ -2768,6 +2769,23 @@ extension AppDelegate {
         get { getAssociatedObject(self, &AssociatedKeys.lastNavigationTime) ?? 0 }
         set { setAssociatedObject(self, &AssociatedKeys.lastNavigationTime, newValue) }
     }
+    
+    // --- Key String Cache for Performance ---
+    private struct KeyCacheEntry: Hashable {
+        let keyCode: UInt16
+        let modifierFlags: UInt64
+    }
+    private var keyStringCache: [KeyCacheEntry: String] {
+        get { getAssociatedObject(self, &AssociatedKeys.keyStringCache) ?? [:] }
+        set { setAssociatedObject(self, &AssociatedKeys.keyStringCache, newValue) }
+    }
+    
+    // --- Action Lookup Map for O(1) Performance ---
+    private var currentGroupActionMap: [String: ActionOrGroup]? {
+        get { getAssociatedObject(self, &AssociatedKeys.currentGroupActionMap) }
+        set { setAssociatedObject(self, &AssociatedKeys.currentGroupActionMap, newValue) }
+    }
+    
     private struct AssociatedKeys {
         // Removed eventTap and runLoopSource - now managed by DualEventTapManager
         static var isMonitoring = "isMonitoring"
@@ -2781,6 +2799,8 @@ extension AppDelegate {
         static var cpuMonitorTimer = "cpuMonitorTimer"
         static var isHighCpuMode = "isHighCpuMode"
         static var lastNavigationTime = "lastNavigationTime"
+        static var keyStringCache = "keyStringCache"
+        static var currentGroupActionMap = "currentGroupActionMap"
     }
 
     // --- Event Tap Logic Methods ---
@@ -2868,6 +2888,7 @@ extension AppDelegate {
         // Force clear all state variables immediately (no delays, no callbacks)
         self.currentSequenceGroup = nil
         self.activeRootGroup = nil
+        self.currentGroupActionMap = nil // Clear the action map
         self.stickyModeToggled = false
         self.lastModifierFlags = []
         self.activeActivationShortcut = nil
@@ -3153,7 +3174,8 @@ extension AppDelegate {
         debugLog("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
 
         // Check if the keyString matches an action or group within the currently active group
-        if let currentGroup = currentSequenceGroup, let hit = currentGroup.actions.first(where: { $0.item.key == keyString }) {
+        // Use the pre-built action map for O(1) lookup instead of linear search
+        if let currentGroup = currentSequenceGroup, let hit = currentGroupActionMap?[keyString] {
             debugLog("[AppDelegate] processKeyInSequence: Found match for '\(keyString)' in group '\(currentGroup.displayName).'")
             switch hit {
             case .action(let action):
@@ -3181,6 +3203,9 @@ extension AppDelegate {
                 
                 // Update sequence state immediately to prevent race conditions
                 currentSequenceGroup = subgroup
+                
+                // Build action map for the new group for fast lookups
+                currentGroupActionMap = buildActionMap(for: subgroup)
 
                 // Update UI state first to ensure correct display
                 DispatchQueue.main.async {
@@ -3242,6 +3267,7 @@ extension AppDelegate {
             // Fallback logic, though this indicates a potential issue elsewhere
             self.activeRootGroup = config.root // Store the determined root group locally
             self.currentSequenceGroup = config.root // Start the sequence at this root
+            self.currentGroupActionMap = buildActionMap(for: config.root) // Build action map for fallback
             // If the window is somehow visible, try to update its UI state.
             if self.controller.window.isVisible {
                  print("[AppDelegate] startSequence (Fallback): Window visible, navigating UI to default root.")
@@ -3256,6 +3282,9 @@ extension AppDelegate {
         print("[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'")
         self.activeRootGroup = rootGroup
         self.currentSequenceGroup = rootGroup
+        
+        // Build action map for fast lookups
+        self.currentGroupActionMap = buildActionMap(for: rootGroup)
         
         // Set atomic sequence flag for ultra-fast callback checking
         OSAtomicCompareAndSwap32(0, 1, isInSequence)
@@ -3280,6 +3309,7 @@ extension AppDelegate {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")
             self.currentSequenceGroup = nil
             self.activeRootGroup = nil
+            self.currentGroupActionMap = nil // Clear the action map
             
             // Clear atomic sequence flag for ultra-fast callback checking
             OSAtomicCompareAndSwap32(1, 0, isInSequence)
@@ -3329,28 +3359,44 @@ extension AppDelegate {
     // Converts a key event into a single character string suitable for matching against config keys.
     // Handles forced English layout if enabled.
     private func keyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
+        // Check cache first for performance
+        let cacheKey = KeyCacheEntry(keyCode: keyCode, modifierFlags: modifiers.rawValue)
+        if let cachedValue = keyStringCache[cacheKey] {
+            debugLog("[AppDelegate] keyStringForEvent (Cache Hit): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(cachedValue)'")
+            return cachedValue.isEmpty ? nil : cachedValue
+        }
+        
         // --- Option 1: Forced English Layout ---
         if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
             // Respect Shift key for case
             let result = modifiers.contains(.shift) ? mapped.uppercased() : mapped
             print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result)' (Case Sensitive)")
+            // Cache the result
+            keyStringCache[cacheKey] = result
             return result.isEmpty ? nil : result
         }
 
         // --- Option 2: System Layout (Case Sensitive, Ignore Ctrl/Opt Effect) ---
 
         // Handle specific non-character keys FIRST by keycode
+        let specialKey: String?
         switch keyCode {
-            case 36: return "\u{21B5}" // Enter
-            case 48: return "\t"       // Tab
-            case 49: return " "       // Space
-            case 51: return "\u{0008}" // Backspace
-            case KeyCodes.escape: return "\u{001B}" // Escape
-            case 126: return "↑"      // Up Arrow
-            case 125: return "↓"      // Down Arrow
-            case 123: return "←"      // Left Arrow
-            case 124: return "→"      // Right Arrow
-            default: break // Continue for other keys
+            case 36: specialKey = "\u{21B5}" // Enter
+            case 48: specialKey = "\t"       // Tab
+            case 49: specialKey = " "       // Space
+            case 51: specialKey = "\u{0008}" // Backspace
+            case KeyCodes.escape: specialKey = "\u{001B}" // Escape
+            case 126: specialKey = "↑"      // Up Arrow
+            case 125: specialKey = "↓"      // Down Arrow
+            case 123: specialKey = "←"      // Left Arrow
+            case 124: specialKey = "→"      // Right Arrow
+            default: specialKey = nil // Continue for other keys
+        }
+        
+        if let specialKey = specialKey {
+            // Cache the special key
+            keyStringCache[cacheKey] = specialKey
+            return specialKey
         }
 
         // For remaining keys, determine character based on modifiers
@@ -3374,6 +3420,8 @@ extension AppDelegate {
             print("[AppDelegate] keyStringForEvent: Result is empty or nil, returning nil.")
             return nil
         } else {
+            // Cache the result before returning
+            keyStringCache[cacheKey] = result!
             return result
         }
     }
@@ -3388,6 +3436,17 @@ extension AppDelegate {
         if modifiers.contains(.capsLock) { parts.append("CapsLock") } // Include CapsLock for completeness
         if parts.isEmpty { return "[None]" }
         return "[" + parts.joined(separator: "][") + "]"
+    }
+    
+    // Helper function to build action map for O(1) lookups
+    private func buildActionMap(for group: Group) -> [String: ActionOrGroup] {
+        var map: [String: ActionOrGroup] = [:]
+        for action in group.actions {
+            if let key = action.item.key {
+                map[key] = action
+            }
+        }
+        return map
     }
 
     // --- Permissions Helpers ---
