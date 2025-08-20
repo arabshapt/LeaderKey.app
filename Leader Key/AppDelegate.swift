@@ -3360,7 +3360,7 @@ extension AppDelegate {
     // Handles forced English layout if enabled.
     private func keyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> String? {
         // Check cache first for performance
-        let cacheKey = KeyCacheEntry(keyCode: keyCode, modifierFlags: modifiers.rawValue)
+        let cacheKey = KeyCacheEntry(keyCode: keyCode, modifierFlags: UInt64(modifiers.rawValue))
         if let cachedValue = keyStringCache[cacheKey] {
             debugLog("[AppDelegate] keyStringForEvent (Cache Hit): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(cachedValue)'")
             return cachedValue.isEmpty ? nil : cachedValue
