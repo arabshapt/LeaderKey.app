@@ -508,3 +508,51 @@ Added instant detection by handling disabled event types directly in the callbac
 
 ### Business Impact
 Users experience zero downtime when macOS disables event taps, ensuring Leader Key remains responsive without any noticeable interruption in keyboard monitoring.
+
+## Theme Runtime Bugs Fix and Stealth Mode Addition (2025-08-20)
+
+### Type: Bug Fix & Feature Addition
+### Status: Completed
+
+### Problem Statement
+User reported that only the "cheater" theme worked correctly, while other themes had runtime bugs. Additionally requested a stealth mode that shows nothing.
+
+### Root Cause Analysis
+The theme implementations (MysteryBox, Mini, Breadcrumbs, ForTheHorde) were missing proper animation method calls in their show() methods, specifically the fadeInAndUp animation that Cheater theme was using.
+
+### Solution Implemented
+
+#### 1. Fixed Animation Issues in Themes:
+- **MysteryBox.swift**: Added fadeInAndUp animation in show() method
+- **Mini.swift**: Added fadeInAndUp animation in show(), changed fadeOut to fadeOutAndDown in hide()
+- **Breadcrumbs.swift**: Replaced fadeIn with fadeInAndUp, fadeOut with fadeOutAndDown
+- **ForTheHorde.swift**: Added fadeInAndUp animation while preserving custom animation logic
+
+#### 2. Added Stealth Mode:
+- **Theme.swift**: Added stealth case to enum, updated all switch statements
+- **Stealth.swift**: Created new theme with completely invisible window (zero alpha, no content)
+- **project.pbxproj**: Added Stealth.swift to Xcode project structure
+
+### Files Modified:
+- Leader Key/Theme.swift (3 edits - enum case, classFor, name)
+- Leader Key/Themes/MysteryBox.swift (1 edit - show method)
+- Leader Key/Themes/Mini.swift (2 edits - show and hide methods)
+- Leader Key/Themes/Breadcrumbs.swift (2 edits - show and hide methods)
+- Leader Key/Themes/ForTheHorde.swift (1 edit - show method)
+- Leader Key/Themes/Stealth.swift (new file)
+- Leader Key.xcodeproj/project.pbxproj (4 edits - build configuration)
+
+### Technical Details:
+- Animation methods were already defined in NSWindow+Animations.swift
+- All themes now consistently use fadeInAndUp/fadeOutAndDown animations
+- Stealth mode creates a completely transparent window with no visual elements
+- Maintained backward compatibility with existing theme selection
+
+### Testing Results:
+- ✅ Build successful with all changes
+- ✅ All themes compile without errors
+- ✅ Stealth theme properly integrated into project
+- ✅ Animation consistency across all themes
+
+### Business Impact:
+All themes now work correctly without runtime bugs, providing users with full choice of visual styles. Stealth mode enables users who want keyboard functionality without any visual overlay, improving accessibility for specific workflows.

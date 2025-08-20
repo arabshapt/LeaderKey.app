@@ -40,7 +40,10 @@ enum ForTheHorde {
 
       self.displayIfNeeded()
       makeKeyAndOrderFront(nil)
-      after?()
+      
+      fadeInAndUp {
+        after?()
+      }
     }
 
     override func hide(after: (() -> Void)? = nil) {

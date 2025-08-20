@@ -60,13 +60,13 @@ enum Breadcrumbs {
 
       makeKeyAndOrderFront(nil)
 
-      fadeIn {
+      fadeInAndUp {
         after?()
       }
     }
 
     override func hide(after: (() -> Void)? = nil) {
-      fadeOut {
+      fadeOutAndDown {
         super.hide(after: after)
       }
     }
