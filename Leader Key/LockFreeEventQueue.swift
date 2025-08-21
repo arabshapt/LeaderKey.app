@@ -177,6 +177,14 @@ final class LockFreeEventQueue {
         return currentHead >= currentTail
     }
     
+    /// Atomically and safely clear all events from the queue.
+    func clear() {
+        while dequeue() != nil {
+            // Keep dequeuing until the queue is empty.
+            // The dequeue operation itself is atomic and handles memory cleanup of the CGEvent.
+        }
+    }
+
     /// Get performance statistics
     func getStatistics() -> (enqueued: Int64, dequeued: Int64, dropped: Int64) {
         return (

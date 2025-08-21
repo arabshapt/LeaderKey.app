@@ -3330,8 +3330,10 @@ extension AppDelegate {
             // Clear atomic sequence flag for ultra-fast callback checking
             OSAtomicCompareAndSwap32(1, 0, isInSequence)
             
-            // Clear any queued key events when sequence ends
-            // clearKeyEventQueue() - removed, using lock-free queue now
+            // Purge any pending events from the old sequence to prevent them
+            // from being processed against the new state.
+            eventQueue.clear()
+            print("[AppDelegate] resetSequenceState: Cleared pending event queue.")
 
             // Reset sticky mode toggle state
             if stickyModeToggled {
