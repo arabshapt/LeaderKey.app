@@ -1,5 +1,6 @@
 // swiftlint:disable file_length
 import Cocoa
+import Combine
 import Defaults
 import KeyboardShortcuts
 import Settings
@@ -268,6 +269,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   var fileMonitor: FileMonitor!
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
+  private var cancellables = Set<AnyCancellable>()
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -345,6 +347,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     #if DEBUG
     debugLog("[AppDelegate] UserConfig and UserState initialized.")
     #endif
+    
+    // Subscribe to reload events to manage event processing
+    Events.sink { [weak self] event in
+        guard let self = self else { return }
+        switch event {
+        case .willReload:
+            self.isReloading = true
+            #if DEBUG
+            debugLog("[AppDelegate] Config reload started - pausing event processing")
+            #endif
+        case .didReload:
+            self.isReloading = false
+            #if DEBUG
+            debugLog("[AppDelegate] Config reload completed - resuming event processing")
+            #endif
+        default:
+            break
+        }
+    }.store(in: &cancellables)
 
     // Setup background services and UI elements
     setupFileMonitor()      // Defined in private extension
@@ -1267,6 +1288,12 @@ extension AppDelegate {
         set { setAssociatedObject(self, &AssociatedKeys.currentBundleId, newValue) }
     }
     
+    // --- Config Reload Tracking ---
+    private var isReloading: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.isReloading) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.isReloading, newValue) }
+    }
+    
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
@@ -1290,6 +1317,7 @@ extension AppDelegate {
         static var lastActivationTime = "lastActivationTime"
         static var currentKeyLookupCache = "currentKeyLookupCache"
         static var currentBundleId = "currentBundleId"
+        static var isReloading = "isReloading"
     }
 
     // --- Event Tap Logic Methods ---
@@ -1477,6 +1505,9 @@ extension AppDelegate {
     
     // Quick check if we should consume an event (ultra-fast, no NSEvent creation)
     func quickShouldConsumeEvent(_ event: CGEvent) -> Bool {
+        // Don't consume events during config reload
+        if isReloading { return false }
+        
         // Only check keyDown events
         guard event.type == .keyDown else { return false }
         
@@ -1586,6 +1617,9 @@ extension AppDelegate {
     
     // Enqueue event for async processing
     func enqueueEventForProcessing(_ event: CGEvent) {
+        // Don't process events during reload
+        if isReloading { return }
+        
         // Copy the event to prevent it from being released
         guard let eventCopy = event.copy() else { return }
         
@@ -1598,15 +1632,24 @@ extension AppDelegate {
         AppDelegate.eventProcessingQueue.async { [weak self] in
             guard let self = self else { return }
             
-            // Now we can create NSEvent on background queue
-            guard let nsEvent = NSEvent(cgEvent: eventCopy) else { return }
+            // Double-check we're not reloading and still monitoring
+            guard !self.isReloading && self.isMonitoring else { return }
+            
+            // Create NSEvent with validation
+            // Sometimes CGEvent can become invalid, especially during config changes
+            guard let nsEvent = NSEvent(cgEvent: eventCopy) else {
+                #if DEBUG
+                debugLog("[AppDelegate] Warning: Failed to create NSEvent from CGEvent - event may be invalid")
+                #endif
+                return
+            }
             
             // Use a semaphore to ensure main thread processing completes before next event
             let semaphore = DispatchSemaphore(value: 0)
             
             DispatchQueue.main.async {
-                // Only process if still relevant
-                if self.isMonitoring {
+                // Only process if still monitoring and not reloading
+                if self.isMonitoring && !self.isReloading {
                     _ = self.processKeyEvent(
                         cgEvent: eventCopy,
                         keyCode: nsEvent.keyCode,
