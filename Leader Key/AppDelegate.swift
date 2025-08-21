@@ -1275,6 +1275,8 @@ extension AppDelegate {
         static var cachedActivationKeyCodes = "cachedActivationKeyCodes"
         static var cachedActivationShortcuts = "cachedActivationShortcuts"
         static var cachedActivationModifiers = "cachedActivationModifiers"
+        static var hasPendingActivation = "hasPendingActivation"
+        static var lastActivationTime = "lastActivationTime"
     }
 
     // --- Event Tap Logic Methods ---
@@ -1469,6 +1471,7 @@ extension AppDelegate {
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         
         // Check if it's in our cached activation keys
+        var isActivationKey = false
         if cachedActivationKeyCodes.contains(keyCode) {
             // Check modifiers match
             let flags = event.flags
@@ -1480,13 +1483,32 @@ extension AppDelegate {
                 let hasControl = flags.contains(.maskControl) == expectedFlags.contains(.maskControl)
                 
                 if hasCommand && hasShift && hasOption && hasControl {
+                    isActivationKey = true
+                    // Mark that we have a pending activation
+                    hasPendingActivation = true
+                    lastActivationTime = CFAbsoluteTimeGetCurrent()
                     return true
                 }
             }
         }
         
-        // If we're in an active sequence, consume all keyDown events
-        return isInActiveSequence
+        // Consume if we're in an active sequence
+        if isInActiveSequence {
+            return true
+        }
+        
+        // Consume if we have a pending activation being processed
+        if hasPendingActivation {
+            return true
+        }
+        
+        // Consume if we recently activated (within 100ms window)
+        let timeSinceActivation = CFAbsoluteTimeGetCurrent() - lastActivationTime
+        if timeSinceActivation < 0.1 {  // 100ms window
+            return true
+        }
+        
+        return false
     }
     
     // Check if we're currently in an active sequence
@@ -1498,6 +1520,10 @@ extension AppDelegate {
     func enqueueEventForProcessing(_ event: CGEvent) {
         // Copy the event to prevent it from being released
         guard let eventCopy = event.copy() else { return }
+        
+        // Check if this is an activation key
+        let keyCode = UInt16(eventCopy.getIntegerValueField(.keyboardEventKeycode))
+        let isActivationKey = cachedActivationKeyCodes.contains(keyCode)
         
         // Process events serially to maintain order
         // The serial queue ensures events are processed one at a time in FIFO order
@@ -1519,6 +1545,12 @@ extension AppDelegate {
                         modifiers: nsEvent.modifierFlags
                     )
                 }
+                
+                // Clear pending activation flag after processing an activation key
+                if isActivationKey {
+                    self.hasPendingActivation = false
+                }
+                
                 semaphore.signal()
             }
             
@@ -1531,6 +1563,18 @@ extension AppDelegate {
     private var cachedActivationModifiers: [UInt16: CGEventFlags] {
         get { getAssociatedObject(self, &AssociatedKeys.cachedActivationModifiers) ?? [:] }
         set { setAssociatedObject(self, &AssociatedKeys.cachedActivationModifiers, newValue) }
+    }
+    
+    // Track if we have a pending activation being processed
+    private var hasPendingActivation: Bool {
+        get { getAssociatedObject(self, &AssociatedKeys.hasPendingActivation) ?? false }
+        set { setAssociatedObject(self, &AssociatedKeys.hasPendingActivation, newValue) }
+    }
+    
+    // Track when we last started an activation
+    private var lastActivationTime: CFAbsoluteTime {
+        get { getAssociatedObject(self, &AssociatedKeys.lastActivationTime) ?? 0 }
+        set { setAssociatedObject(self, &AssociatedKeys.lastActivationTime, newValue) }
     }
     
     // --- Force Reset Mechanism ---
@@ -1546,6 +1590,7 @@ extension AppDelegate {
         self.stickyModeToggled = false
         self.lastModifierFlags = []
         self.activeActivationShortcut = nil
+        self.hasPendingActivation = false
 
         // Force hide the window immediately if it's visible
         if controller.window.isVisible {
@@ -2082,6 +2127,9 @@ extension AppDelegate {
             
             // Clear any queued key events when sequence ends
             clearKeyEventQueue()
+            
+            // Clear pending activation flag when sequence resets
+            self.hasPendingActivation = false
 
             // Reset sticky mode toggle state
             if stickyModeToggled {
