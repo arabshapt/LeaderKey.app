@@ -347,22 +347,22 @@ enum ThreadOptimization {
     let currentMemory = getCurrentMemoryUsage()
     
     executeCritical {
-      // Memory-based proactive cleanup (new approach)
-      if currentMemory >= 50 { // 50MB threshold for proactive cleanup
+      // Memory-based proactive cleanup with realistic thresholds
+      if currentMemory >= 150 { // 150MB threshold for proactive cleanup (was 50MB)
         print("[ThreadOptimization] Memory at \(currentMemory)MB - performing proactive cleanup")
         proactiveCleanup()
       }
       
-      // System pressure based cleanup
-      if thermalState == .critical || isLowPowerMode || currentMemory >= 100 {
+      // System pressure based cleanup with realistic thresholds
+      if thermalState == .critical || isLowPowerMode || currentMemory >= 350 { // Was 100MB
         // Emergency optimization
         print("[ThreadOptimization] Emergency conditions detected - performing emergency cleanup")
         emergencyCleanup()
-      } else if thermalState == .serious || currentMemory >= 75 {
+      } else if thermalState == .serious || currentMemory >= 250 { // Was 75MB
         // Aggressive optimization  
         print("[ThreadOptimization] High pressure conditions - performing aggressive cleanup")
         aggressiveCleanup()
-      } else if currentMemory >= 50 {
+      } else if currentMemory >= 150 { // Was 50MB
         // Proactive optimization (already handled above but included for clarity)
         proactiveCleanup()
       }
@@ -606,8 +606,8 @@ enum ThreadOptimization {
       return "MEMORY LEAK DETECTED: Growing at \(String(format: "%.1f", growthRate))MB per sample"
     }
     
-    if recent.last!.residentSize > 200 { // Absolute threshold
-      return "EXCESSIVE MEMORY: \(recent.last!.residentSize)MB - Normal should be <50MB"
+    if recent.last!.residentSize > 400 { // Realistic absolute threshold (was 200MB)
+      return "EXCESSIVE MEMORY: \(recent.last!.residentSize)MB - Normal should be <200MB"
     }
     
     return nil

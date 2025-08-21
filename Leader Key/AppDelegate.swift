@@ -1717,19 +1717,19 @@ private extension AppDelegate {
             }
         }
         
-        // Proactive memory monitoring with aggressive cleanup thresholds
+        // Proactive memory monitoring with realistic cleanup thresholds
         let currentMemory = ThreadOptimization.getCurrentMemoryUsage()
         
-        if currentMemory > 50 { // Lowered threshold from 100MB to 50MB for proactive monitoring
+        if currentMemory > 150 { // More realistic threshold for logging (was 50MB)
             print("[AppDelegate] Watchdog: Memory usage \(currentMemory)MB")
             
-            if currentMemory > 100 { // Emergency threshold - simplified cleanup
+            if currentMemory > 350 { // Emergency threshold - only for extreme cases (was 100MB)
                 print("[AppDelegate] 🚨 High memory: \(currentMemory)MB - performing emergency cleanup")
                 ThreadOptimization.emergencyCleanup()
-            } else if currentMemory > 75 { // Aggressive cleanup threshold
+            } else if currentMemory > 250 { // Aggressive cleanup threshold (was 75MB)
                 print("[AppDelegate] ⚠️ Elevated memory: \(currentMemory)MB - performing aggressive cleanup")
                 ThreadOptimization.aggressiveCleanup()
-            } else if currentMemory > 50 { // Proactive cleanup threshold
+            } else if currentMemory > 150 { // Proactive cleanup threshold (was 50MB)
                 print("[AppDelegate] 💡 Memory approaching limit: \(currentMemory)MB - performing proactive cleanup")
                 ThreadOptimization.proactiveCleanup()
             }
