@@ -22,6 +22,7 @@ class StatusItem {
   var handleRevealConfig: (() -> Void)?
   var handleCheckForUpdates: (() -> Void)?
   var handleForceReset: (() -> Void)?
+  var handleShowPerformanceStats: (() -> Void)?
 
   func enable() {
     statusItem = NSStatusBar.system.statusItem(
@@ -74,6 +75,15 @@ class StatusItem {
     )
     forceResetItem.target = self
     menu.addItem(forceResetItem)
+    
+    // Add performance stats menu item (only in debug builds)
+    #if DEBUG
+    let performanceStatsItem = NSMenuItem(
+      title: "Show Performance Stats", action: #selector(showPerformanceStats), keyEquivalent: ""
+    )
+    performanceStatsItem.target = self
+    menu.addItem(performanceStatsItem)
+    #endif
 
     menu.addItem(NSMenuItem.separator())
 
@@ -126,6 +136,10 @@ class StatusItem {
 
   @objc func forceReset() {
     handleForceReset?()
+  }
+  
+  @objc func showPerformanceStats() {
+    handleShowPerformanceStats?()
   }
 
   private func updateStatusItemAppearance() {
