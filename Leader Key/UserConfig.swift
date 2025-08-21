@@ -194,6 +194,7 @@ class UserConfig: ObservableObject {
     // Clear caches and reset state
     appConfigs = [:] // Clear app-specific cache
     configCache.clearCache() // Clear parsed config cache
+    ConfigPreprocessor.shared.invalidateAll() // Clear preprocessed key lookup caches
 
     // Re-discover available config files
     self.discoverConfigFiles()

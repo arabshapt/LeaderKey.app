@@ -1256,6 +1256,17 @@ extension AppDelegate {
         set { setAssociatedObject(self, &AssociatedKeys.cachedActivationShortcuts, newValue) }
     }
     
+    // --- Config Preprocessing for Fast Lookups ---
+    private var currentKeyLookupCache: KeyLookupCache? {
+        get { getAssociatedObject(self, &AssociatedKeys.currentKeyLookupCache) }
+        set { setAssociatedObject(self, &AssociatedKeys.currentKeyLookupCache, newValue) }
+    }
+    
+    private var currentBundleId: String? {
+        get { getAssociatedObject(self, &AssociatedKeys.currentBundleId) }
+        set { setAssociatedObject(self, &AssociatedKeys.currentBundleId, newValue) }
+    }
+    
     private struct AssociatedKeys {
         static var eventTap = "eventTap"
         static var runLoopSource = "runLoopSource"
@@ -1277,6 +1288,8 @@ extension AppDelegate {
         static var cachedActivationModifiers = "cachedActivationModifiers"
         static var hasPendingActivation = "hasPendingActivation"
         static var lastActivationTime = "lastActivationTime"
+        static var currentKeyLookupCache = "currentKeyLookupCache"
+        static var currentBundleId = "currentBundleId"
     }
 
     // --- Event Tap Logic Methods ---
@@ -1492,8 +1505,28 @@ extension AppDelegate {
             }
         }
         
-        // Consume if we're in an active sequence
+        // Check if we're in an active sequence
         if isInActiveSequence {
+            // Get modifier flags for sticky mode check
+            let flags = event.flags
+            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue))
+            let isStickyMode = isInStickyMode(modifiers)
+            
+            // If in sticky mode and we have a key lookup cache, check if key is valid
+            if isStickyMode,
+               let currentGroup = currentSequenceGroup,
+               let cache = currentKeyLookupCache {
+                // Extract key string from the event for lookup
+                // We need a fast way to get the key string without creating NSEvent
+                if let keyString = fastKeyStringForEvent(cgEvent: event, keyCode: keyCode, flags: flags) {
+                    // O(1) lookup: only consume if this key exists in the current group
+                    return cache.hasKey(keyString, inGroupId: currentGroup.id)
+                }
+                // If we can't determine the key string, don't consume (pass through)
+                return false
+            }
+            
+            // Not in sticky mode or no cache - consume all keys in sequence
             return true
         }
         
@@ -1514,6 +1547,41 @@ extension AppDelegate {
     // Check if we're currently in an active sequence
     var isInActiveSequence: Bool {
         return currentSequenceGroup != nil || activeActivationShortcut != nil
+    }
+    
+    // Fast key string extraction for O(1) lookups (without NSEvent creation)
+    private func fastKeyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, flags: CGEventFlags) -> String? {
+        // Handle special keys first
+        switch keyCode {
+        case 36: return "\u{21B5}" // Enter
+        case 48: return "\t"        // Tab
+        case 49: return " "         // Space
+        case 51: return "\u{0008}"  // Backspace
+        case KeyCodes.escape: return "\u{001B}" // Escape
+        case 126: return "↑"        // Up Arrow
+        case 125: return "↓"        // Down Arrow
+        case 123: return "←"        // Left Arrow
+        case 124: return "→"        // Right Arrow
+        default:
+            // For regular keys, use forced English layout if enabled
+            if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
+                // Check shift modifier for case
+                let hasShift = flags.contains(.maskShift)
+                return hasShift ? mapped.uppercased() : mapped
+            }
+            
+            // For system layout, we need to create NSEvent (fallback to existing method)
+            // This is slower but ensures accuracy for non-English layouts
+            guard let nsEvent = NSEvent(cgEvent: cgEvent) else { return nil }
+            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue))
+            
+            // Get the character respecting modifiers
+            if modifiers.contains(.control) || modifiers.contains(.option) {
+                return nsEvent.charactersIgnoringModifiers
+            } else {
+                return nsEvent.characters
+            }
+        }
     }
     
     // Enqueue event for async processing
@@ -2098,6 +2166,28 @@ extension AppDelegate {
             }
             return
         }
+        
+        // Preprocess the config for fast lookups
+        // Determine the bundle ID for caching
+        let bundleId: String
+        switch activationType {
+        case .defaultOnly:
+            bundleId = "global"
+        case .appSpecificWithFallback:
+            // Get the actual bundle ID that was detected
+            let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectFrontmostAppWithOverlay()
+            let configKey = isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
+            bundleId = configKey ?? "global"
+        }
+        
+        // Store current bundle ID for later use
+        self.currentBundleId = bundleId
+        
+        // Preprocess and cache the config for O(1) lookups
+        let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(rootGroup, for: bundleId)
+        self.currentKeyLookupCache = keyLookupCache
+        
+        print("[AppDelegate] startSequence: Preprocessed config for '\(bundleId)' with \(keyLookupCache.getCacheStats())")
 
         // Store the root group for the current sequence and set the current level to the root.
         print("[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'")
