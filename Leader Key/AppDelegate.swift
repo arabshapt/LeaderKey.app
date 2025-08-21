@@ -188,10 +188,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // --- Dual Event Tap Manager for Redundancy ---
   let dualTapManager = DualEventTapManager()
   
+  // --- Sequence State Machine for Robust Handling ---
+  private enum SequenceState: Int32 {
+      case idle = 0          // Not in a sequence
+      case navigating = 1    // In a sequence, navigating groups
+      case actionPending = 2 // A final action has been triggered and is pending execution
+  }
+  private let sequenceState = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+
   // --- Cached Activation Keys for Ultra-Fast Checking ---
   private var cachedActivationKeyCodes: Set<UInt16> = []
   private var cachedActivationModifiers: [UInt16: CGEventFlags] = [:]
-  private let isInSequence = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
   
   // --- Power Management ---
   private var powerAssertionID: IOPMAssertionID = 0
@@ -256,8 +263,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Initialize event processor queue with real-time priority
     setupEventProcessor()
     
-    // Initialize atomic sequence flag
-    isInSequence.initialize(to: 0)
+    // Initialize atomic sequence state
+    sequenceState.initialize(to: SequenceState.idle.rawValue)
     
     // Cache activation keycodes for ultra-fast checking
     cacheActivationKeys()
@@ -539,7 +546,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     guard isMonitoring else { return false }
     
     // Ultra-fast check for active sequence using atomic flag
-    if OSAtomicAdd32(0, isInSequence) == 1 {
+    if OSAtomicAdd32(0, sequenceState) != SequenceState.idle.rawValue {
       return true
     }
     
@@ -1222,88 +1229,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func handleActivation(type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil) {
       // Thread safety guard - UI operations must run on main thread
       guard Thread.isMainThread else {
-          print("[AppDelegate] handleActivation() called from background thread - dispatching to main thread")
           DispatchQueue.main.async { [weak self] in
               self?.handleActivation(type: type, activationShortcut: activationShortcut)
           }
           return
       }
-      
-      print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
-      // Track the activation shortcut to prevent immediate command release triggers
-      activeActivationShortcut = activationShortcut
-      
-      // Create power assertion when starting a sequence
-      createPowerAssertion()
 
-      // This function decides what to do when an activation shortcut is pressed.
+      // Atomically read the current state
+      let currentState = SequenceState(rawValue: sequenceState.pointee) ?? .idle
+      print("[AppDelegate] handleActivation: Received activation. Current state: \(currentState)")
 
-      if controller.window.isVisible { // Check if the Leader Key window is already visible
-          print("[AppDelegate] handleActivation: Window is already visible.")
-          switch Defaults[.reactivateBehavior] { // Check user preference for reactivation
-          case .hide:
-              // Preference: Hide the window if activated again while visible.
-              print("[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence.")
-              hide()
-              return // Stop processing here
-
-          case .reset:
-              // Preference: Reset the sequence if activated again while visible.
-              print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
-              // Ensure window is visible and frontmost (but not key to avoid interfering with overlays)
-              if !controller.window.isVisible {
-                  print("[AppDelegate] handleActivation (Reset): Making window visible.")
-                  controller.window.orderFront(nil) // Just bring to front without making key
-              }
-              // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
-              MainActor.assumeIsolated {
-                  controller.userState.clear()
-              }
-              self.currentSequenceGroup = nil
-              self.activeRootGroup = nil
-              self.currentGroupActionMap = nil // Clear the action map
-              self.stickyModeToggled = false
-              self.lastModifierFlags = []
-              // Determine new active root based on the activation shortcut that was just pressed
-              let newRoot: Group
-              switch type {
-              case .defaultOnly:
-                newRoot = self.config.root
-              case .appSpecificWithFallback:
-                // Use the same overlay detection logic as initial activation
-                let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-                let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
-                newRoot = self.config.getConfig(for: configKey)
-              }
-              MainActor.assumeIsolated {
-                  self.controller.userState.activeRoot = newRoot
-              }
-              print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
-              controller.repositionWindowNearMouse()
-              startSequence(activationType: type)
-
-          case .nothing:
-              // Preference: Do nothing if activated again while visible, unless window lost focus.
-              print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
-              // Ensure window is visible (but not key to avoid interfering with overlays)
-              if !controller.window.isVisible {
-                  print("[AppDelegate] handleActivation (Nothing): Making window visible.")
-                  controller.window.orderFront(nil) // Just bring to front without making key
-              }
-              // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
-              // This prevents restarting if the user just presses the shortcut again mid-sequence.
-              if currentSequenceGroup == nil {
-                  print("[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
-                  startSequence(activationType: type)
-              } else {
-                   print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
-              }
-          }
-      } else {
-          // Show window invisibly; when ready, start sequence, then the window will reveal.
+      switch currentState {
+      case .idle:
+          // If idle, this is a fresh sequence.
+          print("[AppDelegate] handleActivation: State is IDLE. Starting new sequence.")
+          activeActivationShortcut = activationShortcut
+          createPowerAssertion()
           show(type: type) {
               self.startSequence(activationType: type)
           }
+
+      case .navigating:
+          // If navigating, the user wants to reset the incomplete sequence.
+          print("[AppDelegate] handleActivation: State is NAVIGATING. Resetting and starting new sequence.")
+          resetSequenceState() // This clears the old state and sets state to .idle
+
+          // After reset, we can treat it as a new activation.
+          activeActivationShortcut = activationShortcut
+          createPowerAssertion()
+          // Ensure window is visible and repositioned before starting the new sequence.
+          show(type: type) {
+              self.startSequence(activationType: type)
+          }
+
+      case .actionPending:
+          // If an action is pending, ignore the new activation to protect the first action.
+          print("[AppDelegate] handleActivation: State is ACTION_PENDING. Ignoring new activation.")
+          return
       }
   }
 
@@ -2909,8 +2871,12 @@ extension AppDelegate {
         self.lastModifierFlags = []
         self.activeActivationShortcut = nil
         
-        // Clear atomic sequence flag
-        OSAtomicCompareAndSwap32(1, 0, isInSequence)
+        // Atomically set the state back to IDLE.
+        var oldState: Int32
+        repeat {
+            oldState = sequenceState.pointee
+        } while !OSAtomicCompareAndSwap32(oldState, SequenceState.idle.rawValue, sequenceState)
+        print("[AppDelegate] forceResetState: State changed from \(SequenceState(rawValue: oldState) ?? .idle) to IDLE.")
 
         // Force hide the window immediately if it's visible
         if controller.window.isVisible {
@@ -3196,6 +3162,15 @@ extension AppDelegate {
             switch hit {
             case .action(let action):
                 debugLog("[AppDelegate] processKeyInSequence: Matched ACTION: '\\(action.displayName)' (\\(action.value)).")
+
+                // Set state to ACTION_PENDING before running the action.
+                // This protects the action from being reset by a new activation.
+                var oldState: Int32
+                repeat {
+                    oldState = sequenceState.pointee
+                } while !OSAtomicCompareAndSwap32(oldState, SequenceState.actionPending.rawValue, sequenceState)
+                print("[AppDelegate] processKeyInSequence: State changed from \(SequenceState(rawValue: oldState) ?? .idle) to ACTION_PENDING.")
+
                 // Run the action (ensure it's on main thread since we're already there)
                 controller.runAction(action)
 
@@ -3217,6 +3192,16 @@ extension AppDelegate {
             case .group(let subgroup):
                 debugLog("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
                 
+                // Explicitly set state to NAVIGATING upon entering a subgroup.
+                let oldState = sequenceState.pointee
+                if oldState != SequenceState.navigating.rawValue {
+                    var currentState: Int32
+                    repeat {
+                        currentState = sequenceState.pointee
+                    } while !OSAtomicCompareAndSwap32(currentState, SequenceState.navigating.rawValue, sequenceState)
+                    print("[AppDelegate] processKeyInSequence: State corrected from \(SequenceState(rawValue: oldState) ?? .idle) to NAVIGATING.")
+                }
+
                 // Update sequence state immediately to prevent race conditions
                 currentSequenceGroup = subgroup
                 
@@ -3302,8 +3287,13 @@ extension AppDelegate {
         // Build action map for fast lookups
         self.currentGroupActionMap = buildActionMap(for: rootGroup)
         
-        // Set atomic sequence flag for ultra-fast callback checking
-        OSAtomicCompareAndSwap32(0, 1, isInSequence)
+        // Set state to NAVIGATING for the new sequence.
+        // This atomically swaps the current state to the 'navigating' state.
+        var oldState: Int32
+        repeat {
+            oldState = sequenceState.pointee
+        } while !OSAtomicCompareAndSwap32(oldState, SequenceState.navigating.rawValue, sequenceState)
+        print("[AppDelegate] startSequence: State changed from \(SequenceState(rawValue: oldState) ?? .idle) to NAVIGATING.")
 
         // If the window is already visible (e.g., reactivation with .reset), update the UI state.
         if self.controller.window.isVisible {
@@ -3327,8 +3317,12 @@ extension AppDelegate {
             self.activeRootGroup = nil
             self.currentGroupActionMap = nil // Clear the action map
             
-            // Clear atomic sequence flag for ultra-fast callback checking
-            OSAtomicCompareAndSwap32(1, 0, isInSequence)
+            // Atomically set the state back to IDLE.
+            var oldState: Int32
+            repeat {
+                oldState = sequenceState.pointee
+            } while !OSAtomicCompareAndSwap32(oldState, SequenceState.idle.rawValue, sequenceState)
+            print("[AppDelegate] resetSequenceState: State changed from \(SequenceState(rawValue: oldState) ?? .idle) to IDLE.")
             
             // Purge any pending events from the old sequence to prevent them
             // from being processed against the new state.
