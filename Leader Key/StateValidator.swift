@@ -38,6 +38,41 @@ enum StateValidator {
   
   // MARK: - Navigation State Validation
   
+  /// Validate if a group can be added to the navigation path
+  static func canAddGroupToPath(
+    group: Group,
+    navigationPath: [Group],
+    activeRoot: Group?
+  ) -> ValidationResult {
+    // If path is empty, we're setting the root - allow any group
+    // This handles the case where activeRoot might be a different instance
+    // of the same logical group (common during rapid activations)
+    if navigationPath.isEmpty {
+      // Allow any group to be set as root when path is empty
+      // The first navigation effectively sets/resets the root
+      return .success
+    }
+    
+    // If path is not empty, the new group should be a child of the last group
+    guard let lastGroup = navigationPath.last else {
+      return .failure("Navigation path is corrupted")
+    }
+    
+    // Check if the new group exists in the last group's actions
+    let groupExists = lastGroup.actions.contains { action in
+      if case .group(let subgroup) = action {
+        return subgroup.key == group.key
+      }
+      return false
+    }
+    
+    if !groupExists {
+      return .failure("Group '\(group.label ?? group.key ?? "unknown")' is not a child of '\(lastGroup.label ?? lastGroup.key ?? "unknown")'")
+    }
+    
+    return .success
+  }
+  
   /// Validate navigation state consistency
   static func validateNavigation(
     navigationPath: [Group],

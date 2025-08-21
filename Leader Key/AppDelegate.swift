@@ -15,6 +15,177 @@ let updateLocationIdentifier = "UpdateCheck"
 // Define the same unique tag here
 private let leaderKeySyntheticEventTag: Int64 = 0xDEADBEEF
 
+// MARK: - Navigation Queue System
+
+/// Request structure for queued navigation operations
+struct NavigationRequest {
+    let id: UUID
+    let targetGroup: Group
+    let sourceGroup: Group?  // Expected current group when request was made
+    let timestamp: Date
+    let completion: ((Bool) -> Void)?
+    
+    init(
+        targetGroup: Group,
+        sourceGroup: Group?,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        self.id = UUID()
+        self.targetGroup = targetGroup
+        self.sourceGroup = sourceGroup
+        self.timestamp = Date()
+        self.completion = completion
+    }
+}
+
+/// Serial queue for processing navigation requests to prevent race conditions
+final class NavigationQueue {
+    
+    // MARK: - Properties
+    
+    private let queue = DispatchQueue(label: "com.leaderkey.navigationQueue", qos: .userInteractive)
+    private var pendingRequest: NavigationRequest?
+    private var isProcessing = false
+    
+    // Weak references to avoid retain cycles
+    private weak var controller: Controller?
+    private weak var appDelegate: AppDelegate?
+    
+    // MARK: - Initialization
+    
+    init(controller: Controller, appDelegate: AppDelegate) {
+        self.controller = controller
+        self.appDelegate = appDelegate
+    }
+    
+    // MARK: - Queue Management
+    
+    /// Enqueue a navigation request, cancelling any pending requests
+    func enqueue(_ request: NavigationRequest) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Cancel pending request if exists
+            if let pending = self.pendingRequest {
+                print("[NavigationQueue] Cancelling pending navigation to '\(pending.targetGroup.displayName)'")
+                pending.completion?(false)
+            }
+            
+            // Store new request
+            self.pendingRequest = request
+            
+            // Process if not already processing
+            if !self.isProcessing {
+                self.processNext()
+            }
+        }
+    }
+    
+    /// Process the next navigation request in queue
+    private func processNext() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            guard let request = self.pendingRequest else {
+                self.isProcessing = false
+                return
+            }
+            
+            self.isProcessing = true
+            self.pendingRequest = nil
+            
+            // Validate navigation context
+            let contextValid = self.validateContext(request: request)
+            
+            if contextValid {
+                // Execute navigation on main thread (UserState is @MainActor)
+                DispatchQueue.main.async { [weak self] in
+                    self?.executeNavigation(request: request)
+                }
+            } else {
+                print("[NavigationQueue] Context validation failed for navigation to '\(request.targetGroup.displayName)'")
+                request.completion?(false)
+                self.isProcessing = false
+                self.processNext() // Process next if any
+            }
+        }
+    }
+    
+    /// Validate that the navigation context is still valid
+    private func validateContext(request: NavigationRequest) -> Bool {
+        guard let appDelegate = appDelegate else { return false }
+        
+        // If request has a source group, validate it matches current state
+        if let expectedSource = request.sourceGroup {
+            let currentGroup = appDelegate.getCurrentSequenceGroup()
+            
+            // Check if current group matches expected source
+            if let current = currentGroup {
+                let matches = current.key == expectedSource.key && 
+                             current.label == expectedSource.label
+                if !matches {
+                    print("[NavigationQueue] Context mismatch: expected '\(expectedSource.displayName)' but current is '\(current.displayName)'")
+                    return false
+                }
+            } else if currentGroup == nil {
+                print("[NavigationQueue] Context mismatch: expected '\(expectedSource.displayName)' but no current group")
+                return false
+            }
+        }
+        
+        return true
+    }
+    
+    /// Execute the navigation on main thread
+    @MainActor
+    private func executeNavigation(request: NavigationRequest) {
+        guard let controller = controller else {
+            request.completion?(false)
+            completeProcessing()
+            return
+        }
+        
+        // Attempt navigation through UserState
+        let success = controller.userState.navigateToGroup(request.targetGroup)
+        
+        if success {
+            print("[NavigationQueue] Successfully navigated to '\(request.targetGroup.displayName)'")
+            
+            // Update AppDelegate state only after successful navigation
+            queue.async { [weak self] in
+                request.completion?(true)
+                self?.completeProcessing()
+            }
+        } else {
+            print("[NavigationQueue] Navigation to '\(request.targetGroup.displayName)' failed")
+            
+            queue.async { [weak self] in
+                request.completion?(false)
+                self?.completeProcessing()
+            }
+        }
+    }
+    
+    /// Mark processing complete and process next request if any
+    private func completeProcessing() {
+        queue.async { [weak self] in
+            self?.isProcessing = false
+            self?.processNext()
+        }
+    }
+    
+    /// Cancel all pending navigations
+    func cancelAll() {
+        queue.async { [weak self] in
+            if let pending = self?.pendingRequest {
+                print("[NavigationQueue] Cancelling all pending navigations")
+                pending.completion?(false)
+                self?.pendingRequest = nil
+            }
+            self?.isProcessing = false
+        }
+    }
+}
+
 // MARK: - Callback Performance Statistics
 
 struct CallbackStatistics {
@@ -174,6 +345,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   var controller: Controller!
   let statusItem = StatusItem()
   let config = UserConfig()
+  private var navigationQueue: NavigationQueue!
   var fileMonitor: FileMonitor!
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
@@ -277,6 +449,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     config.ensureAndLoad() // Ensures config dir/file exists and loads default config
     state = UserState(userConfig: config)
     controller = Controller(userState: state, userConfig: config, appDelegate: self)
+    navigationQueue = NavigationQueue(controller: controller, appDelegate: self)
     debugLog("[AppDelegate] UserConfig and UserState initialized.")
 
     // Setup background services and UI elements
@@ -3215,24 +3388,36 @@ extension AppDelegate {
                 return true // Event handled
 
             case .group(let subgroup):
-                debugLog("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup.")
+                debugLog("[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Queueing navigation.")
                 
-                // Update sequence state immediately to prevent race conditions
-                currentSequenceGroup = subgroup
+                // Create navigation request with current context
+                let request = NavigationRequest(
+                    targetGroup: subgroup,
+                    sourceGroup: currentSequenceGroup,
+                    completion: { [weak self] success in
+                        guard let self = self else { return }
+                        
+                        if success {
+                            // Only update sequence state if navigation was successful
+                            self.currentSequenceGroup = subgroup
+                            
+                            // Build action map for the new group for fast lookups
+                            self.currentGroupActionMap = self.buildActionMap(for: subgroup)
+                            
+                            // Check if the group has sticky mode enabled
+                            if subgroup.stickyMode == true {
+                                debugLog("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
+                                self.activateStickyMode()
+                            }
+                            debugLog("[AppDelegate] processKeyInSequence: Successfully navigated to group '\(subgroup.displayName)'.")
+                        } else {
+                            print("[AppDelegate] processKeyInSequence: ❌ Navigation to group '\(subgroup.displayName)' failed. Staying in current group.")
+                        }
+                    }
+                )
                 
-                // Build action map for the new group for fast lookups
-                currentGroupActionMap = buildActionMap(for: subgroup)
-
-                // Update UI state first to ensure correct display
-                DispatchQueue.main.async {
-                    self.controller.userState.navigateToGroup(subgroup)
-                }
-
-                // Check if the group has sticky mode enabled
-                if subgroup.stickyMode == true {
-                    debugLog("[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode.")
-                    activateStickyMode()
-                }
+                // Enqueue navigation request
+                navigationQueue.enqueue(request)
                 
                 let endTime = CFAbsoluteTimeGetCurrent()
                 let duration = (endTime - startTime) * 1000
@@ -3287,9 +3472,16 @@ extension AppDelegate {
             // If the window is somehow visible, try to update its UI state.
             if self.controller.window.isVisible {
                  print("[AppDelegate] startSequence (Fallback): Window visible, navigating UI to default root.")
-                DispatchQueue.main.async {
-                    self.controller.userState.navigateToGroup(self.config.root)
-                }
+                let request = NavigationRequest(
+                    targetGroup: self.config.root,
+                    sourceGroup: nil,  // No source group for initial navigation
+                    completion: { success in
+                        if !success {
+                            print("[AppDelegate] startSequence (Fallback): ❌ Failed to navigate to default root. Config may be corrupted.")
+                        }
+                    }
+                )
+                self.navigationQueue.enqueue(request)
             }
             return
         }
@@ -3308,18 +3500,34 @@ extension AppDelegate {
         // If the window is already visible (e.g., reactivation with .reset), update the UI state.
         if self.controller.window.isVisible {
              print("[AppDelegate] startSequence: Window is visible, updating UI state for root group.")
-            DispatchQueue.main.async {
-                // Ensure UI reflects the start of the sequence at the root group.
-                self.controller.userState.navigateToGroup(rootGroup)
-                // Reset window transparency when starting a new sequence
-                self.controller.window.alphaValue = Defaults[.normalModeOpacity]
-            }
+            let request = NavigationRequest(
+                targetGroup: rootGroup,
+                sourceGroup: nil,  // No source group for initial navigation
+                completion: { [weak self] success in
+                    if !success {
+                        print("[AppDelegate] startSequence: ❌ Failed to navigate to root group '\(rootGroup.displayName)'.")
+                    }
+                    // Reset window transparency when starting a new sequence
+                    DispatchQueue.main.async {
+                        self?.controller.window.alphaValue = Defaults[.normalModeOpacity]
+                    }
+                }
+            )
+            self.navigationQueue.enqueue(request)
         }
          print("[AppDelegate] startSequence: Sequence setup complete.")
     }
 
+    // Helper method to get current sequence group for NavigationQueue
+    func getCurrentSequenceGroup() -> Group? {
+        return currentSequenceGroup
+    }
+    
     // Resets the internal state variables used to track the current key sequence.
     func resetSequenceState() {
+        // Cancel any pending navigations
+        navigationQueue?.cancelAll()
+        
         // Only perform reset if a sequence is actually active
         if currentSequenceGroup != nil || activeRootGroup != nil {
             print("[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil).")

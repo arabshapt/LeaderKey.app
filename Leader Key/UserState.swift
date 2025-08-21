@@ -11,6 +11,7 @@ final class UserState: ObservableObject {
   @Published var isShowingRefreshState: Bool
   @Published var navigationPath: [Group] = []
   @Published var activeRoot: Group? // Root group for the current context (app-specific or default)
+  @Published var navigationError: String? // Error message from failed navigation attempts
   var activeConfigKey: String? // The config key that was used to load activeRoot
   
   // State snapshot for debugging
@@ -40,6 +41,7 @@ final class UserState: ObservableObject {
     display = nil
     navigationPath = []
     isShowingRefreshState = false
+    navigationError = nil
     // Reset activeRoot to the default when clearing
     activeRoot = userConfig.root
     activeConfigKey = nil
@@ -47,18 +49,29 @@ final class UserState: ObservableObject {
     createSnapshot()
   }
 
-  func navigateToGroup(_ group: Group) {
-    // Validate navigation is allowed
-    let validation = StateValidator.validateNavigation(
+  @discardableResult
+  func navigateToGroup(_ group: Group) -> Bool {
+    // Validate that the new group can be added to the path
+    let validation = StateValidator.canAddGroupToPath(
+      group: group,
       navigationPath: navigationPath,
-      activeRoot: activeRoot,
-      currentGroup: currentGroup
+      activeRoot: activeRoot
     )
     validation.log(context: "navigateToGroup")
     
     if validation.isValid {
       navigationPath.append(group)
       createSnapshot()
+      navigationError = nil  // Clear any previous error
+      return true
+    } else {
+      // Store error message for UI display
+      navigationError = validation.message
+      // Auto-clear error after 3 seconds
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+        self?.navigationError = nil
+      }
+      return false
     }
   }
 

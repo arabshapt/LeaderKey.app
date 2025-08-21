@@ -208,6 +208,25 @@ enum Cheatsheet {
               .foregroundStyle(.secondary)
           }
           .padding(.bottom, 8)
+          
+          // Show navigation error if present
+          if let error = userState.navigationError {
+            HStack {
+              Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.red)
+                .font(.system(size: 12))
+              Text(error)
+                .foregroundColor(.red)
+                .font(.system(size: 11))
+                .lineLimit(2)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.red.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(.bottom, 8)
+          }
+          
           Divider()
             .padding(.bottom, 8)
 
