@@ -1641,36 +1641,29 @@ extension AppDelegate {
     
     // Fast key string extraction for O(1) lookups (without NSEvent creation)
     private func fastKeyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, flags: CGEventFlags) -> String? {
-        // Handle special keys first
-        switch keyCode {
-        case 36: return "\u{21B5}" // Enter
-        case 48: return "\t"        // Tab
-        case 49: return " "         // Space
-        case 51: return "\u{0008}"  // Backspace
-        case KeyCodes.escape: return "\u{001B}" // Escape
-        case 126: return "↑"        // Up Arrow
-        case 125: return "↓"        // Down Arrow
-        case 123: return "←"        // Left Arrow
-        case 124: return "→"        // Right Arrow
-        default:
-            // For regular keys, use forced English layout if enabled
-            if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
-                // Check shift modifier for case
+        // Try forced English layout first (covers 95% of keys)
+        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
+            // Special handling for letters - apply shift for uppercase
+            if keyCode <= 0x32 && ((keyCode >= 0x00 && keyCode <= 0x11) || 
+                                   (keyCode >= 0x1F && keyCode <= 0x2E)) {
+                // This is a letter key (a-z range)
                 let hasShift = flags.contains(.maskShift)
                 return hasShift ? mapped.uppercased() : mapped
             }
-            
-            // For system layout, we need to create NSEvent (fallback to existing method)
-            // This is slower but ensures accuracy for non-English layouts
-            guard let nsEvent = NSEvent(cgEvent: cgEvent) else { return nil }
-            let modifiers = cgFlagsToNSModifiers(flags)
-            
-            // Get the character respecting modifiers
-            if modifiers.contains(.control) || modifiers.contains(.option) {
-                return nsEvent.charactersIgnoringModifiers
-            } else {
-                return nsEvent.characters
-            }
+            // For non-letters, return as-is (numbers, punctuation, special keys)
+            return mapped
+        }
+        
+        // Fallback: For system layout, we need to create NSEvent
+        // This is slower but ensures accuracy for non-English layouts
+        guard let nsEvent = NSEvent(cgEvent: cgEvent) else { return nil }
+        let modifiers = cgFlagsToNSModifiers(flags)
+        
+        // Get the character respecting modifiers
+        if modifiers.contains(.control) || modifiers.contains(.option) {
+            return nsEvent.charactersIgnoringModifiers
+        } else {
+            return nsEvent.characters
         }
     }
     
