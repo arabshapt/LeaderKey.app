@@ -104,6 +104,15 @@ private struct QueuedKeyEvent {
 
 private let maxQueueSize = 3 // Reduced queue size to minimize latency
 
+// MARK: - Callback Optimization State
+// Consolidated state struct to reduce associated object lookups
+private struct CallbackOptimizationState {
+    var hasPendingActivation: Bool = false
+    var lastActivationTime: CFAbsoluteTime = 0
+    // Note: Other state like currentSequenceGroup is kept separate as it's 
+    // accessed from many places and needs proper synchronization
+}
+
 // MARK: - Performance Monitoring
 
 // High-precision timing utilities using mach_absolute_time
@@ -1329,8 +1338,7 @@ extension AppDelegate {
         static var cachedActivationKeyCodes = "cachedActivationKeyCodes"
         static var cachedActivationShortcuts = "cachedActivationShortcuts"
         static var cachedActivationModifiers = "cachedActivationModifiers"
-        static var hasPendingActivation = "hasPendingActivation"
-        static var lastActivationTime = "lastActivationTime"
+        static var callbackOptimizationState = "callbackOptimizationState"
         static var currentKeyLookupCache = "currentKeyLookupCache"
         static var currentBundleId = "currentBundleId"
         static var isReloading = "isReloading"
@@ -1552,6 +1560,9 @@ extension AppDelegate {
         // Get keycode directly from CGEvent
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         
+        // Single lookup of consolidated state
+        let currentState = callbackState
+        
         // Check if it's in our cached activation keys
         var isActivationKey = false
         if cachedActivationKeyCodes.contains(keyCode) {
@@ -1566,9 +1577,11 @@ extension AppDelegate {
                 
                 if hasCommand && hasShift && hasOption && hasControl {
                     isActivationKey = true
-                    // Mark that we have a pending activation
-                    hasPendingActivation = true
-                    lastActivationTime = CFAbsoluteTimeGetCurrent()
+                    // Mark that we have a pending activation (single state update)
+                    var newState = currentState
+                    newState.hasPendingActivation = true
+                    newState.lastActivationTime = CFAbsoluteTimeGetCurrent()
+                    callbackState = newState
                     return true
                 }
             }
@@ -1607,12 +1620,12 @@ extension AppDelegate {
         }
         
         // Consume if we have a pending activation being processed
-        if hasPendingActivation {
+        if currentState.hasPendingActivation {
             return true
         }
         
         // Consume if we recently activated (within 100ms window)
-        let timeSinceActivation = CFAbsoluteTimeGetCurrent() - lastActivationTime
+        let timeSinceActivation = CFAbsoluteTimeGetCurrent() - currentState.lastActivationTime
         if timeSinceActivation < 0.1 {  // 100ms window
             return true
         }
@@ -1740,16 +1753,30 @@ extension AppDelegate {
         set { setAssociatedObject(self, &AssociatedKeys.cachedActivationModifiers, newValue) }
     }
     
+    // Consolidated callback optimization state (single associated object lookup)
+    private var callbackState: CallbackOptimizationState {
+        get { getAssociatedObject(self, &AssociatedKeys.callbackOptimizationState) ?? CallbackOptimizationState() }
+        set { setAssociatedObject(self, &AssociatedKeys.callbackOptimizationState, newValue) }
+    }
+    
     // Track if we have a pending activation being processed
     private var hasPendingActivation: Bool {
-        get { getAssociatedObject(self, &AssociatedKeys.hasPendingActivation) ?? false }
-        set { setAssociatedObject(self, &AssociatedKeys.hasPendingActivation, newValue) }
+        get { callbackState.hasPendingActivation }
+        set { 
+            var state = callbackState
+            state.hasPendingActivation = newValue
+            callbackState = state
+        }
     }
     
     // Track when we last started an activation
     private var lastActivationTime: CFAbsoluteTime {
-        get { getAssociatedObject(self, &AssociatedKeys.lastActivationTime) ?? 0 }
-        set { setAssociatedObject(self, &AssociatedKeys.lastActivationTime, newValue) }
+        get { callbackState.lastActivationTime }
+        set { 
+            var state = callbackState
+            state.lastActivationTime = newValue
+            callbackState = state
+        }
     }
     
     // --- Force Reset Mechanism ---
