@@ -109,6 +109,7 @@ private let maxQueueSize = 3 // Reduced queue size to minimize latency
 private struct CallbackOptimizationState {
     var hasPendingActivation: Bool = false
     var lastActivationTime: CFAbsoluteTime = 0
+    var stickyModeKeycodes: Set<UInt16>? = nil  // Pre-computed for O(1) lookup
     // Note: Other state like currentSequenceGroup is kept separate as it's 
     // accessed from many places and needs proper synchronization
 }
@@ -1601,18 +1602,25 @@ extension AppDelegate {
             let modifiers = cgFlagsToNSModifiers(flags)
             let isStickyMode = isInStickyMode(modifiers)
             
-            // If in sticky mode and we have a key lookup cache, check if key is valid
-            if isStickyMode,
-               let currentGroup = currentSequenceGroup,
-               let cache = currentKeyLookupCache {
-                // Extract key string from the event for lookup
-                // We need a fast way to get the key string without creating NSEvent
-                if let keyString = fastKeyStringForEvent(cgEvent: event, keyCode: keyCode, flags: flags) {
-                    // O(1) lookup: only consume if this key exists in the current group
-                    return cache.hasKey(keyString, inGroupId: currentGroup.id)
+            // If in sticky mode, use pre-computed keycodes for O(1) lookup
+            if isStickyMode {
+                // First check if we have pre-computed keycodes
+                if let validKeycodes = currentState.stickyModeKeycodes {
+                    // Direct O(1) keycode check - no string conversion needed!
+                    return validKeycodes.contains(keyCode)
                 }
-                // If we can't determine the key string, don't consume (pass through)
-                return false
+                
+                // Fallback: compute on-demand if not cached (shouldn't happen normally)
+                if let currentGroup = currentSequenceGroup,
+                   let cache = currentKeyLookupCache {
+                    // Extract key string from the event for lookup
+                    if let keyString = fastKeyStringForEvent(cgEvent: event, keyCode: keyCode, flags: flags) {
+                        // O(1) lookup: only consume if this key exists in the current group
+                        return cache.hasKey(keyString, inGroupId: currentGroup.id)
+                    }
+                    // If we can't determine the key string, don't consume (pass through)
+                    return false
+                }
             }
             
             // Not in sticky mode or no cache - consume all keys in sequence
@@ -2234,6 +2242,13 @@ extension AppDelegate {
                 
                 // Update sequence state immediately to prevent race conditions
                 currentSequenceGroup = subgroup
+                
+                // Update pre-computed keycodes for the new group
+                if let cache = currentKeyLookupCache {
+                    var state = callbackState
+                    state.stickyModeKeycodes = cache.getValidKeycodes(forGroupId: subgroup.id)
+                    callbackState = state
+                }
 
                 // Update UI state first to ensure correct display
                 DispatchQueue.main.async {
@@ -2327,6 +2342,12 @@ extension AppDelegate {
         print("[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'")
         self.activeRootGroup = rootGroup
         self.currentSequenceGroup = rootGroup
+        
+        // Pre-compute keycodes for sticky mode optimization
+        var state = callbackState
+        state.stickyModeKeycodes = keyLookupCache.getValidKeycodes(forGroupId: rootGroup.id)
+        callbackState = state
+        print("[AppDelegate] Pre-computed \(state.stickyModeKeycodes?.count ?? 0) keycodes for sticky mode")
 
         // If the window is already visible (e.g., reactivation with .reset), update the UI state.
         if self.controller.window.isVisible {
@@ -2352,8 +2373,11 @@ extension AppDelegate {
             // Clear any queued key events when sequence ends
             clearKeyEventQueue()
             
-            // Clear pending activation flag when sequence resets
+            // Clear pending activation flag and pre-computed keycodes when sequence resets
             self.hasPendingActivation = false
+            var state = callbackState
+            state.stickyModeKeycodes = nil
+            callbackState = state
 
             // Reset sticky mode toggle state
             if stickyModeToggled {
