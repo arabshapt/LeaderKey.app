@@ -35,13 +35,20 @@ private func eventTapCallback(
         return Unmanaged.passRetained(event)
     }
     
+    // Cast the reference to AppDelegate first (needed for dual tap manager)
+    let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+    
+    // INSTANT DETECTION - Handle tap disabled events immediately
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        print("[EventTap] ⚠️ Tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "user input") - triggering instant failover")
+        appDelegate.dualTapManager.handleInstantFailover()
+        return nil // Don't pass disabled events through
+    }
+    
     // Check for synthetic event FIRST (early exit optimization)
     if event.getIntegerValueField(.eventSourceUserData) == leaderKeySyntheticEventTag {
         return Unmanaged.passRetained(event)
     }
-
-    // Cast the reference to AppDelegate
-    let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
     
     // Handle non-keyDown events through the old path
     if event.type != .keyDown {
@@ -270,6 +277,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
   private var cancellables = Set<AnyCancellable>()
+  
+  // --- Dual Event Tap Manager for Redundancy ---
+  let dualTapManager = DualEventTapManager()
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -448,8 +458,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       self?.checkAndRecoverWindowState()
     }
     
-    // Check event tap health every 2 seconds by default; this is robust while reducing wakeups
-    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+    // Check event tap health every 0.5 seconds for faster recovery from tap disabling
+    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
       self?.checkEventTapHealth()
     }
   }
@@ -469,22 +479,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
   private func checkEventTapHealth() {
     if isMonitoring {
-      // Check if event tap exists and is enabled
-      if let tap = eventTap {
-        if !CGEvent.tapIsEnabled(tap: tap) {
-          print("[AppDelegate] Event Tap Health Check: Event tap disabled! Re-enabling...")
-          CGEvent.tapEnable(tap: tap, enable: true)
-          
-          // If still disabled after re-enabling, restart the whole event tap
+      // Use dual tap manager for health checking and failover
+      if !dualTapManager.checkAndFailover() {
+        // Both taps are unhealthy - log stats and trigger full restart
+        print("[AppDelegate] Event Tap Health Check: Both taps unhealthy! Stats:")
+        print(getCallbackPerformanceStats())
+        print(dualTapManager.getStatistics())
+        
+        // Try single tap fallback first
+        if let tap = eventTap {
           if !CGEvent.tapIsEnabled(tap: tap) {
-            print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting event tap...")
-            restartEventTap()
+            print("[AppDelegate] Event Tap Health Check: Single tap also disabled! Re-enabling...")
+            CGEvent.tapEnable(tap: tap, enable: true)
+            
+            if !CGEvent.tapIsEnabled(tap: tap) {
+              print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting...")
+              restartEventTap()
+            }
           }
+        } else {
+          print("[AppDelegate] Event Tap Health Check: No taps available! Restarting...")
+          restartEventTap()
         }
-      } else {
-        // Event tap is nil but we should be monitoring
-        print("[AppDelegate] Event Tap Health Check: Event tap is nil! Restarting...")
-        restartEventTap()
       }
     } else {
       // Not monitoring - check if permissions have been granted
@@ -1382,6 +1398,25 @@ extension AppDelegate {
         // Cache activation shortcuts for fast lookup
         cacheActivationShortcuts()
 
+        // First try to create dual taps for redundancy
+        let dualTapsCreated = dualTapManager.createDualTaps(
+            callback: eventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        )
+        
+        if dualTapsCreated {
+            print("[AppDelegate] Dual event taps created successfully for redundancy")
+            self.isMonitoring = true
+            self.didShowPermissionsAlertRecently = false
+            
+            // Start CPU monitoring for adaptive behavior
+            startCPUMonitoring()
+            return
+        }
+        
+        // Fallback to single tap if dual taps failed
+        print("[AppDelegate] Dual taps failed, falling back to single tap")
+        
         // Create the event tap. This requires Accessibility permissions.
         // Build an event mask listening for key down, key up, and modifier-flag changes.
         let eventMask: CGEventMask =
@@ -1460,6 +1495,9 @@ extension AppDelegate {
 
         // Stop health monitoring and CPU monitoring
         stopCPUMonitoring()
+        
+        // Stop dual taps if they exist
+        dualTapManager.stopDualTaps()
 
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
