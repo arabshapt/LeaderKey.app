@@ -1538,9 +1538,16 @@ extension AppDelegate {
         
         // Check if we're in an active sequence
         if isInActiveSequence {
-            // Get modifier flags for sticky mode check
+            // Get modifier flags
             let flags = event.flags
-            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue))
+            
+            // Special handling for CMD+, (Settings shortcut) - always consume
+            if keyCode == 43 && flags.contains(.maskCommand) {
+                return true  // Always consume CMD+, in sequences
+            }
+            
+            // Check for sticky mode
+            let modifiers = cgFlagsToNSModifiers(flags)
             let isStickyMode = isInStickyMode(modifiers)
             
             // If in sticky mode and we have a key lookup cache, check if key is valid
@@ -1580,6 +1587,20 @@ extension AppDelegate {
         return currentSequenceGroup != nil || activeActivationShortcut != nil
     }
     
+    // Convert CGEventFlags to NSEvent.ModifierFlags properly
+    private func cgFlagsToNSModifiers(_ cgFlags: CGEventFlags) -> NSEvent.ModifierFlags {
+        var modifiers: NSEvent.ModifierFlags = []
+        
+        if cgFlags.contains(.maskCommand) { modifiers.insert(.command) }
+        if cgFlags.contains(.maskShift) { modifiers.insert(.shift) }
+        if cgFlags.contains(.maskControl) { modifiers.insert(.control) }
+        if cgFlags.contains(.maskAlternate) { modifiers.insert(.option) }
+        if cgFlags.contains(.maskAlphaShift) { modifiers.insert(.capsLock) }
+        if cgFlags.contains(.maskSecondaryFn) { modifiers.insert(.function) }
+        
+        return modifiers
+    }
+    
     // Fast key string extraction for O(1) lookups (without NSEvent creation)
     private func fastKeyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, flags: CGEventFlags) -> String? {
         // Handle special keys first
@@ -1604,7 +1625,7 @@ extension AppDelegate {
             // For system layout, we need to create NSEvent (fallback to existing method)
             // This is slower but ensures accuracy for non-English layouts
             guard let nsEvent = NSEvent(cgEvent: cgEvent) else { return nil }
-            let modifiers = NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue))
+            let modifiers = cgFlagsToNSModifiers(flags)
             
             // Get the character respecting modifiers
             if modifiers.contains(.control) || modifiers.contains(.option) {
@@ -1972,7 +1993,7 @@ extension AppDelegate {
 
     private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         // OPTIMIZATION: Early exit if keycode is not in our cached activation set
-        if !cachedActivationKeyCodes.contains(keyCode) && keyCode != KeyCodes.escape {
+        if !cachedActivationKeyCodes.contains(keyCode) && keyCode != KeyCodes.escape && keyCode != 43 {
             // Not an activation key or escape - check if we're in a sequence
             if currentSequenceGroup != nil {
                 // We're in a sequence, so process this key
