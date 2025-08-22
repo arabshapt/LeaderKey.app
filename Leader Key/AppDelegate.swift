@@ -1639,19 +1639,31 @@ extension AppDelegate {
         return modifiers
     }
     
+    // Helper function to identify letter key codes (a-z)
+    private func isLetterKeyCode(_ keyCode: UInt16) -> Bool {
+        return (keyCode >= 0x00 && keyCode <= 0x11) ||  // a-q range
+               (keyCode >= 0x1F && keyCode <= 0x2E && keyCode != 0x2B && keyCode != 0x2C && keyCode != 0x2D)  // o,p,r-z range (excluding punctuation)
+    }
+    
     // Fast key string extraction for O(1) lookups (without NSEvent creation)
     private func fastKeyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, flags: CGEventFlags) -> String? {
         // Try forced English layout first (covers 95% of keys)
-        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
-            // Special handling for letters - apply shift for uppercase
-            if keyCode <= 0x32 && ((keyCode >= 0x00 && keyCode <= 0x11) || 
-                                   (keyCode >= 0x1F && keyCode <= 0x2E)) {
-                // This is a letter key (a-z range)
-                let hasShift = flags.contains(.maskShift)
-                return hasShift ? mapped.uppercased() : mapped
+        if Defaults[.forceEnglishKeyboardLayout] {
+            let hasShift = flags.contains(.maskShift)
+            
+            // Check shifted keymap first for non-letter keys when shift is pressed
+            if hasShift, !isLetterKeyCode(keyCode), let shiftedMapping = englishShiftedKeymap[keyCode] {
+                return shiftedMapping
             }
-            // For non-letters, return as-is (numbers, punctuation, special keys)
-            return mapped
+            
+            // Then check regular keymap
+            if let mapped = englishKeymap[keyCode] {
+                // Only uppercase letters when shift is pressed
+                if hasShift && isLetterKeyCode(keyCode) {
+                    return mapped.uppercased()
+                }
+                return mapped
+            }
         }
         
         // Fallback: For system layout, we need to create NSEvent
@@ -2379,11 +2391,22 @@ extension AppDelegate {
         var result: String?
         
         // --- Option 1: Forced English Layout ---
-        if Defaults[.forceEnglishKeyboardLayout], let mapped = englishKeymap[keyCode] {
-            // Respect Shift key for case
-            result = modifiers.contains(.shift) ? mapped.uppercased() : mapped
+        if Defaults[.forceEnglishKeyboardLayout] {
+            // Check shifted keymap first for non-letter keys when shift is pressed
+            if modifiers.contains(.shift), !isLetterKeyCode(keyCode), let shiftedMapping = englishShiftedKeymap[keyCode] {
+                result = shiftedMapping
+            } else if let mapped = englishKeymap[keyCode] {
+                // Only uppercase letters when shift is pressed
+                if modifiers.contains(.shift) && isLetterKeyCode(keyCode) {
+                    result = mapped.uppercased()
+                } else {
+                    result = mapped
+                }
+            }
             #if DEBUG
-            print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")' (Case Sensitive)")
+            if result != nil {
+                print("[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result!)' (Case Sensitive)")
+            }
             #endif
         } else {
             // --- Option 2: System Layout (Case Sensitive, Ignore Ctrl/Opt Effect) ---
