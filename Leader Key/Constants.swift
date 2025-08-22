@@ -11,7 +11,7 @@ let englishKeymap: [UInt16: String] = [
   
   // Numbers 0-9
   0x12: "1", 0x13: "2", 0x14: "3", 0x15: "4", 0x16: "5",
-  0x17: "6", 0x18: "7", 0x19: "8", 0x1A: "9", 0x1D: "0",
+  0x17: "6", 0x1A: "7", 0x19: "8", 0x1C: "9", 0x1D: "0",
   
   // Punctuation and symbols (non-shift versions)
   0x2B: ",",   // comma
