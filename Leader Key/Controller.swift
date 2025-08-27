@@ -119,6 +119,7 @@ class Controller {
 
     userState.activeRoot = configToLoad // Update UserState with the selected config
     userState.activeConfigKey = configKeyForSettings // Store the config key for settings
+    userState.isActive = true // Mark Leader Key as active
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
     var calculatedOrigin: NSPoint? // Store calculated origin
@@ -190,6 +191,26 @@ class Controller {
 
   func hide(afterClose: (() -> Void)? = nil) {
     Events.send(.willDeactivate)
+    
+    // Mark Leader Key as inactive immediately
+    userState.isActive = false
+    
+    // Reset Karabiner's leader_mode variable if using Karabiner input
+    if Defaults[.inputMethodPreference] == .karabiner {
+      let karabinerCLI = "/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
+      let resetCommand = "\"\(karabinerCLI)\" --set-variables '{\"leader_mode\":0}'"
+      
+      let task = Process()
+      task.launchPath = "/bin/sh"
+      task.arguments = ["-c", resetCommand]
+      
+      do {
+        try task.run()
+        debugLog("[Controller] Reset Karabiner leader_mode variable to 0")
+      } catch {
+        debugLog("[Controller] Failed to reset Karabiner leader_mode: \(error)")
+      }
+    }
     
     // Release any held modifier keys before hiding
     releaseAllHeldModifiers()

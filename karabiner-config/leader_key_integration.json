@@ -1,0 +1,341 @@
+{
+  "title": "Leader Key Integration",
+  "rules": [
+    {
+      "description": "Leader Key - Activate with Cmd+K",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "k",
+            "modifiers": {
+              "mandatory": ["command"]
+            }
+          },
+          "to": [
+            {
+              "shell_command": "echo 'activate' | nc -U /tmp/leaderkey.sock"
+            },
+            {
+              "set_variable": {
+                "name": "leader_mode",
+                "value": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "Leader Key - Deactivate with Escape",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "escape"
+          },
+          "to": [
+            {
+              "key_code": "escape"
+            },
+            {
+              "set_variable": {
+                "name": "leader_mode",
+                "value": 0
+              }
+            },
+            {
+              "shell_command": "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
+            }
+          ],
+          "conditions": [
+            {
+              "type": "variable_if",
+              "name": "leader_mode",
+              "value": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "Leader Key - Forward letter keys",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "a" },
+          "to": [{ "shell_command": "echo 'key a' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "b" },
+          "to": [{ "shell_command": "echo 'key b' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "c" },
+          "to": [{ "shell_command": "echo 'key c' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "d" },
+          "to": [{ "shell_command": "echo 'key d' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "e" },
+          "to": [{ "shell_command": "echo 'key e' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "f" },
+          "to": [{ "shell_command": "echo 'key f' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "g" },
+          "to": [{ "shell_command": "echo 'key g' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "h" },
+          "to": [{ "shell_command": "echo 'key h' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "i" },
+          "to": [{ "shell_command": "echo 'key i' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "j" },
+          "to": [{ "shell_command": "echo 'key j' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "k" },
+          "to": [{ "shell_command": "echo 'key k' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "l" },
+          "to": [{ "shell_command": "echo 'key l' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "m" },
+          "to": [{ "shell_command": "echo 'key m' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "n" },
+          "to": [{ "shell_command": "echo 'key n' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "o" },
+          "to": [{ "shell_command": "echo 'key o' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "p" },
+          "to": [{ "shell_command": "echo 'key p' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "q" },
+          "to": [{ "shell_command": "echo 'key q' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "r" },
+          "to": [{ "shell_command": "echo 'key r' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "s" },
+          "to": [{ "shell_command": "echo 'key s' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "t" },
+          "to": [{ "shell_command": "echo 'key t' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "u" },
+          "to": [{ "shell_command": "echo 'key u' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "v" },
+          "to": [{ "shell_command": "echo 'key v' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "w" },
+          "to": [{ "shell_command": "echo 'key w' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "x" },
+          "to": [{ "shell_command": "echo 'key x' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "y" },
+          "to": [{ "shell_command": "echo 'key y' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "z" },
+          "to": [{ "shell_command": "echo 'key z' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        }
+      ]
+    },
+    {
+      "description": "Leader Key - Forward number keys",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "0" },
+          "to": [{ "shell_command": "echo 'key 0' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "1" },
+          "to": [{ "shell_command": "echo 'key 1' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "2" },
+          "to": [{ "shell_command": "echo 'key 2' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "3" },
+          "to": [{ "shell_command": "echo 'key 3' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "4" },
+          "to": [{ "shell_command": "echo 'key 4' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "5" },
+          "to": [{ "shell_command": "echo 'key 5' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "6" },
+          "to": [{ "shell_command": "echo 'key 6' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "7" },
+          "to": [{ "shell_command": "echo 'key 7' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "8" },
+          "to": [{ "shell_command": "echo 'key 8' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "9" },
+          "to": [{ "shell_command": "echo 'key 9' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        }
+      ]
+    },
+    {
+      "description": "Leader Key - Forward special keys",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "spacebar" },
+          "to": [{ "shell_command": "echo 'key spacebar' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "return_or_enter" },
+          "to": [{ "shell_command": "echo 'key return_or_enter' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "tab" },
+          "to": [{ "shell_command": "echo 'key tab' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "delete_or_backspace" },
+          "to": [{ "shell_command": "echo 'key delete_or_backspace' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "period" },
+          "to": [{ "shell_command": "echo 'key .' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "comma" },
+          "to": [{ "shell_command": "echo 'key ,' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "semicolon" },
+          "to": [{ "shell_command": "echo 'key ;' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        },
+        {
+          "type": "basic",
+          "from": { "key_code": "slash" },
+          "to": [{ "shell_command": "echo 'key /' | nc -U /tmp/leaderkey.sock" }],
+          "conditions": [{ "type": "variable_if", "name": "leader_mode", "value": 1 }]
+        }
+      ]
+    }
+  ]
+}

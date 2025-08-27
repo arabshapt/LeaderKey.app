@@ -27,6 +27,7 @@ struct AdvancedPane: View {
   @Default(.commandShellPreference) var commandShellPreference
   @Default(.loadShellRCFiles) var loadShellRCFiles
   @Default(.customShellPath) var customShellPath
+  @Default(.inputMethodPreference) var inputMethodPreference
 
   @State private var hasAccessibilityPermissions = false
   @State private var isCustomShellValid = false
@@ -59,6 +60,53 @@ struct AdvancedPane: View {
 
           Button("Reset") {
             configDir = UserConfig.defaultDirectory()
+          }
+        }
+      }
+      
+      Settings.Section(
+        title: "Input Method", bottomDivider: true
+      ) {
+        VStack(alignment: .leading, spacing: 16) {
+          HStack {
+            Picker("", selection: $inputMethodPreference) {
+              ForEach(InputMethodPreference.allCases) { method in
+                Text(method.displayName).tag(method)
+              }
+            }
+            .frame(width: 280)
+            .labelsHidden()
+          }
+          
+          VStack(alignment: .leading, spacing: 8) {
+            Text(inputMethodPreference.description)
+              .font(.callout)
+              .foregroundColor(.secondary)
+            
+            if inputMethodPreference == .karabiner {
+              Text("⚠️ Requires Karabiner Elements to be installed and running")
+                .font(.callout)
+                .foregroundColor(.orange)
+              
+              HStack(spacing: 12) {
+                Button("Export Karabiner JSON") {
+                  let content = KarabinerExporter.exportConfiguration(userConfig: config, format: .karabinerJSON)
+                  _ = KarabinerExporter.saveToFile(content, format: .karabinerJSON)
+                }
+                
+                Button("Export Goku EDN") {
+                  let content = KarabinerExporter.exportConfiguration(userConfig: config, format: .gokuEDN)
+                  _ = KarabinerExporter.saveToFile(content, format: .gokuEDN)
+                }
+                
+                Spacer()
+              }
+              .padding(.top, 8)
+              
+              Text("Export your current Leader Key configuration for use with Karabiner Elements or Goku")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
           }
         }
       }

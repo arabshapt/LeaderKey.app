@@ -21,7 +21,8 @@ private let leaderKeySyntheticEventTag: Int64 = 0xDEADBEEF
 private var globalCallbackStats = CallbackStatistics()
 
 // This needs to be a top-level function or static method to be used as a C callback.
-private func eventTapCallback(
+// Made internal so it can be used by CGEventTapInputMethod
+internal func eventTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
@@ -278,7 +279,7 @@ private struct OpacityPane: View {
 }
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     // --- Properties ---
   var controller: Controller!
   let statusItem = StatusItem()
@@ -290,6 +291,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
   // --- Dual Event Tap Manager for Redundancy ---
   let dualTapManager = DualEventTapManager()
+  
+  // --- Input Method Management ---
+  private var currentInputMethod: InputMethod?
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -488,6 +492,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
   
   private func checkEventTapHealth() {
+    // Skip tap health checks if using Karabiner input method
+    if Defaults[.inputMethodPreference] == .karabiner {
+      // For Karabiner mode, check input method health instead
+      if let currentMethod = currentInputMethod {
+        _ = currentMethod.checkHealth()
+      }
+      return
+    }
+    
     if isMonitoring {
       // Use dual tap manager for health checking and failover
       if !dualTapManager.checkAndFailover() {
@@ -1116,6 +1129,24 @@ private extension AppDelegate {
                 }
             }
         }
+        
+        // Observe changes to input method preference
+        Task {
+            for await value in Defaults.updates(.inputMethodPreference) {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    print("[AppDelegate] Input method preference changed to: \(value.displayName). Restarting monitoring...")
+                    
+                    // Stop current monitoring
+                    if self.isMonitoring {
+                        self.stopEventTapMonitoring()
+                    }
+                    
+                    // Start with new input method
+                    self.startEventTapMonitoring()
+                }
+            }
+        }
     }
 
     func configureImageCaching() {
@@ -1406,21 +1437,44 @@ extension AppDelegate {
         
         // Cache activation shortcuts for fast lookup
         cacheActivationShortcuts()
-
-        // First try to create dual taps for redundancy
-        let dualTapsCreated = dualTapManager.createDualTaps(
-            callback: eventTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        )
         
-        if dualTapsCreated {
-            print("[AppDelegate] Dual event taps created successfully for redundancy")
+        // Initialize the appropriate input method based on preference
+        let inputMethodType = Defaults[.inputMethodPreference]
+        
+        switch inputMethodType {
+        case .karabiner:
+            currentInputMethod = KarabinerInputMethod()
+            print("[AppDelegate] Using Karabiner input method")
+        case .cgEventTap:
+            currentInputMethod = CGEventTapInputMethod(appDelegate: self, dualTapManager: dualTapManager)
+            print("[AppDelegate] Using CGEventTap input method")
+        }
+        
+        // Start the input method
+        if let method = currentInputMethod, method.start(with: self) {
+            print("[AppDelegate] Input method started successfully: \(inputMethodType.displayName)")
             self.isMonitoring = true
             self.didShowPermissionsAlertRecently = false
             
-            // Start CPU monitoring for adaptive behavior
-            startCPUMonitoring()
+            // Start CPU monitoring for adaptive behavior (only for CGEventTap)
+            if inputMethodType == .cgEventTap {
+                startCPUMonitoring()
+            }
             return
+        }
+        
+        // If preferred method failed, try fallback to CGEventTap
+        if inputMethodType == .karabiner {
+            print("[AppDelegate] Karabiner method failed, falling back to CGEventTap")
+            currentInputMethod = CGEventTapInputMethod(appDelegate: self, dualTapManager: dualTapManager)
+            
+            if let method = currentInputMethod, method.start(with: self) {
+                print("[AppDelegate] Fallback to CGEventTap successful")
+                self.isMonitoring = true
+                self.didShowPermissionsAlertRecently = false
+                startCPUMonitoring()
+                return
+            }
         }
         
         // Fallback to single tap if dual taps failed
@@ -1505,8 +1559,9 @@ extension AppDelegate {
         // Stop health monitoring and CPU monitoring
         stopCPUMonitoring()
         
-        // Stop dual taps if they exist
-        dualTapManager.stopDualTaps()
+        // Stop the current input method
+        currentInputMethod?.stop()
+        currentInputMethod = nil
 
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
@@ -2618,6 +2673,212 @@ extension AppDelegate {
         let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
 
         return incomingRelevantModifiers == requiredModifiers
+    }
+    
+    // MARK: - InputMethodDelegate
+    
+    func inputMethodDidReceiveActivation(bundleId: String?) {
+        // Handle activation from Karabiner
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if let bundleId = bundleId {
+                debugLog("[InputMethod] Activation received with bundleId: \(bundleId)")
+            }
+            
+            // Determine activation type based on whether bundleId was provided
+            let activationType: Controller.ActivationType = bundleId != nil ? .appSpecificWithFallback : .defaultOnly
+            
+            // Check if window is already visible (same as handleActivation does)
+            if self.controller.window.isVisible {
+                debugLog("[InputMethod] Window is already visible, checking reactivation behavior")
+                
+                switch Defaults[.reactivateBehavior] {
+                case .hide:
+                    // Hide the window if activated again while visible
+                    debugLog("[InputMethod] Reactivate behavior is 'hide'. Hiding window.")
+                    self.hide()
+                    return
+                    
+                case .reset:
+                    // Reset the sequence if activated again while visible
+                    debugLog("[InputMethod] Reactivate behavior is 'reset'. Resetting sequence.")
+                    
+                    // Ensure window is visible and frontmost
+                    if !self.controller.window.isVisible {
+                        self.controller.window.orderFront(nil)
+                    }
+                    
+                    // Clear existing state
+                    self.controller.userState.clear()
+                    self.currentSequenceGroup = nil
+                    self.activeRootGroup = nil
+                    self.stickyModeToggled = false
+                    self.lastModifierFlags = []
+                    
+                    // Determine new active root based on activation type
+                    let newRoot: Group
+                    switch activationType {
+                    case .defaultOnly:
+                        newRoot = self.config.root
+                    case .appSpecificWithFallback:
+                        // Use the same overlay detection logic as initial activation
+                        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+                        let configKey = isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
+                        newRoot = self.config.getConfig(for: configKey)
+                    }
+                    self.controller.userState.activeRoot = newRoot
+                    self.controller.userState.isActive = true // Ensure keys are processed after reset
+                    
+                    // Reposition and start new sequence
+                    self.controller.repositionWindowNearMouse()
+                    self.startSequence(activationType: activationType)
+                    
+                case .nothing:
+                    // Do nothing if activated again while visible, unless no sequence is active
+                    debugLog("[InputMethod] Reactivate behavior is 'nothing'.")
+                    
+                    // Ensure window is visible
+                    if !self.controller.window.isVisible {
+                        self.controller.window.orderFront(nil)
+                    }
+                    
+                    // Start a sequence only if one wasn't already active
+                    if self.currentSequenceGroup == nil {
+                        debugLog("[InputMethod] No current sequence, starting new sequence.")
+                        self.controller.userState.isActive = true // Ensure keys are processed
+                        self.startSequence(activationType: activationType)
+                    } else {
+                        debugLog("[InputMethod] Sequence already active, doing nothing.")
+                    }
+                }
+            } else {
+                // Window not visible, show it and start sequence
+                debugLog("[InputMethod] Window not visible, showing and starting sequence")
+                
+                // Show the window (this sets up userState.activeRoot)
+                self.controller.show(type: activationType) {
+                    // After window is shown, initialize sequence state
+                    // This matches what handleActivation() does for CGEventTap mode
+                    self.startSequence(activationType: activationType)
+                }
+            }
+        }
+    }
+    
+    func inputMethodDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+        // Handle key event from Karabiner
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            debugLog("[InputMethod] Key received: \(keyCode), modifiers: \(modifiers)")
+            
+            // Process the key through the normal flow
+            if self.controller.userState.isActive {
+                // Convert keyCode to character
+                guard let character = self.keyCodeToCharacter(keyCode) else {
+                    debugLog("[InputMethod] Unable to convert keyCode \(keyCode) to character")
+                    return
+                }
+                
+                debugLog("[InputMethod] Processing key '\(character)'")
+                self.controller.handleKey(character, withModifiers: modifiers)
+            }
+        }
+    }
+    
+    private func keyCodeToCharacter(_ keyCode: UInt16) -> String? {
+        // Map common keycodes to their character representations
+        switch keyCode {
+        // Letters
+        case 0: return "a"
+        case 1: return "s"
+        case 2: return "d"
+        case 3: return "f"
+        case 4: return "h"
+        case 5: return "g"
+        case 6: return "z"
+        case 7: return "x"
+        case 8: return "c"
+        case 9: return "v"
+        case 11: return "b"
+        case 12: return "q"
+        case 13: return "w"
+        case 14: return "e"
+        case 15: return "r"
+        case 16: return "y"
+        case 17: return "t"
+        case 18: return "1"
+        case 19: return "2"
+        case 20: return "3"
+        case 21: return "4"
+        case 22: return "6"
+        case 23: return "5"
+        case 24: return "="
+        case 25: return "9"
+        case 26: return "7"
+        case 27: return "-"
+        case 28: return "8"
+        case 29: return "0"
+        case 30: return "]"
+        case 31: return "o"
+        case 32: return "u"
+        case 33: return "["
+        case 34: return "i"
+        case 35: return "p"
+        case 36: return "\r" // Return
+        case 37: return "l"
+        case 38: return "j"
+        case 39: return "'"
+        case 40: return "k"
+        case 41: return ";"
+        case 42: return "\\"
+        case 43: return ","
+        case 44: return "/"
+        case 45: return "n"
+        case 46: return "m"
+        case 47: return "."
+        case 48: return "\t" // Tab
+        case 49: return " " // Space
+        case 50: return "`"
+        case 51: return "\u{7F}" // Delete/Backspace
+        case 53: return "\u{1B}" // Escape
+        default: return nil
+        }
+    }
+    
+    func inputMethodDidReceiveDeactivation() {
+        // Handle deactivation from Karabiner
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            debugLog("[InputMethod] Deactivation received")
+            
+            if self.controller.userState.isActive {
+                self.controller.hide()
+            }
+        }
+    }
+    
+    func inputMethodDidReceiveSequence(_ sequence: String) {
+        // Handle key sequence from Karabiner
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            debugLog("[InputMethod] Sequence received: \(sequence)")
+            
+            // Parse and process the sequence
+            // This could be used for multi-key shortcuts sent from Karabiner
+        }
+    }
+    
+    func inputMethodDidRequestState() -> [String: Any] {
+        // Return current Leader Key state
+        return [
+            "active": controller.userState.isActive,
+            "currentGroup": controller.userState.currentGroup?.label ?? "",
+            "bundleId": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        ]
     }
 }
 

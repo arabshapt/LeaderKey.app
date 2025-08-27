@@ -70,6 +70,8 @@ extension Defaults.Keys {
   static let loadShellRCFiles = Key<Bool>("loadShellRCFiles", default: true, suite: defaultsSuite)
   /// Custom shell path when using custom shell preference
   static let customShellPath = Key<String>("customShellPath", default: "", suite: defaultsSuite)
+  /// Input method for keyboard events
+  static let inputMethodPreference = Key<InputMethodPreference>("inputMethodPreference", default: .cgEventTap, suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -149,6 +151,31 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
     var isDirectory: ObjCBool = false
     let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
     return exists && !isDirectory.boolValue && fileManager.isExecutableFile(atPath: path)
+  }
+}
+
+enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case cgEventTap = "cgeventtap"
+  case karabiner = "karabiner"
+  
+  var id: Self { self }
+  
+  var displayName: String {
+    switch self {
+    case .cgEventTap:
+      return "CGEventTap (Default)"
+    case .karabiner:
+      return "Karabiner Elements"
+    }
+  }
+  
+  var description: String {
+    switch self {
+    case .cgEventTap:
+      return "Direct keyboard interception using macOS event taps"
+    case .karabiner:
+      return "Integration through Karabiner Elements with Unix socket"
+    }
   }
 }
 
