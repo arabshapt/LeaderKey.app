@@ -70,6 +70,12 @@ extension Defaults.Keys {
   static let loadShellRCFiles = Key<Bool>("loadShellRCFiles", default: true, suite: defaultsSuite)
   /// Custom shell path when using custom shell preference
   static let customShellPath = Key<String>("customShellPath", default: "", suite: defaultsSuite)
+  
+  // Input method settings
+  /// Type of input method to use (CGEventTap or Unix Socket)
+  static let inputMethodType = Key<InputMethodType>("inputMethodType", default: .cgEventTap, suite: defaultsSuite)
+  /// Unix socket path for socket-based input method
+  static let unixSocketPath = Key<String>("unixSocketPath", default: "/tmp/leaderkey.sock", suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -149,6 +155,40 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
     var isDirectory: ObjCBool = false
     let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
     return exists && !isDirectory.boolValue && fileManager.isExecutableFile(atPath: path)
+  }
+}
+
+enum InputMethodType: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case cgEventTap = "cgeventtap"
+  case unixSocket = "unixsocket"
+  
+  var id: Self { self }
+  
+  var description: String {
+    switch self {
+    case .cgEventTap:
+      return "CGEventTap (System Events)"
+    case .unixSocket:
+      return "Unix Socket (Karabiner Integration)"
+    }
+  }
+  
+  var requiresAccessibilityPermissions: Bool {
+    switch self {
+    case .cgEventTap:
+      return true
+    case .unixSocket:
+      return false
+    }
+  }
+  
+  var statusDescription: String {
+    switch self {
+    case .cgEventTap:
+      return "Listens to system keyboard events directly. Requires Accessibility permissions."
+    case .unixSocket:
+      return "Receives keystrokes from Karabiner Elements via Unix socket. No system permissions required."
+    }
   }
 }
 

@@ -40,8 +40,8 @@ private func eventTapCallback(
     
     // INSTANT DETECTION - Handle tap disabled events immediately
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        print("[EventTap] ⚠️ Tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "user input") - triggering instant failover")
-        appDelegate.dualTapManager.handleInstantFailover()
+        print("[EventTap] ⚠️ Tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "user input")")
+        // The CGEventTapInputMethod will handle failover internally
         return nil // Don't pass disabled events through
     }
     
@@ -278,7 +278,7 @@ private struct OpacityPane: View {
 }
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     // --- Properties ---
   var controller: Controller!
   let statusItem = StatusItem()
@@ -288,8 +288,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @IBOutlet var updaterController: SPUStandardUpdaterController!
   private var cancellables = Set<AnyCancellable>()
   
-  // --- Dual Event Tap Manager for Redundancy ---
-  let dualTapManager = DualEventTapManager()
+  // --- Input Method for receiving keyboard events ---
+  private var inputMethod: InputMethod?
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -402,17 +402,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Attempt to start the global event tap immediately
     #if DEBUG
-    debugLog("[AppDelegate] Attempting initial startEventTapMonitoring()...")
+    debugLog("[AppDelegate] Attempting initial startInputMethodMonitoring()...")
     #endif
-    startEventTapMonitoring() // Defined in Event Tap Handling extension
+    startInputMethodMonitoring() // Start with configured input method
 
-    // Add a delayed check to retry starting the event tap if it failed initially.
+    // Add a delayed check to retry starting the input method if it failed initially.
     // This helps if Accessibility permissions were granted just before launch
     // and the system needs a moment to register them.
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { // Wait 2 seconds
-        if !self.isMonitoring && self.checkAccessibilityPermissions() {
-            print("[AppDelegate] Delayed check: Permissions available but not monitoring. Retrying startEventTapMonitoring()...")
-            self.startEventTapMonitoring()
+        if !self.isMonitoring && (Defaults[.inputMethodType] == .cgEventTap ? self.checkAccessibilityPermissions() : true) {
+            print("[AppDelegate] Delayed check: Permissions available but not monitoring. Retrying startInputMethodMonitoring()...")
+            self.startInputMethodMonitoring()
         } else if !self.isMonitoring {
             print("[AppDelegate] Delayed check: Still no permissions. Health check will monitor for changes.")
         } else {
@@ -437,8 +437,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // This provides another chance if the user grants permissions while the app is running
     // and then brings the app to the front.
     if !isMonitoring {
-      print("[AppDelegate] applicationDidBecomeActive: Not monitoring, attempting to start startEventTapMonitoring()...")
-      startEventTapMonitoring()
+      print("[AppDelegate] applicationDidBecomeActive: Not monitoring, attempting to start startInputMethodMonitoring()...")
+      startInputMethodMonitoring()
     } else {
       print("[AppDelegate] applicationDidBecomeActive: Already monitoring.")
     }
@@ -446,7 +446,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     print("[AppDelegate] applicationWillTerminate: Stopping event tap and saving config...")
-    stopEventTapMonitoring() // Defined in Event Tap Handling extension
+    stopInputMethodMonitoring() // Stop the input method
     config.saveCurrentlyEditingConfig() // Save any unsaved changes from the settings pane
     stateRecoveryTimer?.invalidate() // Stop state recovery timer
     eventTapHealthTimer?.invalidate() // Stop event tap health timer
@@ -489,12 +489,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
   private func checkEventTapHealth() {
     if isMonitoring {
-      // Use dual tap manager for health checking and failover
-      if !dualTapManager.checkAndFailover() {
-        // Both taps are unhealthy - log stats and trigger full restart
-        print("[AppDelegate] Event Tap Health Check: Both taps unhealthy! Stats:")
+      // Check input method health
+      guard let inputMethod = inputMethod, inputMethod.isActive else {
+        // Input method is unhealthy - log stats and trigger full restart
+        print("[AppDelegate] Input Method Health Check: Input method unhealthy! Stats:")
         print(getCallbackPerformanceStats())
-        print(dualTapManager.getStatistics())
+        if let method = inputMethod {
+          print(method.getStatistics())
+        }
         
         // Try single tap fallback first
         if let tap = eventTap {
@@ -511,6 +513,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           print("[AppDelegate] Event Tap Health Check: No taps available! Restarting...")
           restartEventTap()
         }
+        return
       }
     } else {
       // Not monitoring - check if permissions have been granted
@@ -518,8 +521,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       
       // Detect permission change from false to true
       if lastPermissionCheck == false && hasPermissions {
-        print("[AppDelegate] Event Tap Health Check: Accessibility permissions newly granted! Starting event tap...")
-        startEventTapMonitoring()
+        print("[AppDelegate] Event Tap Health Check: Accessibility permissions newly granted! Starting input method...")
+        startInputMethodMonitoring()
       }
       
       // Update last permission state
@@ -530,8 +533,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func restartEventTap() {
     print("[AppDelegate] Restarting event tap...")
     
-    // First stop the existing tap
-    stopEventTapMonitoring()
+    // First stop the existing input method
+    stopInputMethodMonitoring()
     
     // Hide any stuck window
     if controller?.window.isVisible == true {
@@ -540,7 +543,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Restart after a brief delay to ensure cleanup
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-      self?.startEventTapMonitoring()
+      self?.startInputMethodMonitoring()
     }
   }
 
@@ -860,6 +863,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Convenience method to show the main Leader Key window
     func show(type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
         print("[AppDelegate] show(type: \(type)) called.")
+        
+        // Start CGEventTap if needed (for CGEventTap mode only)
+        startCGEventTapIfNeeded()
+        
         controller.show(type: type, completion: completion)
     }
 
@@ -870,6 +877,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       controller.hide(afterClose: { [weak self] in
         // Reset sequence AFTER the window is fully closed to avoid visual flash
         self?.resetSequenceState()
+        
+        // Stop CGEventTap if needed (for CGEventTap mode only)
+        self?.stopCGEventTapIfNeeded()
       })
     }
 
@@ -1353,16 +1363,6 @@ extension AppDelegate {
         cachedActivationShortcuts.removeAll()
         cachedActivationModifiers.removeAll()
         
-        // Helper to convert NSEvent.ModifierFlags to CGEventFlags
-        func toCGEventFlags(_ modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
-            var cgFlags: CGEventFlags = []
-            if modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
-            if modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
-            if modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
-            if modifiers.contains(.control) { cgFlags.insert(.maskControl) }
-            return cgFlags
-        }
-        
         // Cache force reset shortcut
         if let shortcut = KeyboardShortcuts.getShortcut(for: .forceReset) {
             let keyCode = UInt16(shortcut.carbonKeyCode)
@@ -1396,98 +1396,115 @@ extension AppDelegate {
         print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes")
     }
     
-    func startEventTapMonitoring() {
-        // Ensure we don't start multiple taps
+    func startInputMethodMonitoring() {
+        // Ensure we don't start multiple input methods
         guard !isMonitoring else {
-            print("[AppDelegate] startEventTapMonitoring: Already monitoring. Aborting.")
+            print("[AppDelegate] startInputMethodMonitoring: Already monitoring. Aborting.")
             return
         }
-        print("[AppDelegate] startEventTapMonitoring: Attempting to start...")
+        print("[AppDelegate] startInputMethodMonitoring: Attempting to start...")
         
         // Cache activation shortcuts for fast lookup
         cacheActivationShortcuts()
 
-        // First try to create dual taps for redundancy
-        let dualTapsCreated = dualTapManager.createDualTaps(
-            callback: eventTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        )
-        
-        if dualTapsCreated {
-            print("[AppDelegate] Dual event taps created successfully for redundancy")
-            self.isMonitoring = true
-            self.didShowPermissionsAlertRecently = false
+        // Create the appropriate input method based on settings
+        let inputMethodType = Defaults[.inputMethodType]
+        switch inputMethodType {
+        case .cgEventTap:
+            // For CGEventTap mode, create the input method but don't start it yet
+            // It will be started when the window is shown to avoid conflicts with activation shortcuts
+            inputMethod = CGEventTapInputMethod()
+            inputMethod?.delegate = self
+            print("[AppDelegate] CGEventTap input method created (will start when window is shown)")
+            self.isMonitoring = false // Mark as not monitoring since it's not active yet
             
             // Start CPU monitoring for adaptive behavior
             startCPUMonitoring()
             return
-        }
-        
-        // Fallback to single tap if dual taps failed
-        print("[AppDelegate] Dual taps failed, falling back to single tap")
-        
-        // Create the event tap. This requires Accessibility permissions.
-        // Build an event mask listening for key down, key up, and modifier-flag changes.
-        let eventMask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.keyUp.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
-        // (Above mask: key down, key up, and flags-changed)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, // Listen to all processes in the current session
-            place: .headInsertEventTap, // Insert tap before other taps
-            options: .defaultTap, // Default behavior
-            eventsOfInterest: eventMask, // Mask for key down events
-            callback: eventTapCallback, // C function callback defined globally
-            userInfo: Unmanaged.passUnretained(self).toOpaque() // Pass reference to self
-        ) else {
-            // Failure usually means Accessibility permissions are missing or denied.
-            #if DEBUG
-            debugLog("[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing.")
-            #endif
-            // Check permissions status *after* failure, only prompt if we haven't recently.
-            if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
-                #if DEBUG
-                debugLog("[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert.")
-                #endif
-                showPermissionsAlert()
-                self.didShowPermissionsAlertRecently = true // Flag to avoid spamming alerts
-                // Reset the flag after a short delay to allow re-prompting later if needed
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                    #if DEBUG
-                    debugLog("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
-                    #endif
-                    self.didShowPermissionsAlertRecently = false
-                }
-            } else {
-                #if DEBUG
-                debugLog("[AppDelegate] startEventTapMonitoring: Accessibility check passed OR alert shown recently. Not showing permissions alert now.")
-                #endif
+            
+        case .unixSocket:
+            inputMethod = UnixSocketInputMethod()
+            // Set delegate and attempt to start Unix socket immediately
+            inputMethod?.delegate = self
+            
+            if let success = inputMethod?.start(), success {
+                print("[AppDelegate] Unix socket input method started successfully")
+                self.isMonitoring = true
+                self.didShowPermissionsAlertRecently = false
+                
+                // Initialize Karabiner variable state when switching to Unix socket mode
+                KarabinerCLI.deactivateLeaderKey()
+                debugLog("[AppDelegate] startInputMethodMonitoring: Initialized leaderkey_active to false for Unix socket mode")
+                
+                // Start CPU monitoring for adaptive behavior
+                startCPUMonitoring()
+                return
             }
-            return // Stop, as tap creation failed
+            
+            // Unix socket failed to start
+            print("[AppDelegate] Unix socket input method failed to start")
         }
+        
+        // If we get here, input method failed to start (Unix socket only, CGEventTap is handled above)
+    }
+    
+    // MARK: - Dynamic CGEventTap Management
+    
+    /// Start CGEventTap input method (called when window is shown)
+    func startCGEventTapIfNeeded() {
+        guard Defaults[.inputMethodType] == .cgEventTap else { return }
+        guard let cgEventTap = inputMethod as? CGEventTapInputMethod else { return }
+        guard !isMonitoring else { return }
+        
+        debugLog("[AppDelegate] Starting CGEventTap input method")
+        if cgEventTap.start() {
+            isMonitoring = true
+            debugLog("[AppDelegate] CGEventTap input method started successfully")
+        } else {
+            debugLog("[AppDelegate] CGEventTap input method failed to start")
+        }
+    }
+    
+    /// Stop CGEventTap input method (called when window is hidden)
+    func stopCGEventTapIfNeeded() {
+        guard Defaults[.inputMethodType] == .cgEventTap else { return }
+        guard let cgEventTap = inputMethod as? CGEventTapInputMethod else { return }
+        guard isMonitoring else { return }
+        
+        debugLog("[AppDelegate] Stopping CGEventTap input method")
+        cgEventTap.stop()
+        isMonitoring = false
+        debugLog("[AppDelegate] CGEventTap input method stopped")
+    }
 
-        // Tap creation successful, proceed with setup
+    func stopInputMethodMonitoring() {
+        guard isMonitoring else {
+             #if DEBUG
+             debugLog("[AppDelegate] stopInputMethodMonitoring: Not currently monitoring. Aborting.")
+             #endif
+             return
+        }
         #if DEBUG
-        debugLog("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
+        debugLog("[AppDelegate] stopInputMethodMonitoring: Stopping input method...")
         #endif
-        self.eventTap = tap
-        // Create a run loop source from the tap and add it to the current run loop
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        self.runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        // Enable the tap
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.isMonitoring = true // Set monitoring state
-        self.didShowPermissionsAlertRecently = false // Reset alert flag as monitoring is now active
 
-        // Start event tap health monitoring
-
-        // Start CPU monitoring for adaptive behavior
-        startCPUMonitoring()
-
+        // Stop CPU monitoring
+        stopCPUMonitoring()
+        
+        // Ensure LeaderKey variable is cleared in Karabiner when stopping
+        if Defaults[.inputMethodType] == .unixSocket {
+            KarabinerCLI.deactivateLeaderKey()
+            debugLog("[AppDelegate] stopInputMethodMonitoring: Cleared leaderkey_active variable in Karabiner")
+        }
+        
+        // Stop the current input method
+        inputMethod?.stop()
+        inputMethod = nil
+        
+        resetSequenceState() // Ensure sequence state is cleared
+        self.isMonitoring = false // Update state
         #if DEBUG
-        debugLog("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
+        debugLog("[AppDelegate] stopInputMethodMonitoring: Monitoring stopped.")
         #endif
     }
 
@@ -1505,8 +1522,7 @@ extension AppDelegate {
         // Stop health monitoring and CPU monitoring
         stopCPUMonitoring()
         
-        // Stop dual taps if they exist
-        dualTapManager.stopDualTaps()
+        // Legacy method - dual taps are now handled by InputMethod system
 
         resetSequenceState() // Ensure sequence state is cleared
         // Remove run loop source and invalidate the tap
@@ -1813,14 +1829,14 @@ extension AppDelegate {
 
         // Restart event tap monitoring to ensure clean state
         if isMonitoring {
-            print("[AppDelegate] forceResetState: Restarting event monitoring for clean state.")
+            print("[AppDelegate] forceResetState: Restarting input method monitoring for clean state.")
             let wasMonitoring = true
-            stopEventTapMonitoring()
+            stopInputMethodMonitoring()
 
             // Brief delay to allow system cleanup before restart
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if wasMonitoring {
-                    self.startEventTapMonitoring()
+                    self.startInputMethodMonitoring()
                 }
             }
         }
@@ -2563,10 +2579,10 @@ extension AppDelegate {
             
             // Check if permissions are now granted
             if self.checkAccessibilityPermissions() {
-                print("[AppDelegate] Permission polling: Permissions granted! Starting event tap...")
+                print("[AppDelegate] Permission polling: Permissions granted! Starting input method...")
                 self.permissionPollingTimer?.invalidate()
                 self.permissionPollingTimer = nil
-                self.startEventTapMonitoring()
+                self.startInputMethodMonitoring()
                 return
             }
             
@@ -2618,6 +2634,79 @@ extension AppDelegate {
         let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
 
         return incomingRelevantModifiers == requiredModifiers
+    }
+}
+
+// MARK: - InputMethodDelegate
+
+extension AppDelegate {
+    func inputMethod(_ inputMethod: InputMethod, didReceiveKeyDown event: InputEvent) {
+        // Route key down events to the controller
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Convert InputEvent to key string for Controller
+            let key = event.key ?? ""
+            
+            // For now, handle the event similarly to how keyDown events were handled before
+            self.controller.handleKey(key, withModifiers: event.nsModifierFlags)
+        }
+    }
+    
+    func inputMethod(_ inputMethod: InputMethod, didReceiveKeyUp event: InputEvent) {
+        // Key up events - mostly for tracking purposes
+        // The controller doesn't currently have a specific key up handler
+        debugLog("[AppDelegate] InputMethodDelegate: Key up - \(event.key ?? "unknown")")
+    }
+    
+    func inputMethod(_ inputMethod: InputMethod, didReceiveFlagsChanged event: InputEvent) {
+        // Handle modifier flag changes
+        // This could be used for modifier-based shortcuts or state changes
+        debugLog("[AppDelegate] InputMethodDelegate: Flags changed - modifiers: \(event.modifiers)")
+    }
+    
+    func inputMethod(_ inputMethod: InputMethod, didEncounterError error: Error) {
+        // Handle input method errors
+        debugLog("[AppDelegate] InputMethodDelegate: Error - \(error.localizedDescription)")
+        
+        // For serious errors, might want to restart the input method
+        DispatchQueue.main.async { [weak self] in
+            // Could show an alert or try to restart the input method
+            print("[AppDelegate] Input method encountered error: \(error)")
+        }
+    }
+    
+    func inputMethodDidReceiveEscape(_ inputMethod: InputMethod) {
+        // ESC key pressed - hide the window and reset state
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if self.controller.window.isVisible {
+                self.hide()
+            }
+        }
+    }
+    
+    func inputMethodDidRequestActivation(_ inputMethod: InputMethod) {
+        // Unix socket received activation request - show the LeaderKey window
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            debugLog("[AppDelegate] InputMethodDelegate: Activation requested from Unix socket")
+            
+            // Use the same activation logic as keyboard shortcuts
+            self.show(type: .appSpecificWithFallback)
+        }
+    }
+    
+    
+    private func toCGEventFlags(_ modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
+        var cgFlags: CGEventFlags = []
+        if modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
+        if modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
+        if modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
+        if modifiers.contains(.control) { cgFlags.insert(.maskControl) }
+        return cgFlags
     }
 }
 

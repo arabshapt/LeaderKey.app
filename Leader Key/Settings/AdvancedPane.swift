@@ -27,6 +27,8 @@ struct AdvancedPane: View {
   @Default(.commandShellPreference) var commandShellPreference
   @Default(.loadShellRCFiles) var loadShellRCFiles
   @Default(.customShellPath) var customShellPath
+  @Default(.inputMethodType) var inputMethodType
+  @Default(.unixSocketPath) var unixSocketPath
 
   @State private var hasAccessibilityPermissions = false
   @State private var isCustomShellValid = false
@@ -162,6 +164,51 @@ struct AdvancedPane: View {
               .frame(width: 150)
             Text("\(Int(panelTopOffsetPercent * 100))%")
               .frame(width: 40, alignment: .leading)
+          }
+        }
+      }
+
+      Settings.Section(title: "Input Method", bottomDivider: true) {
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            Text("Input Method:")
+            Picker("", selection: $inputMethodType) {
+              Text("CGEventTap (Default)").tag(InputMethodType.cgEventTap)
+              Text("Unix Socket (Karabiner)").tag(InputMethodType.unixSocket)
+            }
+            .frame(width: 200)
+            .labelsHidden()
+          }
+          
+          Text("CGEventTap: Uses system event tap (requires Accessibility permissions)")
+            .font(.callout)
+            .foregroundColor(.secondary)
+          
+          Text("Unix Socket: Receives events from Karabiner Elements (no Accessibility permissions required)")
+            .font(.callout)
+            .foregroundColor(.secondary)
+          
+          if inputMethodType == .unixSocket {
+            HStack {
+              Text("Socket Path:")
+              TextField("/tmp/leaderkey.sock", text: $unixSocketPath)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 300)
+            }
+            
+            HStack {
+              Button("Export Karabiner Config") {
+                exportKarabinerConfig()
+              }
+              .help("Generate Karabiner Elements configuration file")
+              
+              Spacer()
+            }
+            
+            Text("Karabiner configuration will be exported to your Downloads folder. Import it into Karabiner Elements to use Unix socket mode.")
+              .font(.callout)
+              .foregroundColor(.secondary)
+              .padding(.top, 4)
           }
         }
       }
@@ -526,6 +573,49 @@ struct AdvancedPane: View {
   
   private var detectionBackgroundColor: Color {
     detectionStatusColor.opacity(0.1)
+  }
+  
+  private func exportKarabinerConfig() {
+    do {
+      // Create custom configuration with user's socket path
+      let customConfig = KarabinerConfig.Configuration(
+        activationKey: "k",
+        activationModifiers: ["left_command", "left_shift"],
+        socketPath: unixSocketPath,
+        escapeKey: "escape"
+      )
+      
+      let configString = KarabinerConfig.generateConfig(configuration: customConfig)
+      let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+      let configURL = downloadsURL.appendingPathComponent("leaderkey-karabiner-config.json")
+      
+      try configString.write(to: configURL, atomically: true, encoding: .utf8)
+      
+      // Show success alert
+      DispatchQueue.main.async {
+        let alert = NSAlert()
+        alert.messageText = "Karabiner Configuration Exported"
+        alert.informativeText = "Configuration saved to: \(configURL.path)\n\nImport this file into Karabiner Elements to use Unix socket mode."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Reveal in Finder")
+        
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
+          NSWorkspace.shared.activateFileViewerSelecting([configURL])
+        }
+      }
+    } catch {
+      // Show error alert
+      DispatchQueue.main.async {
+        let alert = NSAlert()
+        alert.messageText = "Export Failed"
+        alert.informativeText = "Failed to export Karabiner configuration: \(error.localizedDescription)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+      }
+    }
   }
 }
 

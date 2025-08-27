@@ -191,6 +191,12 @@ class Controller {
   func hide(afterClose: (() -> Void)? = nil) {
     Events.send(.willDeactivate)
     
+    // Ensure LeaderKey is deactivated in Karabiner when window hides
+    if Defaults[.inputMethodType] == .unixSocket {
+      KarabinerCLI.deactivateLeaderKey()
+      debugLog("[Controller] hide: Deactivated LeaderKey in Karabiner for Unix socket mode")
+    }
+    
     // Release any held modifier keys before hiding
     releaseAllHeldModifiers()
 
@@ -419,6 +425,13 @@ class Controller {
   }
 
   func runAction(_ action: Action) {
+    // Immediately deactivate LeaderKey in Karabiner when any action is triggered
+    // This ensures that subsequent keystrokes go to the active app, not LeaderKey
+    if Defaults[.inputMethodType] == .unixSocket {
+      KarabinerCLI.deactivateLeaderKey()
+      debugLog("[Controller] runAction: Deactivated LeaderKey in Karabiner for Unix socket mode")
+    }
+    
     switch action.type {
     case .application:
       NSWorkspace.shared.openApplication(
