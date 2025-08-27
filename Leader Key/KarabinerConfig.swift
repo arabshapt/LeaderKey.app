@@ -102,6 +102,7 @@ private struct KarabinerRule: Codable {
     let manipulators: [KarabinerManipulator]
     
     static func createActivationRule(configuration: KarabinerConfig.Configuration) -> KarabinerRule {
+        let shellCommand = "perl -e 'my $msg = q[{\"type\":\"activate\"}]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
         return KarabinerRule(
             description: "LeaderKey Activation",
             manipulators: [
@@ -112,7 +113,7 @@ private struct KarabinerRule: Codable {
                         modifiers: KarabinerModifiers(mandatory: configuration.activationModifiers)
                     ),
                     to: [
-                        KarabinerToKey(shell: "echo '{\"type\": \"activate\"}' | socat - UNIX-CONNECT:\(configuration.socketPath)"),
+                        KarabinerToKey(shell: shellCommand),
                         KarabinerToKey(setVariable: KarabinerVariable(name: "leaderkey_active", value: 1))
                     ]
                 )
@@ -121,6 +122,7 @@ private struct KarabinerRule: Codable {
     }
     
     static func createDeactivationRule(configuration: KarabinerConfig.Configuration) -> KarabinerRule {
+        let shellCommand = "perl -e 'my $msg = q[{\"type\":\"escape\"}]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
         return KarabinerRule(
             description: "LeaderKey Deactivation",
             manipulators: [
@@ -128,7 +130,7 @@ private struct KarabinerRule: Codable {
                     type: "basic",
                     from: KarabinerFromKey(keyCode: configuration.escapeKey),
                     to: [
-                        KarabinerToKey(shell: "echo '{\"type\": \"escape\"}' | socat - UNIX-CONNECT:\(configuration.socketPath)"),
+                        KarabinerToKey(shell: shellCommand),
                         KarabinerToKey(setVariable: KarabinerVariable(name: "leaderkey_active", value: 0))
                     ],
                     conditions: [
@@ -147,11 +149,14 @@ private struct KarabinerRule: Codable {
                    "space", "tab", "return_or_enter", "delete_or_backspace"]
         
         let manipulators = keys.map { key in
-            KarabinerManipulator(
+            let json = "{\\\"type\\\":\\\"keydown\\\",\\\"key\\\":\\\"\(key)\\\",\\\"keyCode\\\":0,\\\"modifiers\\\":[]}"
+            let shellCommand = "perl -e 'my $msg = q[\(json)]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
+
+            return KarabinerManipulator(
                 type: "basic",
                 from: KarabinerFromKey(keyCode: key),
                 to: [
-                    KarabinerToKey(shell: "echo '{\"type\": \"keydown\", \"key\": \"\(key)\", \"keyCode\": 0, \"modifiers\": []}' | socat - UNIX-CONNECT:\(configuration.socketPath)")
+                    KarabinerToKey(shell: shellCommand)
                 ],
                 conditions: [
                     KarabinerCondition(type: "variable_if", name: "leaderkey_active", value: 1)
