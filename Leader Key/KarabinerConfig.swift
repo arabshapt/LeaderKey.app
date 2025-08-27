@@ -102,7 +102,7 @@ private struct KarabinerRule: Codable {
     let manipulators: [KarabinerManipulator]
     
     static func createActivationRule(configuration: KarabinerConfig.Configuration) -> KarabinerRule {
-        let shellCommand = "perl -e 'my $msg = q[{\"type\":\"activate\"}]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
+        let shellCommand = "perl -e 'my \\$msg = q[{\"type\":\"activate\"}]; print pack(\"N\", length(\\$msg)), \\$msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
         return KarabinerRule(
             description: "LeaderKey Activation",
             manipulators: [
@@ -122,7 +122,7 @@ private struct KarabinerRule: Codable {
     }
     
     static func createDeactivationRule(configuration: KarabinerConfig.Configuration) -> KarabinerRule {
-        let shellCommand = "perl -e 'my $msg = q[{\"type\":\"escape\"}]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
+        let shellCommand = "perl -e 'my \\$msg = q[{\"type\":\"escape\"}]; print pack(\"N\", length(\\$msg)), \\$msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
         return KarabinerRule(
             description: "LeaderKey Deactivation",
             manipulators: [
@@ -150,7 +150,7 @@ private struct KarabinerRule: Codable {
         
         let manipulators = keys.map { key in
             let json = "{\\\"type\\\":\\\"keydown\\\",\\\"key\\\":\\\"\(key)\\\",\\\"keyCode\\\":0,\\\"modifiers\\\":[]}"
-            let shellCommand = "perl -e 'my $msg = q[\(json)]; print pack(\"N\", length($msg)), $msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
+            let shellCommand = "perl -e 'my \\$msg = q[\(json)]; print pack(\"N\", length(\\$msg)), \\$msg' | socat - UNIX-CONNECT:\(configuration.socketPath)"
 
             return KarabinerManipulator(
                 type: "basic",
