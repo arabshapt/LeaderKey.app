@@ -79,9 +79,10 @@ final class Karabiner2Exporter {
     // 2. Generate applications section
     let applications = generateApplicationsSectionFromAliases(appAliases: appAliases)
     
-    // 3. Structure to hold all :des sections
+    // 3. Structure to hold all :des sections and activations
     var desSections: [(name: String, groups: [ManipulatorGroup])] = []
     var allStateMappings: [StateMapping] = []
+    var allActivations: [String] = []  // Collect all activation rules
     
     // 4. Generate global mode section
     let (globalStateTree, globalMappings) = buildStateTree(
@@ -92,28 +93,26 @@ final class Karabiner2Exporter {
     )
     allStateMappings.append(contentsOf: globalMappings)
     
-    let globalGroups = generateManipulatorsForUnifiedHierarchical(
+    let (globalActivation, globalGroups) = generateManipulatorsForUnifiedHierarchical(
       from: globalStateTree,
       appAlias: nil,
       bundleId: nil,
       activationKey: "{:key :k :modi :command}",
       initialStateId: globalInitialStateId
     )
+    allActivations.append(globalActivation)
     desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
     
     // 5. Generate fallback mode section
-    let fallbackGroups = [
-      ManipulatorGroup(
-        condition: nil,
-        rules: [generateUnifiedActivationManipulator(
-          appAlias: nil,
-          bundleId: "__FALLBACK__",
-          activationKey: "{:key :k :modi [:command :option]}",
-          initialStateId: fallbackInitialStateId
-        )]
-      )
-    ]
-    desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
+    let fallbackActivation = generateUnifiedActivationManipulator(
+      appAlias: nil,
+      bundleId: "__FALLBACK__",
+      activationKey: "{:key :k :modi [:command :option]}",
+      initialStateId: fallbackInitialStateId
+    )
+    allActivations.append(fallbackActivation)
+    // Fallback mode has no other rules, just the activation
+    desSections.append((name: "Leader Key - Fallback Mode", groups: []))
     
     // 6. Generate app-specific sections
     for (bundleId, alias, config) in appAliases {
@@ -126,13 +125,14 @@ final class Karabiner2Exporter {
       )
       allStateMappings.append(contentsOf: appMappings)
       
-      let appGroups = generateManipulatorsForUnifiedHierarchical(
+      let (appActivation, appGroups) = generateManipulatorsForUnifiedHierarchical(
         from: appStateTree,
         appAlias: alias,
         bundleId: bundleId,
         activationKey: "{:key :k :modi [:command :shift]}",
         initialStateId: appInitialStateId
       )
+      allActivations.append(appActivation)
       
       // Find custom name from original appConfigs
       let customName = appConfigs.first(where: { $0.bundleId == bundleId })?.customName
@@ -140,10 +140,20 @@ final class Karabiner2Exporter {
       desSections.append((name: "Leader Key - \(appName)", groups: appGroups))
     }
     
-    // 7. Format as hierarchical EDN
+    // 7. Create activation section at the beginning
+    let activationSection = (
+      name: "Leader Key - Activation Shortcuts",
+      groups: [ManipulatorGroup(condition: nil, rules: allActivations)]
+    )
+    
+    // Insert activation section at the beginning
+    var allSections = [activationSection]
+    allSections.append(contentsOf: desSections)
+    
+    // 8. Format as hierarchical EDN
     let ednContent = formatUnifiedGokuEDNHierarchical(
       applications: applications,
-      desSections: desSections
+      desSections: allSections
     )
     
     return (edn: ednContent, stateMappings: allStateMappings)
@@ -565,23 +575,23 @@ final class Karabiner2Exporter {
   }
   
   // Generate manipulators for unified EDN with hierarchical :condi grouping
+  // Returns: (activationRule, modeGroups) - activation separated from mode rules
   private static func generateManipulatorsForUnifiedHierarchical(
     from nodes: [StateNode],
     appAlias: String?,
     bundleId: String?,
     activationKey: String,
     initialStateId: Int32
-  ) -> [ManipulatorGroup] {
+  ) -> (activation: String, groups: [ManipulatorGroup]) {
     var groups: [ManipulatorGroup] = []
     
-    // 1. Activation group (no condition needed for activation)
+    // 1. Generate activation rule separately (will be returned, not added to groups)
     let activationRule = generateUnifiedActivationManipulator(
       appAlias: appAlias,
       bundleId: bundleId,
       activationKey: activationKey,
       initialStateId: initialStateId
     )
-    groups.append(ManipulatorGroup(condition: nil, rules: [activationRule]))
     
     // Collect and organize rules by state
     var stateTransitions: [Int32: [String: Int32]] = [:]
@@ -686,7 +696,7 @@ final class Karabiner2Exporter {
       groups.append(ManipulatorGroup(condition: modeCondition, rules: modeRules))
     }
     
-    return groups
+    return (activation: activationRule, groups: groups)
   }
   
   // Generate manipulators for unified EDN with cleaner app alias conditions (legacy flat version)
