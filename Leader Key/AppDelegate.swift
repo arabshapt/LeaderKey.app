@@ -3100,6 +3100,7 @@ extension AppDelegate {
 
       if self.controller.userState.isActive {
         self.controller.hide()
+        self.resetSequenceState()  // Reset sequence state to match CGEventTap behavior
       }
     }
   }
@@ -3200,6 +3201,7 @@ extension AppDelegate {
       // Clear current navigation to start fresh from root
       controller.userState.clear()
       controller.userState.activeRoot = rootGroup
+      controller.userState.isActive = true  // Keep active state - we're still in Leader Key mode!
       currentSequenceGroup = rootGroup
       
       // Simulate pressing each key in the path to navigate to the target group

@@ -25,6 +25,7 @@ class MainWindow: PanelWindow, NSWindowDelegate {
 
   var hasCheatsheet: Bool { return true }
   var controller: Controller
+  private var shouldBeVisible = false  // Track if window should be visible
 
   required init(controller: Controller) {
     self.controller = controller
@@ -71,6 +72,7 @@ class MainWindow: PanelWindow, NSWindowDelegate {
   }
 
   func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+    shouldBeVisible = true  // Mark that window should be visible
     // 1. Determine the final origin
     let finalOrigin: NSPoint
     if let newOrigin = origin {
@@ -112,6 +114,9 @@ class MainWindow: PanelWindow, NSWindowDelegate {
 
     // Reveal on next run loop cycle after any state updates from the completion have laid out.
     DispatchQueue.main.async {
+      // Only show if we should still be visible (not hidden by a deactivate call)
+      guard self.shouldBeVisible else { return }
+      
       // Force layout once more to capture any changes made in the completion (e.g., header update)
       self.displayIfNeeded()
       self.contentView?.layoutSubtreeIfNeeded()
@@ -122,6 +127,7 @@ class MainWindow: PanelWindow, NSWindowDelegate {
   }
 
   func hide(after: (() -> Void)?) {
+    shouldBeVisible = false  // Mark that window should NOT be visible
     // Make the window fully transparent and remove it from the screen, but keep it alive in memory
     alphaValue = 0
     orderOut(nil)
