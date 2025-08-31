@@ -625,11 +625,11 @@ final class Karabiner2Exporter {
     // 2. Mode-level condition group
     let modeCondition: String
     if bundleId == "__FALLBACK__" {
-      modeCondition = "[:condi [:leaderkey_fallback]]"
+      modeCondition = "[:condi :leaderkey_fallback]"
     } else if let alias = appAlias {
-      modeCondition = "[:condi [:\(alias) [:leaderkey_active] [:!leaderkey_global] [:!leaderkey_fallback]]]"
+      modeCondition = "[:condi :\(alias) :leaderkey_active :!leaderkey_global :!leaderkey_fallback]"
     } else {
-      modeCondition = "[:condi [:leaderkey_global]]"
+      modeCondition = "[:condi :leaderkey_global]"
     }
     
     // Generate escape handler for all states (under mode condition)
@@ -670,11 +670,11 @@ final class Karabiner2Exporter {
         // Add state-specific condition
         let stateCondition: String
         if bundleId == "__FALLBACK__" {
-          stateCondition = "[:condi [:leaderkey_fallback [\"leader_state\" \(stateId)]]]"
+          stateCondition = "[:condi :leaderkey_fallback [\"leader_state\" \(stateId)]]"
         } else if let alias = appAlias {
-          stateCondition = "[:condi [:\(alias) [:leaderkey_active] [:!leaderkey_global] [:!leaderkey_fallback] [\"leader_state\" \(stateId)]]]"
+          stateCondition = "[:condi :\(alias) :leaderkey_active :!leaderkey_global :!leaderkey_fallback [\"leader_state\" \(stateId)]]"
         } else {
-          stateCondition = "[:condi [:leaderkey_global [\"leader_state\" \(stateId)]]]"
+          stateCondition = "[:condi :leaderkey_global [\"leader_state\" \(stateId)]]"
         }
         
         modeRules.append(stateCondition)
