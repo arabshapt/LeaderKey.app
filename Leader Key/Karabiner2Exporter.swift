@@ -93,28 +93,7 @@ final class Karabiner2Exporter {
     )
     allStateMappings.append(contentsOf: globalMappings)
     
-    let (globalActivation, globalGroups) = generateManipulatorsForUnifiedHierarchical(
-      from: globalStateTree,
-      appAlias: nil,
-      bundleId: nil,
-      activationKey: "{:key :k :modi :command}",
-      initialStateId: globalInitialStateId
-    )
-    allActivations.append(globalActivation)
-    desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
-    
-    // 5. Generate fallback mode section
-    let fallbackActivation = generateUnifiedActivationManipulator(
-      appAlias: nil,
-      bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",
-      initialStateId: fallbackInitialStateId
-    )
-    allActivations.append(fallbackActivation)
-    // Fallback mode has no other rules, just the activation
-    desSections.append((name: "Leader Key - Fallback Mode", groups: []))
-    
-    // 6. Generate app-specific sections
+    // 5. Generate app-specific sections FIRST (most specific)
     for (bundleId, alias, config) in appAliases {
       let appInitialStateId = generateAppInitialStateId(appAlias: alias)
       let (appStateTree, appMappings) = buildStateTree(
@@ -140,7 +119,42 @@ final class Karabiner2Exporter {
       desSections.append((name: "Leader Key - \(appName)", groups: appGroups))
     }
     
-    // 7. Create activation section at the beginning with single escape rule
+    // 6. Generate global mode section SECOND
+    let (globalActivation, globalGroups) = generateManipulatorsForUnifiedHierarchical(
+      from: globalStateTree,
+      appAlias: nil,
+      bundleId: nil,
+      activationKey: "{:key :k :modi :command}",
+      initialStateId: globalInitialStateId
+    )
+    allActivations.append(globalActivation)
+    desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
+    
+    // 7. Generate fallback mode section LAST (most generic)
+    // Load the fallback config using UserConfig's method
+    let fallbackRoot = globalConfig.getFallbackConfig()
+    
+    // Build state tree for fallback config
+    let (fallbackStateTree, fallbackMappings) = buildStateTree(
+      from: fallbackRoot,
+      appAlias: nil,
+      bundleId: "__FALLBACK__",
+      initialStateId: fallbackInitialStateId
+    )
+    allStateMappings.append(contentsOf: fallbackMappings)
+    
+    // Generate manipulators for fallback
+    let (fallbackActivation, fallbackGroups) = generateManipulatorsForUnifiedHierarchical(
+      from: fallbackStateTree,
+      appAlias: nil,
+      bundleId: "__FALLBACK__",
+      activationKey: "{:key :k :modi [:command :option]}",
+      initialStateId: fallbackInitialStateId
+    )
+    allActivations.append(fallbackActivation)
+    desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
+    
+    // 8. Create activation section at the beginning with single escape rule
     // Add single escape rule that works when any Leader Key mode is active
     let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
     
