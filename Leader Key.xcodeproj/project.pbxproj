@@ -29,6 +29,8 @@
 		2655547C2E5F899A0019B79D /* CGEventTapInputMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2655547B2E5F899A0019B79D /* CGEventTapInputMethod.swift */; };
 		2655547E2E5F89A30019B79D /* InputMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2655547D2E5F89A30019B79D /* InputMethod.swift */; };
 		265554802E5F89AA0019B79D /* KarabinerExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2655547F2E5F89AA0019B79D /* KarabinerExporter.swift */; };
+		26F868192E60C27100B5D464 /* Karabiner2InputMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F868182E60C27100B5D464 /* Karabiner2InputMethod.swift */; };
+		26F8681B2E60C27900B5D464 /* Karabiner2Exporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F8681A2E60C27900B5D464 /* Karabiner2Exporter.swift */; };
 		423632132D676F5200878D92 /* FileMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632122D676F5200878D92 /* FileMonitor.swift */; };
 		423632142D676F5300878D92 /* DualEventTapManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632152D676F5300878D92 /* DualEventTapManager.swift */; };
 		423632222D68CA6500878D92 /* MysteryBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632212D68CA6500878D92 /* MysteryBox.swift */; };
@@ -109,6 +111,8 @@
 		2655547B2E5F899A0019B79D /* CGEventTapInputMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGEventTapInputMethod.swift; sourceTree = "<group>"; };
 		2655547D2E5F89A30019B79D /* InputMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputMethod.swift; sourceTree = "<group>"; };
 		2655547F2E5F89AA0019B79D /* KarabinerExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KarabinerExporter.swift; sourceTree = "<group>"; };
+		26F868182E60C27100B5D464 /* Karabiner2InputMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Karabiner2InputMethod.swift; sourceTree = "<group>"; };
+		26F8681A2E60C27900B5D464 /* Karabiner2Exporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Karabiner2Exporter.swift; sourceTree = "<group>"; };
 		423632122D676F5200878D92 /* FileMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMonitor.swift; sourceTree = "<group>"; };
 		423632142D678F4400878D92 /* TestPlan.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = TestPlan.xctestplan; sourceTree = "<group>"; };
 		423632152D676F5300878D92 /* DualEventTapManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualEventTapManager.swift; sourceTree = "<group>"; };
@@ -225,6 +229,8 @@
 		427C17E92BD311B400955B98 /* Leader Key */ = {
 			isa = PBXGroup;
 			children = (
+				26F8681A2E60C27900B5D464 /* Karabiner2Exporter.swift */,
+				26F868182E60C27100B5D464 /* Karabiner2InputMethod.swift */,
 				2655547D2E5F89A30019B79D /* InputMethod.swift */,
 				2655547B2E5F899A0019B79D /* CGEventTapInputMethod.swift */,
 				265554792E5F89920019B79D /* UnixSocketServer.swift */,
@@ -461,7 +467,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n/usr/bin/swift format -r -i .\n";
+			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n/usr/bin/swift format -r -i \"Leader Key\" \"Leader KeyTests\"\n";
 		};
 		42D6FF692DA513A400C8257D /* Reset Accessibility Permissions */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -524,7 +530,9 @@
 				263613912DC4202A0078036F /* UserConfig+GroupPath.swift in Sources */,
 				263613922DC4202A0078036F /* UserConfig+LoadingDecoding.swift in Sources */,
 				263613932DC4202A0078036F /* UserConfig+Saving.swift in Sources */,
+				26F8681B2E60C27900B5D464 /* Karabiner2Exporter.swift in Sources */,
 				263613962E3F202B0078036F /* UserConfig+Metadata.swift in Sources */,
+				26F868192E60C27100B5D464 /* Karabiner2InputMethod.swift in Sources */,
 				427C182D2BD31F9500955B98 /* Settings.swift in Sources */,
 				426E625B2D2E6A98009FD2F2 /* CommandRunner.swift in Sources */,
 				2655547A2E5F89920019B79D /* UnixSocketServer.swift in Sources */,
@@ -707,6 +715,7 @@
 				CURRENT_PROJECT_VERSION = 118;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Leader Key/Support/Preview Content\"";
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -743,6 +752,7 @@
 				CURRENT_PROJECT_VERSION = 118;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Leader Key/Support/Preview Content\"";
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;

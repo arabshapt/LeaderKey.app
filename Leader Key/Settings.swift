@@ -10,6 +10,6 @@ extension Settings.PaneIdentifier {
 
 /// Centralized configuration for all Settings panes
 struct SettingsConfig {
-    /// Width used by all Settings panes for consistent layout
-    static let contentWidth: Double = 1100.0
+  /// Width used by all Settings panes for consistent layout
+  static let contentWidth: Double = 1100.0
 }

@@ -24,7 +24,7 @@ enum Cheatsheet {
           .frame(width: 24)
           .background(.white.opacity(0.1))
           .clipShape(RoundedRectangle(cornerRadius: 5.0, style: .continuous))
-        
+
         if showFallbackIndicator {
           Image(systemName: "circle.fill")
             .foregroundColor(.white.opacity(0.2))
@@ -49,7 +49,8 @@ enum Cheatsheet {
             Text("  ")
           }
           KeyBadge(key: action.key ?? "●", showFallbackIndicator: action.isFromFallback)
-            .help(action.isFromFallback ? "From \(action.fallbackSource ?? "Fallback App Config")" : "")
+            .help(
+              action.isFromFallback ? "From \(action.fallbackSource ?? "Fallback App Config")" : "")
 
           if showIcons {
             actionIcon(item: ActionOrGroup.action(action), iconSize: iconSize)
@@ -120,7 +121,8 @@ enum Cheatsheet {
             Text("  ")
           }
           KeyBadge(key: group.key ?? "", showFallbackIndicator: group.isFromFallback)
-            .help(group.isFromFallback ? "From \(group.fallbackSource ?? "Fallback App Config")" : "")
+            .help(
+              group.isFromFallback ? "From \(group.fallbackSource ?? "Fallback App Config")" : "")
 
           if showIcons {
             actionIcon(item: ActionOrGroup.group(group), iconSize: iconSize)
@@ -179,7 +181,8 @@ enum Cheatsheet {
 
     var actions: [ActionOrGroup] {
       let baseActions = userState.activeRoot?.actions ?? []
-      let currentActions = (userState.currentGroup != nil)
+      let currentActions =
+        (userState.currentGroup != nil)
         ? userState.currentGroup!.actions : baseActions
 
       // Sort actions alphabetically and conditionally show/hide fallback items
@@ -266,7 +269,7 @@ enum Cheatsheet {
     let cheatsheet = PanelWindow(
       contentRect: NSRect(x: 0, y: 0, width: 580, height: 640)
     )
-    cheatsheet.isReleasedWhenClosed = true // allow memory to be reclaimed when window is closed
+    cheatsheet.isReleasedWhenClosed = true  // allow memory to be reclaimed when window is closed
     cheatsheet.contentViewController = controller
     return cheatsheet
   }

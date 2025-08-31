@@ -1,7 +1,7 @@
+import AppKit
 import Defaults
 import Kingfisher
 import SwiftUI
-import AppKit
 
 // Lightweight in-memory cache for app icons resized to requested size
 private final class AppIconMemoryCache {

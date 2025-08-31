@@ -5,7 +5,9 @@
       "Bash(grep:*)",
       "Bash(find:*)",
       "WebSearch",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(chmod:*)",
+      "Bash(swift:*)"
     ],
     "deny": []
   }

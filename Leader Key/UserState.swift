@@ -8,9 +8,9 @@ final class UserState: ObservableObject {
   @Published var display: String?
   @Published var isShowingRefreshState: Bool
   @Published var navigationPath: [Group] = []
-  @Published var activeRoot: Group? // Root group for the current context (app-specific or default)
-  var activeConfigKey: String? // The config key that was used to load activeRoot
-  @Published var isActive: Bool = false // Track whether Leader Key is currently active
+  @Published var activeRoot: Group?  // Root group for the current context (app-specific or default)
+  var activeConfigKey: String?  // The config key that was used to load activeRoot
+  @Published var isActive: Bool = false  // Track whether Leader Key is currently active
 
   var currentGroup: Group? {
     return navigationPath.last
@@ -25,7 +25,7 @@ final class UserState: ObservableObject {
     display = lastChar
     self.isShowingRefreshState = isShowingRefreshState
     self.navigationPath = []
-    self.activeRoot = userConfig.root // Initialize with default root
+    self.activeRoot = userConfig.root  // Initialize with default root
   }
 
   func clear() {
@@ -60,7 +60,9 @@ final class UserState: ObservableObject {
   }
 
   // Helper function to build the full path to a group
-  private func buildGroupPath(from current: Group, to target: Group, currentPath: [Group], result: inout [Group]) {
+  private func buildGroupPath(
+    from current: Group, to target: Group, currentPath: [Group], result: inout [Group]
+  ) {
     // If we found the target, the path is complete
     if current.key == target.key && current.label == target.label {
       result = currentPath + [current]
@@ -70,7 +72,8 @@ final class UserState: ObservableObject {
     // Continue searching in subgroups
     for item in current.actions {
       if case .group(let subgroup) = item {
-        buildGroupPath(from: subgroup, to: target, currentPath: currentPath + [current], result: &result)
+        buildGroupPath(
+          from: subgroup, to: target, currentPath: currentPath + [current], result: &result)
 
         // If we found the path, stop searching
         if !result.isEmpty {

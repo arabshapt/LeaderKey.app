@@ -21,13 +21,13 @@ enum Mini {
       let height = Mini.size
 
       if let explicitOrigin = origin {
-          print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
-          self.setFrameOrigin(explicitOrigin)
-          self.setContentSize(NSSize(width: width, height: height))
+        print("[MiniWindow show(at:)] Using provided origin: \(explicitOrigin)")
+        self.setFrameOrigin(explicitOrigin)
+        self.setContentSize(NSSize(width: width, height: height))
       } else {
-          print("[MiniWindow show(at:)] Origin not provided, centering.")
-          self.setContentSize(NSSize(width: width, height: height))
-          self.center()
+        print("[MiniWindow show(at:)] Origin not provided, centering.")
+        self.setContentSize(NSSize(width: width, height: height))
+        self.center()
       }
 
       self.displayIfNeeded()

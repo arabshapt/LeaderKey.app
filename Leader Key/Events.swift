@@ -10,7 +10,7 @@ enum EventKey {
   // Config
   case willReload
   case didReload
-  case didSaveConfig // Config was saved via settings
+  case didSaveConfig  // Config was saved via settings
 }
 
 class Events {

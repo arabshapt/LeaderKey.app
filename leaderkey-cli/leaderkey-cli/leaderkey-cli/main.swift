@@ -11,6 +11,7 @@ enum Command {
     case deactivate
     case state
     case sequence(keys: String)
+    case stateid(id: String)
     case help
 }
 
@@ -46,6 +47,13 @@ func parseArguments() -> Command {
         }
         let keys = Array(args[2...]).joined(separator: " ")
         return .sequence(keys: keys)
+        
+    case "stateid":
+        guard args.count > 2 else {
+            print("Error: 'stateid' command requires a state ID parameter")
+            exit(1)
+        }
+        return .stateid(id: args[2])
         
     case "help", "--help", "-h":
         return .help
@@ -123,6 +131,7 @@ func printHelp() {
         deactivate            Deactivate Leader Key
         state                 Get current Leader Key state
         sequence <keys>       Send a sequence of keys
+        stateid <id>          Send a state ID for action execution
         help                  Show this help message
     
     Examples:
@@ -158,6 +167,9 @@ case .state:
     
 case .sequence(let keys):
     success = sendViaSocket("sequence \(keys)")
+    
+case .stateid(let id):
+    success = sendViaSocket("stateid \(id)")
     
 case .help:
     printHelp()

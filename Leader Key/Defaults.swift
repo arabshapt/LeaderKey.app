@@ -1,7 +1,7 @@
 import Cocoa
 import Defaults
-import SwiftUI
 import KeyboardShortcuts
+import SwiftUI
 
 var defaultsSuite =
   ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -55,23 +55,29 @@ extension Defaults.Keys {
     "showFallbackItems", default: true, suite: defaultsSuite)
 
   // User-defined names for config files - maps file paths to custom names
-  static let configFileCustomNames = Key<[String: String]>("configFileCustomNames", default: [:], suite: defaultsSuite)
+  static let configFileCustomNames = Key<[String: String]>(
+    "configFileCustomNames", default: [:], suite: defaultsSuite)
 
   // Overlay detection settings
   /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs
-  static let overlayDetectionEnabled = Key<Bool>("overlayDetectionEnabled", default: false, suite: defaultsSuite)
+  static let overlayDetectionEnabled = Key<Bool>(
+    "overlayDetectionEnabled", default: false, suite: defaultsSuite)
   /// List of bundle IDs for apps that should be checked for overlay windows
-  static let overlayApps = Key<[String]>("overlayApps", default: ["com.raycast.macos", "com.runningwithcrayons.Alfred"], suite: defaultsSuite)
-  
+  static let overlayApps = Key<[String]>(
+    "overlayApps", default: ["com.raycast.macos", "com.runningwithcrayons.Alfred"],
+    suite: defaultsSuite)
+
   // Command execution settings
   /// Shell preference for running command actions
-  static let commandShellPreference = Key<ShellPreference>("commandShellPreference", default: .system, suite: defaultsSuite)
+  static let commandShellPreference = Key<ShellPreference>(
+    "commandShellPreference", default: .system, suite: defaultsSuite)
   /// Whether to load shell RC files when executing commands
   static let loadShellRCFiles = Key<Bool>("loadShellRCFiles", default: true, suite: defaultsSuite)
   /// Custom shell path when using custom shell preference
   static let customShellPath = Key<String>("customShellPath", default: "", suite: defaultsSuite)
   /// Input method for keyboard events
-  static let inputMethodPreference = Key<InputMethodPreference>("inputMethodPreference", default: .cgEventTap, suite: defaultsSuite)
+  static let inputMethodPreference = Key<InputMethodPreference>(
+    "inputMethodPreference", default: .cgEventTap, suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -109,9 +115,9 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
   case sh
   case dash
   case custom
-  
+
   var id: Self { self }
-  
+
   var description: String {
     switch self {
     case .system:
@@ -128,7 +134,7 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
       return "Custom"
     }
   }
-  
+
   var path: String {
     switch self {
     case .system:
@@ -145,7 +151,7 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
       return Defaults[.customShellPath].isEmpty ? "/bin/sh" : Defaults[.customShellPath]
     }
   }
-  
+
   static func isValidShellPath(_ path: String) -> Bool {
     let fileManager = FileManager.default
     var isDirectory: ObjCBool = false
@@ -157,24 +163,29 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
 enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identifiable {
   case cgEventTap = "cgeventtap"
   case karabiner = "karabiner"
-  
+  case karabiner2 = "karabiner2"
+
   var id: Self { self }
-  
+
   var displayName: String {
     switch self {
     case .cgEventTap:
       return "CGEventTap (Default)"
     case .karabiner:
       return "Karabiner Elements"
+    case .karabiner2:
+      return "Karabiner 2.0 (State Machine)"
     }
   }
-  
+
   var description: String {
     switch self {
     case .cgEventTap:
       return "Direct keyboard interception using macOS event taps"
     case .karabiner:
       return "Integration through Karabiner Elements with Unix socket"
+    case .karabiner2:
+      return "Advanced Karabiner integration with state machine and Goku EDN export"
     }
   }
 }
@@ -196,7 +207,7 @@ extension KeyboardShortcuts.Name {
   )
   static let fallbackEscape = KeyboardShortcuts.Name(
     "fallbackEscape",
-    default: nil // No default - user can set if needed
+    default: nil  // No default - user can set if needed
   )
 
   // Helper for group-specific shortcuts

@@ -7,8 +7,11 @@ struct ValidationError: Identifiable, Equatable {
   let type: ValidationErrorType
   let severity: ValidationSeverity
   let suggestion: String?
-  
-  init(path: [Int], message: String, type: ValidationErrorType, severity: ValidationSeverity = .error, suggestion: String? = nil) {
+
+  init(
+    path: [Int], message: String, type: ValidationErrorType, severity: ValidationSeverity = .error,
+    suggestion: String? = nil
+  ) {
     self.path = path
     self.message = message
     self.type = type
@@ -30,14 +33,14 @@ enum ValidationErrorType {
 enum ValidationSeverity {
   case warning
   case error
-  
+
   var color: String {
     switch self {
     case .warning: return "orange"
     case .error: return "red"
     }
   }
-  
+
   var iconName: String {
     switch self {
     case .warning: return "exclamationmark.triangle"

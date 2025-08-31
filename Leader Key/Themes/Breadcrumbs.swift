@@ -26,7 +26,9 @@ enum Breadcrumbs {
         initialX = explicitOrigin.x
         initialY = explicitOrigin.y
       } else {
-        print("[BreadcrumbsWindow show(at:)] Origin not provided, using default bottom-left positioning.")
+        print(
+          "[BreadcrumbsWindow show(at:)] Origin not provided, using default bottom-left positioning."
+        )
         initialX = Breadcrumbs.margin
         initialY = Breadcrumbs.margin
       }
