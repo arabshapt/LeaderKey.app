@@ -294,6 +294,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   
   // State ID to action mapping for Karabiner 2.0
   private var stateMappings: [Int32: Karabiner2Exporter.StateMapping] = [:]
+  private var actionCache: [Int32: Action] = [:]  // Cache stateId -> Action for efficient lookup
   private var stateMappingsLastLoaded: Date?
   private var cancellables = Set<AnyCancellable>()
 
@@ -3180,9 +3181,64 @@ extension AppDelegate {
       stateMappingsLastLoaded = Date()
       debugLog("[AppDelegate] Loaded \(mappings.count) state mappings")
       
+      // Build action cache for efficient lookup
+      actionCache.removeAll()
+      for (stateId, mapping) in stateMappings {
+        if mapping.actionType == "action" {
+          if let action = findActionForMapping(mapping) {
+            actionCache[stateId] = action
+            debugLog("[AppDelegate] Cached action for state ID \(stateId): \(action.displayName)")
+          }
+        }
+      }
+      debugLog("[AppDelegate] Built action cache with \(actionCache.count) actions")
+      
     } catch {
       debugLog("[AppDelegate] Failed to load state mappings: \(error)")
     }
+  }
+  
+  private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
+    // Determine which root to use based on bundle ID
+    let rootGroup: Group
+    if let bundleId = mapping.bundleId,
+       let appRoot = config.appConfigs[bundleId],
+       let root = appRoot {
+      rootGroup = root
+    } else {
+      rootGroup = config.root
+    }
+    
+    var currentGroup = rootGroup
+    
+    // Navigate through path to find the group containing the action
+    for i in 0..<mapping.path.count - 1 {
+      let key = mapping.path[i]
+      var found = false
+      for item in currentGroup.actions {
+        if case .group(let group) = item, group.key == key {
+          currentGroup = group
+          found = true
+          break
+        }
+      }
+      if !found { 
+        debugLog("[AppDelegate] Could not find group with key '\(key)' in path for state ID \(mapping.stateId)")
+        return nil 
+      }
+    }
+    
+    // Find the action with the last key
+    if let lastKey = mapping.path.last {
+      for item in currentGroup.actions {
+        if case .action(let action) = item, action.key == lastKey {
+          return action
+        }
+      }
+      debugLog("[AppDelegate] Could not find action with key '\(lastKey)' for state ID \(mapping.stateId)")
+    }
+    
+    return nil
   }
   
   private func executeActionByStateId(_ stateId: Int32) {
@@ -3232,36 +3288,15 @@ extension AppDelegate {
       // This is an action state - execute it
       debugLog("[AppDelegate] State ID \(stateId) is an action, executing")
       
-      // Check if action value exists
-      guard let actionValue = mapping.actionValue else {
-        debugLog("[AppDelegate] No action value for state ID: \(stateId)")
-        return
-      }
-      
-      // Parse the action type from the stored raw value
-      let actionType: Type
-      if let typeRaw = mapping.actionTypeRaw, let parsedType = Type(rawValue: typeRaw) {
-        actionType = parsedType
+      // Use cached action which has all properties including macro steps
+      if let cachedAction = actionCache[stateId] {
+        controller.hide {
+          self.controller.runAction(cachedAction)
+        }
+        debugLog("[AppDelegate] Executed cached action for state ID \(stateId): \(cachedAction.value) with \(cachedAction.macroSteps?.count ?? 0) macro steps")
       } else {
-        // Fallback to command type if not specified or invalid
-        actionType = .command
-        debugLog("[AppDelegate] No valid action type for state ID \(stateId), defaulting to .command")
+        debugLog("[AppDelegate] No cached action found for state ID \(stateId). This may happen if the config changed since mappings were exported.")
       }
-      
-      // Create and execute the action
-      let action = Action(
-        key: nil,
-        type: actionType,
-        label: mapping.actionLabel,
-        value: actionValue
-      )
-      
-      // Hide window and execute the action
-      controller.hide {
-        self.controller.runAction(action)
-      }
-      
-      debugLog("[AppDelegate] Executed action for state ID \(stateId): \(actionValue)")
     } else {
       debugLog("[AppDelegate] Unknown action type for state ID \(stateId): \(mapping.actionType)")
     }
