@@ -15,6 +15,7 @@ protocol InputMethodDelegate: AnyObject {
   func inputMethodDidReceiveActivation(bundleId: String?)
   func inputMethodDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
   func inputMethodDidReceiveDeactivation()
+  func inputMethodDidReceiveSettings()
   func inputMethodDidReceiveSequence(_ sequence: String)
   func inputMethodDidReceiveStateId(_ stateId: Int32)
   func inputMethodDidRequestState() -> [String: Any]

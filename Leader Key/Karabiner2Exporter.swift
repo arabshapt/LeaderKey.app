@@ -154,12 +154,15 @@ final class Karabiner2Exporter {
     allActivations.append(fallbackActivation)
     desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
     
-    // 8. Create activation section at the beginning with single escape rule
+    // 8. Create activation section at the beginning with escape and settings rules
     // Add single escape rule that works when any Leader Key mode is active
     let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
+    activationRules.append(settingsRule)
     
     let activationSection = (
       name: "Leader Key - Activation Shortcuts",

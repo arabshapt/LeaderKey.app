@@ -258,6 +258,11 @@ extension Karabiner2InputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveDeactivation()
   }
 
+  func unixSocketServerDidReceiveSettings() {
+    debugLog("[Karabiner2InputMethod] Received settings command")
+    delegate?.inputMethodDidReceiveSettings()
+  }
+
   func unixSocketServerDidReceiveSequence(_ sequence: String) {
     debugLog("[Karabiner2InputMethod] Received sequence: \(sequence)")
     currentState = 0

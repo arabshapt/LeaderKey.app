@@ -121,6 +121,11 @@ extension KarabinerInputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveDeactivation()
   }
 
+  func unixSocketServerDidReceiveSettings() {
+    debugLog("[KarabinerInputMethod] Received settings command")
+    delegate?.inputMethodDidReceiveSettings()
+  }
+
   func unixSocketServerDidReceiveSequence(_ sequence: String) {
     debugLog("[KarabinerInputMethod] Received sequence: \(sequence)")
     delegate?.inputMethodDidReceiveSequence(sequence)

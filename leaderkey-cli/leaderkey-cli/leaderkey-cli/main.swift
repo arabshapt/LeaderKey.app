@@ -9,6 +9,7 @@ enum Command {
     case activate(bundleId: String?)
     case key(keyCode: String)
     case deactivate
+    case settings
     case state
     case sequence(keys: String)
     case stateid(id: String)
@@ -36,6 +37,9 @@ func parseArguments() -> Command {
         
     case "deactivate":
         return .deactivate
+        
+    case "settings":
+        return .settings
         
     case "state":
         return .state
@@ -129,6 +133,7 @@ func printHelp() {
         activate [bundleId]    Activate Leader Key (optionally for specific app)
         key <keycode>         Send a key event
         deactivate            Deactivate Leader Key
+        settings              Open Leader Key settings
         state                 Get current Leader Key state
         sequence <keys>       Send a sequence of keys
         stateid <id>          Send a state ID for action execution
@@ -161,6 +166,9 @@ case .key(let keyCode):
     
 case .deactivate:
     success = sendViaSocket("deactivate")
+    
+case .settings:
+    success = sendViaSocket("settings")
     
 case .state:
     success = sendViaSocket("state")

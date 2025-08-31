@@ -180,6 +180,10 @@ final class UnixSocketServer {
       delegate?.unixSocketServerDidReceiveDeactivation()
       sendResponse("OK", to: socket)
 
+    case "settings":
+      delegate?.unixSocketServerDidReceiveSettings()
+      sendResponse("OK", to: socket)
+
     case "sequence":
       guard parts.count > 1 else {
         sendResponse("ERROR: Sequence command requires keys", to: socket)
@@ -335,6 +339,7 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveActivation(bundleId: String?)
   func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
   func unixSocketServerDidReceiveDeactivation()
+  func unixSocketServerDidReceiveSettings()
   func unixSocketServerDidReceiveSequence(_ sequence: String)
   func unixSocketServerDidReceiveStateId(_ stateId: Int32)
   func unixSocketServerRequestState() -> [String: Any]

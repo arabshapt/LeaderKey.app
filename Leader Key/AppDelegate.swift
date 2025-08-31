@@ -3105,6 +3105,24 @@ extension AppDelegate {
     }
   }
 
+  func inputMethodDidReceiveSettings() {
+    // Handle settings command from Karabiner
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      
+      debugLog("[InputMethod] Settings command received")
+      
+      // If Leader Key is active, hide it and reset state (like deactivate does)
+      if self.controller.userState.isActive {
+        self.controller.hide()
+        self.resetSequenceState()
+      }
+      
+      // Call the settings menu item action handler to open settings
+      self.settingsMenuItemActionHandler(NSMenuItem())
+    }
+  }
+
   func inputMethodDidReceiveSequence(_ sequence: String) {
     // Handle key sequence from Karabiner
     DispatchQueue.main.async { [weak self] in
