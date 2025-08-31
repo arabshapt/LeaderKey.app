@@ -3201,11 +3201,22 @@ extension AppDelegate {
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
     // Determine which root to use based on bundle ID
     let rootGroup: Group
-    if let bundleId = mapping.bundleId,
-       let appRoot = config.appConfigs[bundleId],
-       let root = appRoot {
-      rootGroup = root
+    if let bundleId = mapping.bundleId {
+      if bundleId == "__FALLBACK__" {
+        // For fallback mode, use the fallback config
+        rootGroup = config.getFallbackConfig()
+      } else {
+        // Regular app-specific config
+        if let appRoot = config.appConfigs[bundleId],
+           let root = appRoot {
+          rootGroup = root
+        } else {
+          // App config not found, use the merged config (app-specific + fallback)
+          rootGroup = config.getConfig(for: bundleId)
+        }
+      }
     } else {
+      // No bundle ID means use global config
       rootGroup = config.root
     }
     
