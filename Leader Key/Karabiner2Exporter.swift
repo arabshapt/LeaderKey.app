@@ -140,10 +140,16 @@ final class Karabiner2Exporter {
       desSections.append((name: "Leader Key - \(appName)", groups: appGroups))
     }
     
-    // 7. Create activation section at the beginning
+    // 7. Create activation section at the beginning with single escape rule
+    // Add single escape rule that works when any Leader Key mode is active
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    
+    var activationRules = allActivations
+    activationRules.append(escapeRule)
+    
     let activationSection = (
       name: "Leader Key - Activation Shortcuts",
-      groups: [ManipulatorGroup(condition: nil, rules: allActivations)]
+      groups: [ManipulatorGroup(condition: nil, rules: activationRules)]
     )
     
     // Insert activation section at the beginning
@@ -642,11 +648,8 @@ final class Karabiner2Exporter {
       modeCondition = "[:condi :leaderkey_global]"
     }
     
-    // Generate escape handler for all states (under mode condition)
+    // No longer generating escape handlers per state - using single global escape
     var modeRules: [String] = []
-    for stateId in allStateIds.sorted() {
-      modeRules.append(generateUnifiedEscapeHandler(forState: stateId, appAlias: appAlias))
-    }
     
     // 3. Group rules by state with nested conditions
     for stateId in allStateIds.sorted() {
