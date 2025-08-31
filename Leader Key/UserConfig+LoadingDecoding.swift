@@ -53,6 +53,31 @@ extension UserConfig {
     // Fallback to default global-config.json (already loaded into self.root)
     return root
   }
+  
+  // Gets the fallback config with all items marked as isFromFallback
+  // This is used when __FALLBACK__ is explicitly activated
+  func getMarkedFallbackConfig() -> Group {
+    // Get the raw fallback config
+    let fallbackConfig = getFallbackConfig()
+    
+    // Check if we actually got a fallback config or just the default root
+    // We can check this by seeing if the cache has a fallback entry
+    let defaultAppKey = "app.default"
+    let hasFallbackConfig = appConfigs[defaultAppKey] != nil
+    
+    // If no fallback config exists (we got the root), return as is
+    if !hasFallbackConfig {
+      return root
+    }
+    
+    // Create a new group with all items marked as fallback
+    var markedGroup = fallbackConfig
+    markedGroup.actions = fallbackConfig.actions.map { item in
+      markAsFromFallback(item, fallbackSource: defaultAppConfigDisplayName)
+    }
+    
+    return markedGroup
+  }
 
   // Gets the config for a specific app bundle ID, falling back to app-fallback-config.json, then default global-config.json
   func getConfig(for bundleId: String?) -> Group {

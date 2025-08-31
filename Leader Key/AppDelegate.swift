@@ -935,10 +935,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
 
   // Convenience method to show the main Leader Key window
   func show(
-    type: Controller.ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil
+    type: Controller.ActivationType = .appSpecificWithFallback, bundleId: String? = nil, completion: (() -> Void)? = nil
   ) {
-    print("[AppDelegate] show(type: \(type)) called.")
-    controller.show(type: type, completion: completion)
+    print("[AppDelegate] show(type: \(type), bundleId: \(bundleId ?? "nil")) called.")
+    controller.show(type: type, bundleId: bundleId, completion: completion)
   }
 
   // Convenience method to hide the main Leader Key window
@@ -2539,7 +2539,7 @@ extension AppDelegate {
 
   // This function is called when an activation shortcut is pressed or via URL scheme.
   // It sets up the initial state for a new key sequence based on the loaded config.
-  private func startSequence(activationType: Controller.ActivationType) {
+  private func startSequence(activationType: Controller.ActivationType, bundleId: String? = nil) {
     print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
 
     // Reset sticky mode when starting any new sequence
@@ -2571,30 +2571,35 @@ extension AppDelegate {
 
     // Preprocess the config for fast lookups
     // Determine the bundle ID for caching
-    let bundleId: String
+    let cacheId: String
     switch activationType {
     case .defaultOnly:
-      bundleId = "global"
+      cacheId = "global"
     case .appSpecificWithFallback:
-      // Get the actual bundle ID that was detected
-      let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectFrontmostAppWithOverlay()
-      let configKey =
-        isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
-      bundleId = configKey ?? "global"
+      // Check if we have __FALLBACK__ bundleId
+      if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
+        cacheId = "fallback"
+      } else {
+        // Get the actual bundle ID that was detected
+        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectFrontmostAppWithOverlay()
+        let configKey =
+          isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
+        cacheId = configKey ?? "global"
+      }
     case .fallbackOnly:
-      bundleId = "fallback"
+      cacheId = "fallback"
     }
 
     // Store current bundle ID for later use
-    self.currentBundleId = bundleId
+    self.currentBundleId = cacheId
 
     // Preprocess and cache the config for O(1) lookups
     let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(
-      rootGroup, for: bundleId)
+      rootGroup, for: cacheId)
     self.currentKeyLookupCache = keyLookupCache
 
     print(
-      "[AppDelegate] startSequence: Preprocessed config for '\(bundleId)' with \(keyLookupCache.getCacheStats())"
+      "[AppDelegate] startSequence: Preprocessed config for '\(cacheId)' with \(keyLookupCache.getCacheStats())"
     )
 
     // Store the root group for the current sequence and set the current level to the root.
@@ -2921,11 +2926,9 @@ extension AppDelegate {
       // Determine activation type based on bundleId
       let activationType: Controller.ActivationType
       if let bundleId = bundleId {
-        if bundleId == "__FALLBACK__" {
-          activationType = .fallbackOnly
-        } else {
-          activationType = .appSpecificWithFallback
-        }
+        // Always use appSpecificWithFallback for any bundleId (including __FALLBACK__)
+        // This ensures consistent behavior with CGEventTap mode
+        activationType = .appSpecificWithFallback
       } else {
         activationType = .defaultOnly
       }
@@ -2963,12 +2966,18 @@ extension AppDelegate {
           case .defaultOnly:
             newRoot = self.config.root
           case .appSpecificWithFallback:
-            // Use the same overlay detection logic as initial activation
-            let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-            let configKey =
-              isOverlay && detectedBundleId != nil
-              ? "\(detectedBundleId!).overlay" : detectedBundleId
-            newRoot = self.config.getConfig(for: configKey)
+            // Check if we have __FALLBACK__ bundleId
+            if let bundleId = bundleId, bundleId == "__FALLBACK__" {
+              // For __FALLBACK__, use merged config (same as no app-specific config)
+              newRoot = self.config.getConfig(for: nil)
+            } else {
+              // Use the same overlay detection logic as initial activation
+              let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+              let configKey =
+                isOverlay && detectedBundleId != nil
+                ? "\(detectedBundleId!).overlay" : detectedBundleId
+              newRoot = self.config.getConfig(for: configKey)
+            }
           case .fallbackOnly:
             newRoot = self.config.getFallbackConfig()
           }
@@ -2977,7 +2986,7 @@ extension AppDelegate {
 
           // Reposition and start new sequence
           self.controller.repositionWindowNearMouse()
-          self.startSequence(activationType: activationType)
+          self.startSequence(activationType: activationType, bundleId: bundleId)
 
         case .nothing:
           // Do nothing if activated again while visible, unless no sequence is active
@@ -2992,7 +3001,7 @@ extension AppDelegate {
           if self.currentSequenceGroup == nil {
             debugLog("[InputMethod] No current sequence, starting new sequence.")
             self.controller.userState.isActive = true  // Ensure keys are processed
-            self.startSequence(activationType: activationType)
+            self.startSequence(activationType: activationType, bundleId: bundleId)
           } else {
             debugLog("[InputMethod] Sequence already active, doing nothing.")
           }
@@ -3002,10 +3011,11 @@ extension AppDelegate {
         debugLog("[InputMethod] Window not visible, showing and starting sequence")
 
         // Show the window (this sets up userState.activeRoot)
-        self.controller.show(type: activationType) {
+        // Pass bundleId to handle __FALLBACK__ correctly
+        self.controller.show(type: activationType, bundleId: bundleId) {
           // After window is shown, initialize sequence state
           // This matches what handleActivation() does for CGEventTap mode
-          self.startSequence(activationType: activationType)
+          self.startSequence(activationType: activationType, bundleId: bundleId)
         }
       }
     }

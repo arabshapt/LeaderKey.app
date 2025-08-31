@@ -78,7 +78,7 @@ class Controller {
     case fallbackOnly
   }
 
-  func show(type: ActivationType = .appSpecificWithFallback, completion: (() -> Void)? = nil) {
+  func show(type: ActivationType = .appSpecificWithFallback, bundleId: String? = nil, completion: (() -> Void)? = nil) {
     // IMPORTANT: Detect overlay state BEFORE sending activation events
     // This prevents overlay apps from hiding their overlays before we can detect them
     let configToLoad: Group
@@ -89,29 +89,37 @@ class Controller {
       configToLoad = userConfig.root  // Use the already loaded default config
       configKeyForSettings = globalDefaultDisplayName
     case .appSpecificWithFallback:
-      let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-      let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
-      configToLoad = userConfig.getConfig(for: configKey)  // Use the enhanced getter
+      // Check if we have a specific bundleId override (like "__FALLBACK__")
+      if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
+        // For __FALLBACK__, use the fallback config with all items marked as fallback
+        configToLoad = userConfig.getMarkedFallbackConfig()  // This marks all items with isFromFallback
+        configKeyForSettings = defaultAppConfigDisplayName  // Show as "Fallback App Config"
+      } else {
+        // Normal app-specific detection
+        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
+        let configKey = isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
+        configToLoad = userConfig.getConfig(for: configKey)  // Use the enhanced getter
 
-      // Determine the config key to use in settings
-      if let bundleId = bundleId {
-        // Look for the display name that matches this bundle ID in discovered configs
-        var foundConfigKey: String? = nil
-        for (displayKey, _) in userConfig.discoveredConfigFiles {
-          if displayKey != globalDefaultDisplayName && displayKey != defaultAppConfigDisplayName {
-            // Check if this key is for the current bundle ID
-            if let extractedId = userConfig.extractBundleId(from: displayKey),
-              extractedId == bundleId
-            {
-              foundConfigKey = displayKey
-              break
+        // Determine the config key to use in settings
+        if let bundleId = detectedBundleId {
+          // Look for the display name that matches this bundle ID in discovered configs
+          var foundConfigKey: String? = nil
+          for (displayKey, _) in userConfig.discoveredConfigFiles {
+            if displayKey != globalDefaultDisplayName && displayKey != defaultAppConfigDisplayName {
+              // Check if this key is for the current bundle ID
+              if let extractedId = userConfig.extractBundleId(from: displayKey),
+                extractedId == bundleId
+              {
+                foundConfigKey = displayKey
+                break
+              }
             }
           }
+          configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
+        } else {
+          // No bundle ID, use the default
+          configKeyForSettings = globalDefaultDisplayName
         }
-        configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
-      } else {
-        // No bundle ID, use the default
-        configKeyForSettings = globalDefaultDisplayName
       }
     case .fallbackOnly:
       configToLoad = userConfig.getFallbackConfig()  // Load only the fallback config
