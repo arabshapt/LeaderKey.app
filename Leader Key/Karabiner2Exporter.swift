@@ -130,7 +130,7 @@ final class Karabiner2Exporter {
     allActivations.append(globalActivation)
     desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
     
-    // 7. Generate fallback mode section LAST (most generic)
+    // 7. Generate fallback mode section (explicit activation for testing)
     // Load the fallback config using UserConfig's method
     let fallbackRoot = globalConfig.getFallbackConfig()
     
@@ -156,9 +156,9 @@ final class Karabiner2Exporter {
     
     // 8. Create activation section at the beginning with escape and settings rules
     // Add single escape rule that works when any Leader Key mode is active
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -250,10 +250,11 @@ final class Karabiner2Exporter {
     }
     
     // 5. Generate fallback-only activation manipulator (Cmd+Option+K)
+    // Using app-specific variables but with __FALLBACK__ bundleId
     let fallbackManipulator = generateUnifiedActivationManipulator(
       appAlias: nil,
       bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",  // Cmd+Option+K for fallback-only
+      activationKey: "{:key :k :modi [:command :option]}",  // Cmd+Option+K for fallback
       initialStateId: fallbackInitialStateId
     )
     
@@ -657,10 +658,12 @@ final class Karabiner2Exporter {
     
     // 2. Mode-level condition group
     let modeCondition: String
-    if bundleId == "__FALLBACK__" {
-      modeCondition = "[:condi :leaderkey_fallback]"
-    } else if let alias = appAlias {
-      modeCondition = "[:condi :\(alias) :leaderkey_active :!leaderkey_global :!leaderkey_fallback]"
+    if let alias = appAlias {
+      // App-specific mode
+      modeCondition = "[:condi :\(alias) :leaderkey_appspecific :!leaderkey_global]"
+    } else if bundleId == "__FALLBACK__" {
+      // Fallback is now treated as app-specific
+      modeCondition = "[:condi :leaderkey_appspecific :!leaderkey_global]"
     } else {
       modeCondition = "[:condi :leaderkey_global]"
     }
@@ -699,10 +702,12 @@ final class Karabiner2Exporter {
       if !stateRules.isEmpty {
         // Add state-specific condition
         let stateCondition: String
-        if bundleId == "__FALLBACK__" {
-          stateCondition = "[:condi :leaderkey_fallback [\"leader_state\" \(stateId)]]"
-        } else if let alias = appAlias {
-          stateCondition = "[:condi :\(alias) :leaderkey_active :!leaderkey_global :!leaderkey_fallback [\"leader_state\" \(stateId)]]"
+        if let alias = appAlias {
+          // App-specific state
+          stateCondition = "[:condi :\(alias) :leaderkey_appspecific :!leaderkey_global [\"leader_state\" \(stateId)]]"
+        } else if bundleId == "__FALLBACK__" {
+          // Fallback state (treated as app-specific)
+          stateCondition = "[:condi :leaderkey_appspecific :!leaderkey_global [\"leader_state\" \(stateId)]]"
         } else {
           stateCondition = "[:condi :leaderkey_global [\"leader_state\" \(stateId)]]"
         }
@@ -1017,15 +1022,12 @@ final class Karabiner2Exporter {
     
     // Determine which mode variables to set
     let modeVars: String
-    if bundleId == "__FALLBACK__" {
-      // Fallback mode
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_fallback\" 1] [\"leaderkey_global\" 0]"
-    } else if appAlias != nil {
-      // App-specific mode
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_fallback\" 0] [\"leaderkey_global\" 0]"
+    if appAlias != nil || bundleId == "__FALLBACK__" {
+      // App-specific mode (including fallback)
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1] [\"leaderkey_global\" 0]"
     } else {
       // Global mode
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_fallback\" 0]"
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_appspecific\" 0]"
     }
     
     if let alias = appAlias {
@@ -1043,7 +1045,7 @@ final class Karabiner2Exporter {
       ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
     
     // Clear all mode variables on escape
-    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" \(inactiveStateId)]"
+    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
     
     if let alias = appAlias {
       // App-specific escape with combined conditions
@@ -1081,7 +1083,7 @@ final class Karabiner2Exporter {
       : "echo 'stateid \(toState)' | nc -U /tmp/leaderkey.sock"
     
     // Clear all mode variables when executing terminal action
-    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_fallback\" 0] [\"leader_state\" \(inactiveStateId)]"
+    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
     
     if let alias = appAlias {
       // App-specific terminal action with combined conditions
