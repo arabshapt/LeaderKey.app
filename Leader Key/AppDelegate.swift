@@ -398,9 +398,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         #endif
       case .didReload:
         self.isReloading = false
+        self.refreshStateMappingsIfNeeded()
         #if DEBUG
           debugLog("[AppDelegate] Config reload completed - resuming event processing")
         #endif
+      case .didSaveConfig:
+        self.refreshStateMappingsIfNeeded()
+        debugLog("[AppDelegate] Config saved - state mappings refreshed")
       default:
         break
       }
@@ -974,9 +978,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
 
       // Update window transparency immediately if we're in a sequence
       if currentSequenceGroup != nil {
-        let isStickyModeActive = isInStickyMode(NSEvent.modifierFlags)
         DispatchQueue.main.async {
-          self.controller.window.alphaValue = isStickyModeActive ? 0.2 : 1.0
+          self.controller.window.alphaValue = Defaults[.stickyModeOpacity]
         }
       }
     }
@@ -1397,6 +1400,12 @@ extension AppDelegate {
     get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
     set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
   }
+  
+  // Track if we're in Karabiner 2.0 sticky mode
+  private var isKarabinerStickyMode: Bool {
+    get { getAssociatedObject(self, &AssociatedKeys.isKarabinerStickyMode) ?? false }
+    set { setAssociatedObject(self, &AssociatedKeys.isKarabinerStickyMode, newValue) }
+  }
   private var cpuMonitorTimer: Timer? {
     get { getAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer) }
     set { setAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer, newValue) }
@@ -1467,6 +1476,7 @@ extension AppDelegate {
     static var isHighCpuMode = "isHighCpuMode"
     static var lastNavigationTime = "lastNavigationTime"
     static var keyStringCache = "keyStringCache"
+    static var isKarabinerStickyMode = "isKarabinerStickyMode"
     static var cachedActivationKeyCodes = "cachedActivationKeyCodes"
     static var cachedActivationShortcuts = "cachedActivationShortcuts"
     static var cachedActivationModifiers = "cachedActivationModifiers"
@@ -2922,6 +2932,9 @@ extension AppDelegate {
       if let bundleId = bundleId {
         debugLog("[InputMethod] Activation received with bundleId: \(bundleId)")
       }
+      
+      // Reset Karabiner sticky mode when activating
+      self.isKarabinerStickyMode = false
 
       // Determine activation type based on bundleId
       let activationType: Controller.ActivationType
@@ -3108,6 +3121,12 @@ extension AppDelegate {
       guard let self = self else { return }
 
       debugLog("[InputMethod] Deactivation received")
+      
+      // Reset Karabiner sticky mode flag and opacity
+      if self.isKarabinerStickyMode {
+        self.isKarabinerStickyMode = false
+        self.controller.window.alphaValue = Defaults[.normalModeOpacity]
+      }
 
       if self.controller.userState.isActive {
         self.controller.hide()
@@ -3146,15 +3165,15 @@ extension AppDelegate {
     }
   }
   
-  func inputMethodDidReceiveStateId(_ stateId: Int32) {
+  func inputMethodDidReceiveStateId(_ stateId: Int32, sticky: Bool = false) {
     // Handle state ID from Karabiner 2.0
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       
-      debugLog("[InputMethod] State ID received: \(stateId)")
+      debugLog("[InputMethod] State ID received: \(stateId), sticky: \(sticky)")
       
       // Look up the action by state ID and execute it
-      self.executeActionByStateId(stateId)
+      self.executeActionByStateId(stateId, sticky: sticky)
     }
   }
 
@@ -3197,7 +3216,7 @@ extension AppDelegate {
         if mapping.actionType == "action" {
           if let action = findActionForMapping(mapping) {
             actionCache[stateId] = action
-            debugLog("[AppDelegate] Cached action for state ID \(stateId): \(action.displayName)")
+            // debugLog("[AppDelegate] Cached action for state ID \(stateId): \(action.displayName)")
           }
         }
       }
@@ -3206,6 +3225,18 @@ extension AppDelegate {
     } catch {
       debugLog("[AppDelegate] Failed to load state mappings: \(error)")
     }
+  }
+  
+  private func refreshStateMappingsIfNeeded() {
+    // Only refresh if we're using Karabiner2 input method
+    guard Defaults[.inputMethodPreference] == .karabiner2,
+          let karabiner2Method = currentInputMethod as? Karabiner2InputMethod else {
+      return
+    }
+    
+    debugLog("[AppDelegate] Refreshing state mappings after config change")
+    karabiner2Method.exportCurrentConfiguration()
+    loadStateMappings()
   }
   
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
@@ -3262,10 +3293,9 @@ extension AppDelegate {
     return nil
   }
   
-  private func executeActionByStateId(_ stateId: Int32) {
-    // Reload mappings if they're stale or not loaded
-    if stateMappingsLastLoaded == nil ||
-       stateMappingsLastLoaded!.timeIntervalSinceNow < -60 {
+  private func executeActionByStateId(_ stateId: Int32, sticky: Bool = false) {
+    // Load mappings if they haven't been loaded yet
+    if stateMappingsLastLoaded == nil {
       loadStateMappings()
     }
     
@@ -3311,10 +3341,22 @@ extension AppDelegate {
       
       // Use cached action which has all properties including macro steps
       if let cachedAction = actionCache[stateId] {
-        controller.hide {
-          self.controller.runAction(cachedAction)
+        if sticky {
+          // In sticky mode, execute action without hiding the popup
+          debugLog("[AppDelegate] Executing action in sticky mode - keeping popup open")
+          // Set sticky mode flag and opacity
+          isKarabinerStickyMode = true
+          DispatchQueue.main.async {
+            self.controller.window.alphaValue = Defaults[.stickyModeOpacity]
+          }
+          controller.runAction(cachedAction)
+        } else {
+          // Normal mode - hide popup after executing action
+          controller.hide {
+            self.controller.runAction(cachedAction)
+          }
         }
-        debugLog("[AppDelegate] Executed cached action for state ID \(stateId): \(cachedAction.value) with \(cachedAction.macroSteps?.count ?? 0) macro steps")
+        debugLog("[AppDelegate] Executed cached action for state ID \(stateId): \(cachedAction.value) with \(cachedAction.macroSteps?.count ?? 0) macro steps, sticky: \(sticky)")
       } else {
         debugLog("[AppDelegate] No cached action found for state ID \(stateId). This may happen if the config changed since mappings were exported.")
       }

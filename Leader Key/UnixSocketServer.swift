@@ -199,7 +199,9 @@ final class UnixSocketServer {
         return
       }
       if parts.count > 1, let stateId = Int32(parts[1]) {
-        delegate?.unixSocketServerDidReceiveStateId(stateId)
+        // Check for optional sticky flag
+        let sticky = parts.count > 2 && parts[2].lowercased() == "sticky"
+        delegate?.unixSocketServerDidReceiveStateId(stateId, sticky: sticky)
         sendResponse("OK", to: socket)
       } else {
         sendResponse("ERROR: Invalid state ID", to: socket)
@@ -341,6 +343,6 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveDeactivation()
   func unixSocketServerDidReceiveSettings()
   func unixSocketServerDidReceiveSequence(_ sequence: String)
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32)
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
   func unixSocketServerRequestState() -> [String: Any]
 }

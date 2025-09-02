@@ -8,6 +8,7 @@ final class Karabiner2Exporter {
     let stateId: Int32
     let item: ActionOrGroup
     let isTerminal: Bool
+    let parentGroupHasStickyMode: Bool  // Track if parent group has sticky mode enabled
   }
   
   struct AppMetadata: Codable {
@@ -155,10 +156,10 @@ final class Karabiner2Exporter {
     desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
     
     // 8. Create activation section at the beginning with escape and settings rules
-    // Add single escape rule that works when any Leader Key mode is active
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode)
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -403,10 +404,12 @@ final class Karabiner2Exporter {
   private static func buildStateTree(from group: Group, appAlias: String? = nil, bundleId: String? = nil, initialStateId: Int32 = globalInitialStateId) -> ([StateNode], [StateMapping]) {
     var nodes: [StateNode] = []
     var stateMappings: [StateMapping] = []
-    var queue: [(item: ActionOrGroup, path: [String], originalPath: [String], parentStateId: Int32)] = []
+    var queue: [(item: ActionOrGroup, path: [String], originalPath: [String], parentStateId: Int32, parentGroupHasStickyMode: Bool)] = []
 
+    // The root group's sticky mode applies to its direct children
+    let rootHasStickyMode = group.stickyMode ?? false
     for item in group.actions {
-      queue.append((item: item, path: [], originalPath: [], parentStateId: initialStateId))
+      queue.append((item: item, path: [], originalPath: [], parentStateId: initialStateId, parentGroupHasStickyMode: rootHasStickyMode))
     }
 
     while !queue.isEmpty {
@@ -431,7 +434,8 @@ final class Karabiner2Exporter {
             originalPath: currentOriginalPath,
             stateId: terminalStateId,
             item: .action(action),
-            isTerminal: true
+            isTerminal: true,
+            parentGroupHasStickyMode: current.parentGroupHasStickyMode
           ))
         
         // Create state mapping for this action
@@ -453,7 +457,8 @@ final class Karabiner2Exporter {
             originalPath: currentOriginalPath,
             stateId: stateId,
             item: .group(subgroup),
-            isTerminal: false
+            isTerminal: false,
+            parentGroupHasStickyMode: current.parentGroupHasStickyMode
           ))
         
         // Create state mapping for this group to enable UI navigation
@@ -469,8 +474,10 @@ final class Karabiner2Exporter {
         )
         stateMappings.append(groupMapping)
 
+        // Check if this subgroup has sticky mode enabled
+        let subgroupHasStickyMode = subgroup.stickyMode ?? false
         for subItem in subgroup.actions {
-          queue.append((item: subItem, path: currentPath, originalPath: currentOriginalPath, parentStateId: stateId))
+          queue.append((item: subItem, path: currentPath, originalPath: currentOriginalPath, parentStateId: stateId, parentGroupHasStickyMode: subgroupHasStickyMode))
         }
       }
     }
@@ -530,7 +537,7 @@ final class Karabiner2Exporter {
     var allStateIds = Set<Int32>([initialStateId])
 
     var stateTransitions: [Int32: [String: Int32]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     // Track processed keys to avoid duplicates
     var processedKeys: Set<String> = []
 
@@ -560,7 +567,7 @@ final class Karabiner2Exporter {
         // Convert each key in path to Karabiner notation for CLI commands
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -580,7 +587,7 @@ final class Karabiner2Exporter {
     for (fromState, actions) in terminalActions {
       for (key, actionData) in actions {
         manipulators.append(
-          generateTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, bundleId: bundleId))
+          generateTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, bundleId: bundleId))
       }
     }
     
@@ -619,7 +626,7 @@ final class Karabiner2Exporter {
     
     // Collect and organize rules by state
     var stateTransitions: [Int32: [String: Int32]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     var allStateIds = Set<Int32>([initialStateId])
     var processedKeys: Set<String> = []
     
@@ -646,7 +653,7 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -674,10 +681,12 @@ final class Karabiner2Exporter {
     // 3. Group rules by state with nested conditions
     for stateId in allStateIds.sorted() {
       var stateRules: [String] = []
+      var definedKeys = Set<String>()
       
       // Add transitions from this state
       if let transitions = stateTransitions[stateId] {
         for (key, toState) in transitions.sorted(by: { $0.key < $1.key }) {
+          definedKeys.insert(key.lowercased())
           stateRules.append(
             generateUnifiedStateTransition(key: key, fromState: stateId, toState: toState, appAlias: appAlias)
           )
@@ -687,12 +696,14 @@ final class Karabiner2Exporter {
       // Add terminal actions from this state
       if let actions = terminalActions[stateId] {
         for (key, actionData) in actions.sorted(by: { $0.key < $1.key }) {
+          definedKeys.insert(key.lowercased())
           stateRules.append(
             generateUnifiedTerminalAction(
               key: key,
               fromState: stateId,
               toState: actionData.terminalStateId,
               actionPath: actionData.path,
+              hasStickyMode: actionData.hasStickyMode,
               appAlias: appAlias
             )
           )
@@ -700,6 +711,14 @@ final class Karabiner2Exporter {
       }
       
       if !stateRules.isEmpty {
+        // Add catch-all rules to consume undefined keys (must be last)
+        let catchAllRules = generateCatchAllRules(
+          fromState: stateId,
+          appAlias: appAlias,
+          definedKeys: definedKeys
+        )
+        stateRules.append(contentsOf: catchAllRules)
+        
         // Add state-specific condition
         let stateCondition: String
         if let alias = appAlias {
@@ -741,7 +760,7 @@ final class Karabiner2Exporter {
     var allStateIds = Set<Int32>([initialStateId])
     
     var stateTransitions: [Int32: [String: Int32]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     var processedKeys: Set<String> = []
     
     for node in nodes {
@@ -767,7 +786,7 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -790,7 +809,7 @@ final class Karabiner2Exporter {
     for (fromState, actions) in terminalActions {
       for (key, actionData) in actions {
         manipulators.append(
-          generateUnifiedTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, appAlias: appAlias)
+          generateUnifiedTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, appAlias: appAlias)
         )
       }
     }
@@ -830,15 +849,16 @@ final class Karabiner2Exporter {
       FileManager.default.fileExists(atPath: cliPath)
       ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
 
+    // When escape is pressed, always reset sticky mode along with other states
     if let bundleId = bundleId {
       return """
            [:escape 
-            [[\"leader_state\" \(inactiveStateId)] [:shell "\(deactivateCmd)"]] 
+            [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] [:shell "\(deactivateCmd)"]] 
             {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(stateId)]]}]
         """
     } else {
       return """
-           [:escape [[\"leader_state\" \(inactiveStateId)] [:shell "\(deactivateCmd)"]] [\"leader_state\" \(stateId)]]
+           [:escape [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] [:shell "\(deactivateCmd)"]] [\"leader_state\" \(stateId)]]
         """
     }
   }
@@ -860,26 +880,39 @@ final class Karabiner2Exporter {
     }
   }
 
-  private static func generateTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, bundleId: String? = nil)
+  private static func generateTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, bundleId: String? = nil)
     -> String
   {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
-    // Use stateid command with the terminal state ID
+    
+    // Use stateid command with optional sticky flag
+    let commandSuffix = hasStickyMode ? " sticky" : ""
     let sequenceCmd =
       FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) stateid \(toState)"
-      : "echo 'stateid \(toState)' | nc -U /tmp/leaderkey.sock"
+      ? "\(cliPath) stateid \(toState)\(commandSuffix)"
+      : "echo 'stateid \(toState)\(commandSuffix)' | nc -U /tmp/leaderkey.sock"
 
+    // If parent group has sticky mode, keep leader_state at fromState and set sticky flag
+    // Otherwise, reset everything
+    let stateVars: String
+    if hasStickyMode {
+      // Keep leader_state at current group (fromState), set sticky flag
+      stateVars = "[\"leaderkey_sticky\" 1]"
+    } else {
+      // Normal reset - clear everything
+      stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+    }
+    
     if let bundleId = bundleId {
       return """
            [\(karabinerKey) 
-            [[:shell "\(sequenceCmd)"] [\"leader_state\" \(inactiveStateId)]] 
+            [[:shell "\(sequenceCmd)"] \(stateVars)] 
             {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
         """
     } else {
       return """
-           [\(karabinerKey) [[:shell "\(sequenceCmd)"] [\"leader_state\" \(inactiveStateId)]] [\"leader_state\" \(fromState)]]
+           [\(karabinerKey) [[:shell "\(sequenceCmd)"] \(stateVars)] [\"leader_state\" \(fromState)]]
         """
     }
   }
@@ -1044,8 +1077,8 @@ final class Karabiner2Exporter {
     let deactivateCmd = FileManager.default.fileExists(atPath: cliPath)
       ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
     
-    // Clear all mode variables on escape
-    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+    // Clear all mode variables on escape, including sticky mode
+    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" \(inactiveStateId)]"
     
     if let alias = appAlias {
       // App-specific escape with combined conditions
@@ -1074,16 +1107,26 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, appAlias: String?) -> String {
+  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?) -> String {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
-    // Use stateid command with the terminal state ID
-    let sequenceCmd = FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) stateid \(toState)"
-      : "echo 'stateid \(toState)' | nc -U /tmp/leaderkey.sock"
     
-    // Clear all mode variables when executing terminal action
-    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+    // Use stateid command with optional sticky flag
+    let commandSuffix = hasStickyMode ? " sticky" : ""
+    let sequenceCmd = FileManager.default.fileExists(atPath: cliPath)
+      ? "\(cliPath) stateid \(toState)\(commandSuffix)"
+      : "echo 'stateid \(toState)\(commandSuffix)' | nc -U /tmp/leaderkey.sock"
+    
+    // If parent group has sticky mode, keep leader_state at fromState and set sticky flag
+    // Otherwise, reset everything
+    let clearVars: String
+    if hasStickyMode {
+      // Keep leader_state at current group (fromState), set sticky flag
+      clearVars = "[\"leaderkey_sticky\" 1]"
+    } else {
+      // Normal reset - clear everything
+      clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+    }
     
     if let alias = appAlias {
       // App-specific terminal action with combined conditions
@@ -1092,6 +1135,65 @@ final class Karabiner2Exporter {
       // Global terminal action with just state condition
       return "   [\(karabinerKey) [[:shell \"\(sequenceCmd)\"] \(clearVars)] [\"leader_state\" \(fromState)]]"
     }
+  }
+  
+  private static func generateCatchAllRules(fromState: Int32, appAlias: String?, definedKeys: Set<String>) -> [String] {
+    // Since Goku doesn't support a true "any key" catch-all, we need to explicitly list undefined keys
+    var rules: [String] = []
+    
+    // Define all possible single keys that could be pressed
+    let allLetters = "abcdefghijklmnopqrstuvwxyz"
+    let allNumbers = "0123456789"
+    let specialKeys = [
+      "spacebar", "return_or_enter", "tab", "delete_or_backspace",
+      "period", "comma", "semicolon", "slash", "hyphen", "equal_sign",
+      "open_bracket", "close_bracket", "quote", "grave_accent_and_tilde",
+      "backslash", "escape", "up_arrow", "down_arrow", "left_arrow", "right_arrow"
+    ]
+    
+    // Generate rules for undefined letters
+    for char in allLetters {
+      let key = String(char)
+      if !definedKeys.contains(key) {
+        if let alias = appAlias {
+          // Use ## prefix to match key with any modifier combination
+          // This ensures all variations are consumed when Leader Key is active
+          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+        } else {
+          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
+        }
+      }
+    }
+    
+    // Generate rules for undefined numbers
+    for char in allNumbers {
+      let key = String(char)
+      if !definedKeys.contains(key) {
+        if let alias = appAlias {
+          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+        } else {
+          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
+        }
+      }
+    }
+    
+    // Generate rules for undefined special keys
+    for key in specialKeys {
+      // Convert to simple form for checking (e.g., "spacebar" -> "space")
+      let simpleKey = key.replacingOccurrences(of: "_or_enter", with: "")
+        .replacingOccurrences(of: "bar", with: "")
+        .replacingOccurrences(of: "_or_backspace", with: "")
+      
+      if !definedKeys.contains(simpleKey) && !definedKeys.contains(key) {
+        if let alias = appAlias {
+          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+        } else {
+          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
+        }
+      }
+    }
+    
+    return rules
   }
   
   private static func formatGokuEDN(manipulators: [String], bundleId: String? = nil) -> String {
@@ -1161,7 +1263,7 @@ final class Karabiner2Exporter {
     
     // Add input sources
     edn += " :input-sources {\n"
-    edn += "   :leaderkey {:input_source_id \"^com\\.apple\\.keylayout\\.US$\"}\n"
+    edn += "   :leaderkey {:input_source_id \"^com.apple.keylayout.US$\"}\n"
     edn += " }\n\n"
     
     // Add main sections

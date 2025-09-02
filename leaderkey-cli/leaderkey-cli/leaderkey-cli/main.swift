@@ -12,7 +12,7 @@ enum Command {
     case settings
     case state
     case sequence(keys: String)
-    case stateid(id: String)
+    case stateid(id: String, sticky: Bool)
     case help
 }
 
@@ -57,7 +57,9 @@ func parseArguments() -> Command {
             print("Error: 'stateid' command requires a state ID parameter")
             exit(1)
         }
-        return .stateid(id: args[2])
+        // Check for optional sticky flag
+        let sticky = args.count > 3 && args[3].lowercased() == "sticky"
+        return .stateid(id: args[2], sticky: sticky)
         
     case "help", "--help", "-h":
         return .help
@@ -136,7 +138,7 @@ func printHelp() {
         settings              Open Leader Key settings
         state                 Get current Leader Key state
         sequence <keys>       Send a sequence of keys
-        stateid <id>          Send a state ID for action execution
+        stateid <id> [sticky] Send a state ID for action execution (sticky keeps popup open)
         help                  Show this help message
     
     Examples:
@@ -176,8 +178,9 @@ case .state:
 case .sequence(let keys):
     success = sendViaSocket("sequence \(keys)")
     
-case .stateid(let id):
-    success = sendViaSocket("stateid \(id)")
+case .stateid(let id, let sticky):
+    let cmd = sticky ? "stateid \(id) sticky" : "stateid \(id)"
+    success = sendViaSocket(cmd)
     
 case .help:
     printHelp()

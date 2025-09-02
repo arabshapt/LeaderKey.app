@@ -9,6 +9,7 @@ extension UserConfig {
   func saveAndFinalize() {
     isActivelyEditing = false
     saveCurrentlyEditingConfig()
+    Events.send(.didSaveConfig)
   }
 
   // Saves the configuration currently being edited in the Settings window

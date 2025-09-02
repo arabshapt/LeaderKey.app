@@ -1,0 +1,53 @@
+{
+  "key": null,
+  "type": "group",
+  "label": "Root",
+  "actions": [
+    {
+      "key": "o",
+      "type": "group",
+      "label": "Sticky Test Group",
+      "stickyMode": true,
+      "actions": [
+        {
+          "key": "a",
+          "type": "text",
+          "label": "Type A",
+          "value": "Action A executed"
+        },
+        {
+          "key": "b",
+          "type": "text",
+          "label": "Type B",
+          "value": "Action B executed"
+        },
+        {
+          "key": "c",
+          "type": "text",
+          "label": "Type C",
+          "value": "Action C executed"
+        }
+      ]
+    },
+    {
+      "key": "n",
+      "type": "group",
+      "label": "Normal Group",
+      "stickyMode": false,
+      "actions": [
+        {
+          "key": "x",
+          "type": "text",
+          "label": "Type X",
+          "value": "Action X executed"
+        },
+        {
+          "key": "y",
+          "type": "text",
+          "label": "Type Y",
+          "value": "Action Y executed"
+        }
+      ]
+    }
+  ]
+}

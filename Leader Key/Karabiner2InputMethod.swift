@@ -69,7 +69,7 @@ final class Karabiner2InputMethod: InputMethod {
       """
   }
 
-  private func exportCurrentConfiguration() {
+  func exportCurrentConfiguration() {
     guard let appDelegate = NSApplication.shared.delegate as? AppDelegate,
       let userConfig = appDelegate.controller?.userConfig
     else {
@@ -269,10 +269,10 @@ extension Karabiner2InputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveSequence(sequence)
   }
   
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32) {
-    debugLog("[Karabiner2InputMethod] Received state ID: \(stateId)")
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
+    debugLog("[Karabiner2InputMethod] Received state ID: \(stateId), sticky: \(sticky)")
     currentState = 0
-    delegate?.inputMethodDidReceiveStateId(stateId)
+    delegate?.inputMethodDidReceiveStateId(stateId, sticky: sticky)
   }
 
   func unixSocketServerRequestState() -> [String: Any] {

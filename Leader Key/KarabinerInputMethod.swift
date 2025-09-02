@@ -131,9 +131,10 @@ extension KarabinerInputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveSequence(sequence)
   }
   
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32) {
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
     debugLog("[KarabinerInputMethod] Received state ID: \(stateId)")
-    delegate?.inputMethodDidReceiveStateId(stateId)
+    // Karabiner 1.0 doesn't support sticky mode, always pass false
+    delegate?.inputMethodDidReceiveStateId(stateId, sticky: false)
   }
 
   func unixSocketServerRequestState() -> [String: Any] {
