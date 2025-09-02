@@ -138,6 +138,101 @@ struct AdvancedPane: View {
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
+                
+                // EDN Injection Info Section
+                VStack(alignment: .leading, spacing: 8) {
+                  HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                      .foregroundColor(.blue)
+                      .font(.system(size: 14))
+                    
+                    VStack(alignment: .leading, spacing: 6) {
+                      Text("Auto-injection into karabiner.edn")
+                        .font(.system(size: 12, weight: .semibold))
+                      
+                      Text("Leader Key can automatically inject its configuration into your main karabiner.edn file using special marker comments.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                      
+                      Text("Add these markers to your karabiner.edn:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                      
+                      VStack(alignment: .leading, spacing: 4) {
+                        Text("In :applications section:")
+                          .font(.system(size: 11, weight: .medium))
+                          .foregroundColor(.secondary)
+                        
+                        Text(";;; LEADERKEY_APPLICATIONS_START\n;;; LEADERKEY_APPLICATIONS_END")
+                          .font(.system(size: 10, design: .monospaced))
+                          .padding(6)
+                          .background(Color.gray.opacity(0.1))
+                          .cornerRadius(4)
+                        
+                        Text("In :main section:")
+                          .font(.system(size: 11, weight: .medium))
+                          .foregroundColor(.secondary)
+                          .padding(.top, 4)
+                        
+                        Text(";;; LEADERKEY_MAIN_START\n;;; LEADERKEY_MAIN_END")
+                          .font(.system(size: 10, design: .monospaced))
+                          .padding(6)
+                          .background(Color.gray.opacity(0.1))
+                          .cornerRadius(4)
+                      }
+                      
+                      Text("• Content between markers is replaced on each export")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                      
+                      Text("• 'Leader Key - Activation Shortcuts' section is preserved if it exists")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                      
+                      Text("• Your custom rules outside markers remain untouched")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                      
+                      HStack(spacing: 8) {
+                        Button(action: {
+                          let markers = """
+                            ;;; LEADERKEY_APPLICATIONS_START
+                            ;; Leader Key applications will be injected here
+                            ;;; LEADERKEY_APPLICATIONS_END
+                            """
+                          NSPasteboard.general.clearContents()
+                          NSPasteboard.general.setString(markers, forType: .string)
+                        }) {
+                          Label("Copy App Markers", systemImage: "doc.on.clipboard")
+                            .font(.system(size: 11))
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button(action: {
+                          let markers = """
+                            ;;; LEADERKEY_MAIN_START
+                            ;; Leader Key main rules will be injected here
+                            ;;; LEADERKEY_MAIN_END
+                            """
+                          NSPasteboard.general.clearContents()
+                          NSPasteboard.general.setString(markers, forType: .string)
+                        }) {
+                          Label("Copy Main Markers", systemImage: "doc.on.clipboard")
+                            .font(.system(size: 11))
+                        }
+                        .buttonStyle(.bordered)
+                      }
+                      .padding(.top, 6)
+                    }
+                  }
+                  .padding(12)
+                  .background(Color.blue.opacity(0.05))
+                  .cornerRadius(8)
+                }
+                .padding(.top, 8)
               }
             }
           }

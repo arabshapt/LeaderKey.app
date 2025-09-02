@@ -161,6 +161,57 @@ final class Karabiner2InputMethod: InputMethod {
       try mappingData.write(to: URL(fileURLWithPath: mappingFilePath))
       
       debugLog("[Karabiner2InputMethod] Exported \(stateMappings.count) state mappings to \(mappingFilePath)")
+      
+      // Inject into main karabiner.edn if markers exist
+      // Check if activation shortcuts already exist in target file
+      let configPath = NSHomeDirectory() + "/.config/karabiner.edn"
+      var hasExistingActivationShortcuts = false
+      
+      if FileManager.default.fileExists(atPath: configPath) {
+        if let existingContent = try? String(contentsOfFile: configPath, encoding: .utf8) {
+          hasExistingActivationShortcuts = existingContent.contains("\"Leader Key - Activation Shortcuts\"")
+        }
+      }
+      
+      // Extract sections, excluding activation shortcuts if they already exist
+      let (applications, mainRules, activationShortcuts) = Karabiner2Exporter.extractSectionsForInjection(
+        from: ednContent,
+        includeActivationShortcuts: true  // Always extract, but we'll decide whether to inject
+      )
+      
+      // Prepare rules for injection
+      var rulesToInject = mainRules
+      
+      // Only add activation shortcuts if they don't already exist
+      if !hasExistingActivationShortcuts, let activationShortcuts = activationShortcuts {
+        debugLog("[Karabiner2InputMethod] Including activation shortcuts (not found in existing file)")
+        rulesToInject.insert(activationShortcuts, at: 0)  // Add at beginning
+      } else if hasExistingActivationShortcuts {
+        debugLog("[Karabiner2InputMethod] Preserving existing activation shortcuts")
+      }
+      
+      if !applications.isEmpty || !rulesToInject.isEmpty {
+        // Try injection with auto-add markers on first attempt
+        let injectionResult = Karabiner2Exporter.injectIntoMainKarabinerEDN(
+          applications: applications,
+          mainRules: rulesToInject,
+          autoAddMarkers: true,  // Auto-add markers if missing
+          preserveActivationShortcuts: hasExistingActivationShortcuts  // Preserve if they exist
+        )
+        
+        switch injectionResult {
+        case .success:
+          debugLog("[Karabiner2InputMethod] Successfully injected Leader Key config into main karabiner.edn")
+        case .noMarkersFound:
+          debugLog("[Karabiner2InputMethod] No injection markers found in karabiner.edn - add markers to enable injection")
+        case .partialMarkersFound(let missing):
+          debugLog("[Karabiner2InputMethod] Incomplete markers in karabiner.edn, missing: \(missing.joined(separator: ", "))")
+        case .fileNotFound:
+          debugLog("[Karabiner2InputMethod] karabiner.edn not found - injection skipped")
+        case .error(let message):
+          debugLog("[Karabiner2InputMethod] Injection failed: \(message)")
+        }
+      }
 
       let task = Process()
       task.launchPath = "/bin/sh"
