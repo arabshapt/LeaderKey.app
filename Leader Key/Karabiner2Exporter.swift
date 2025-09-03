@@ -1204,6 +1204,10 @@ final class Karabiner2Exporter {
     let appComment = bundleId != nil ? " for \(bundleId!)" : ""
     let description = "Leader Key 2.0 State Machine\(appComment)"
     
+    // Apply alternative mappings to all manipulators
+    let allManipulators = [activation] + statesAndActions
+    let manipulatorsWithAlternatives = applyAlternativeKeyMappings(to: allManipulators)
+    
     return """
       ;; Goku Configuration for Leader Key 2.0
       ;; Generated state machine with numeric state tracking
@@ -1212,11 +1216,7 @@ final class Karabiner2Exporter {
       {
        :main [{:des "\(description)"
                :rules [
-                 ;; ========== ACTIVATION ==========
-      \(activation)
-                 
-                 ;; ========== STATE TRANSITIONS & ESCAPE HANDLERS ==========
-      \(statesAndActions.joined(separator: "\n"))
+      \(manipulatorsWithAlternatives.joined(separator: "\n"))
                ]}]
       }
       """
@@ -1239,8 +1239,9 @@ final class Karabiner2Exporter {
           rules.append("   \(condition)")
         }
         
-        // Add all rules in this group
-        rules.append(contentsOf: group.rules)
+        // Add all rules in this group with alternative mappings applied
+        let rulesWithAlternatives = applyAlternativeKeyMappings(to: group.rules)
+        rules.append(contentsOf: rulesWithAlternatives)
       }
       
       if !rules.isEmpty {
@@ -1668,5 +1669,93 @@ final class Karabiner2Exporter {
     }
     
     return modifiedContent
+  }
+  
+  // MARK: - Alternative Mappings
+  
+  // Apply alternative key mappings by duplicating rules with alternative keys and conditions
+  static func applyAlternativeKeyMappings(to rules: [String]) -> [String] {
+    let manager = AlternativeMappingsManager.shared
+    guard !manager.mappings.isEmpty else { return rules }
+    
+    var modifiedRules = rules
+    var insertions: [(index: Int, rule: String)] = []
+    
+    for (index, rule) in rules.enumerated() {
+      // Skip comments and empty lines
+      let trimmed = rule.trimmingCharacters(in: .whitespaces)
+      if trimmed.isEmpty || trimmed.hasPrefix(";;") || trimmed.hasPrefix("#") {
+        continue
+      }
+      
+      // Parse the rule to extract the key
+      for mapping in manager.mappings {
+        let originalKeyPattern = ":\(mapping.originalKey)"
+        
+        // Check if this rule uses the original key
+        if rule.contains(originalKeyPattern) {
+          // Extract the action and conditions from the original rule
+          let alternativeRule = createAlternativeRule(
+            from: rule,
+            originalKey: mapping.originalKey,
+            alternativeKey: mapping.alternativeKey,
+            additionalConditions: mapping.conditions
+          )
+          
+          if let alternativeRule = alternativeRule {
+            insertions.append((index: index + 1, rule: alternativeRule))
+          }
+        }
+      }
+    }
+    
+    // Insert alternative rules after their original rules
+    for (offset, (index, rule)) in insertions.enumerated() {
+      modifiedRules.insert(rule, at: index + offset)
+    }
+    
+    return modifiedRules
+  }
+  
+  // Helper to create an alternative rule from an original rule
+  private static func createAlternativeRule(
+    from originalRule: String,
+    originalKey: String,
+    alternativeKey: String,
+    additionalConditions: [String]
+  ) -> String? {
+    // Replace the key - use simple string replacement as regex has issues with word boundaries
+    var alternativeRule = originalRule.replacingOccurrences(
+      of: ":\(originalKey)",
+      with: ":\(alternativeKey)"
+    )
+    
+    // Add additional conditions
+    if !additionalConditions.isEmpty {
+      let conditionsToAdd = additionalConditions.map { ":\($0)" }.joined(separator: " ")
+      
+      // Find existing conditions and append to them
+      if let lastBracketIndex = alternativeRule.lastIndex(of: "]") {
+        // Check if there's already a condition array at the end
+        let beforeBracket = alternativeRule[..<lastBracketIndex]
+        if let conditionStart = beforeBracket.lastIndex(of: "["),
+           conditionStart < lastBracketIndex {
+          // Check if this is a condition array (contains : or quotes)
+          let conditionContent = String(alternativeRule[conditionStart...lastBracketIndex])
+          if conditionContent.contains("leader_state") || 
+             conditionContent.contains(":") || 
+             conditionContent.contains("leaderkey_") {
+            // Insert additional conditions before the closing bracket
+            alternativeRule.insert(contentsOf: " \(conditionsToAdd)", at: lastBracketIndex)
+          }
+        }
+      }
+    }
+    
+    // Add a comment to indicate this is an alternative mapping
+    let indent = originalRule.prefix(while: { $0 == " " })
+    alternativeRule = "\(indent);; Alternative: \(alternativeKey) for \(originalKey)\n\(alternativeRule)"
+    
+    return alternativeRule
   }
 }

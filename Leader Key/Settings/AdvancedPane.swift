@@ -31,6 +31,7 @@ struct AdvancedPane: View {
 
   @State private var hasAccessibilityPermissions = false
   @State private var isCustomShellValid = false
+  @State private var showingAlternativeMappings = false
 
   var body: some View {
     ScrollView {
@@ -123,6 +124,21 @@ struct AdvancedPane: View {
                       userConfig: config, format: .karabiner2EDN)
                     _ = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
                   }
+                  
+                  Button("Export & Inject") {
+                    let content = KarabinerExporter.exportConfiguration(
+                      userConfig: config, format: .karabiner2EDN)
+                    let savedPath = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
+                    
+                    // Show success message
+                    let alert = NSAlert()
+                    alert.messageText = "Export & Inject Complete"
+                    alert.informativeText = "Configuration exported to:\n\(savedPath?.path ?? "Unknown")\n\nInjection will occur automatically if markers exist in karabiner.edn"
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                  }
+                  .help("Export EDN and inject into karabiner.edn if markers exist")
 
                   Button("Open Goku Config Folder") {
                     let configDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
@@ -132,6 +148,15 @@ struct AdvancedPane: View {
                   Spacer()
                 }
                 .padding(.top, 8)
+                
+                HStack(spacing: 12) {
+                  Button("Configure Alternative Keys") {
+                    showingAlternativeMappings = true
+                  }
+                  .help("Set up alternative key mappings to trigger Leader Key actions without entering Leader Key mode")
+                  
+                  Spacer()
+                }
 
                 Text(
                   "Export your Leader Key configuration as a Karabiner 2.0 state machine. Place the exported EDN file in ~/.config/karabiner.edn.d/ and run 'goku' to compile."
@@ -675,6 +700,9 @@ struct AdvancedPane: View {
     }
     .frame(width: contentWidth + 60)
     .frame(minHeight: 600)
+    .sheet(isPresented: $showingAlternativeMappings) {
+      AlternativeMappingsView()
+    }
   }
 
   private func updatePermissionStatus() {
