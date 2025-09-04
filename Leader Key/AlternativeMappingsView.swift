@@ -5,6 +5,10 @@ struct AlternativeMappingsView: View {
   @State private var showingAddSheet = false
   @State private var editingMapping: AlternativeMapping?
   @State private var searchText = ""
+  @State private var showingSaveAsSheet = false
+  @State private var newSetName = ""
+  @State private var showingDeleteConfirmation = false
+  @State private var setToDelete = ""
   @Environment(\.dismiss) var dismiss
   
   var filteredMappings: [AlternativeMapping] {
@@ -22,17 +26,67 @@ struct AlternativeMappingsView: View {
   var body: some View {
     VStack(spacing: 0) {
       // Header
-      HStack {
-        Text("Alternative Key Mappings")
-          .font(.title2)
-          .fontWeight(.semibold)
-        
-        Spacer()
-        
-        Button("Done") {
-          dismiss()
+      VStack(spacing: 12) {
+        HStack {
+          Text("Alternative Key Mappings")
+            .font(.title2)
+            .fontWeight(.semibold)
+          
+          Spacer()
+          
+          Button("Done") {
+            dismiss()
+          }
+          .keyboardShortcut(.escape, modifiers: [])
         }
-        .keyboardShortcut(.escape, modifiers: [])
+        
+        // Set Management Bar
+        HStack {
+          Text("Mapping Set:")
+            .font(.subheadline)
+          
+          Picker("", selection: $manager.currentSetName) {
+            ForEach(Array(manager.availableSets.keys).sorted(), id: \.self) { key in
+              Text(manager.availableSets[key] ?? key)
+                .tag(key)
+            }
+          }
+          .frame(width: 150)
+          .onChange(of: manager.currentSetName) { newValue in
+            manager.switchToSet(name: newValue)
+          }
+          
+          Divider()
+            .frame(height: 20)
+          
+          Button(action: { showingSaveAsSheet = true }) {
+            Image(systemName: "square.and.arrow.down")
+              .help("Save As New Set")
+          }
+          .disabled(manager.mappings.isEmpty)
+          
+          Button(action: {
+            setToDelete = manager.currentSetName
+            showingDeleteConfirmation = true
+          }) {
+            Image(systemName: "trash")
+              .foregroundColor(.red)
+              .help("Delete Current Set")
+          }
+          .disabled(manager.currentSetName == "default")
+          
+          Spacer()
+          
+          if manager.hasUnsavedChanges {
+            Text("• Unsaved")
+              .font(.caption)
+              .foregroundColor(.orange)
+          }
+          
+          Text("\(manager.mappings.count) mapping\(manager.mappings.count == 1 ? "" : "s")")
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
       }
       .padding()
       
@@ -102,10 +156,6 @@ struct AlternativeMappingsView: View {
         }
         
         Spacer()
-        
-        Text("\(manager.mappings.count) mapping\(manager.mappings.count == 1 ? "" : "s")")
-          .font(.caption)
-          .foregroundColor(.secondary)
       }
       .padding()
     }
@@ -115,6 +165,69 @@ struct AlternativeMappingsView: View {
     }
     .sheet(item: $editingMapping) { mapping in
       AlternativeMappingEditView(mapping: mapping)
+    }
+    .sheet(isPresented: $showingSaveAsSheet) {
+      SaveAsSheet(isPresented: $showingSaveAsSheet, currentName: manager.currentSetName) { newName in
+        if manager.saveAsNewSet(name: newName) {
+          // Success - already switched to new set
+        } else {
+          // Show error - set already exists
+          // In a real app, show an alert
+        }
+      }
+    }
+    .alert("Delete Mapping Set", isPresented: $showingDeleteConfirmation) {
+      Button("Cancel", role: .cancel) { }
+      Button("Delete", role: .destructive) {
+        _ = manager.deleteSet(name: setToDelete)
+      }
+    } message: {
+      Text("Are you sure you want to delete the '\(manager.availableSets[setToDelete] ?? setToDelete)' mapping set? This cannot be undone.")
+    }
+  }
+}
+
+// MARK: - Save As Sheet
+
+struct SaveAsSheet: View {
+  @Binding var isPresented: Bool
+  let currentName: String
+  let onSave: (String) -> Void
+  
+  @State private var newName = ""
+  @FocusState private var isFocused: Bool
+  
+  var body: some View {
+    VStack(spacing: 20) {
+      Text("Save Mapping Set As")
+        .font(.title3)
+        .fontWeight(.semibold)
+      
+      TextField("Enter new set name", text: $newName)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 250)
+        .focused($isFocused)
+      
+      HStack {
+        Button("Cancel") {
+          isPresented = false
+        }
+        .keyboardShortcut(.escape, modifiers: [])
+        
+        Spacer()
+        
+        Button("Save") {
+          onSave(newName)
+          isPresented = false
+        }
+        .keyboardShortcut(.return, modifiers: [])
+        .disabled(newName.isEmpty)
+      }
+    }
+    .padding(30)
+    .frame(width: 350)
+    .onAppear {
+      isFocused = true
     }
   }
 }
@@ -248,13 +361,8 @@ struct AlternativeMappingEditView: View {
       // Form
       Form {
         Section {
-          HStack {
-            TextField("Key to substitute (e.g., hyphen, minus)", text: $originalKey)
-              .frame(width: 250)
-            
-            Spacer()
-          }
-          .help("The key you want to create an alternative for")
+          TextField("Key to substitute (e.g., hyphen, minus)", text: $originalKey)
+            .help("The key you want to create an alternative for")
         } header: {
           Text("Original Key")
         } footer: {
@@ -264,12 +372,8 @@ struct AlternativeMappingEditView: View {
         }
         
         Section {
-          HStack {
-            TextField("Alternative key (e.g., l, f, j)", text: $alternativeKey)
-              .frame(width: 250)
-            Spacer()
-          }
-          .help("The key that will act as the original key when conditions are met")
+          TextField("Alternative key (e.g., l, f, j)", text: $alternativeKey)
+            .help("The key that will act as the original key when conditions are met")
         } header: {
           Text("Alternative Key")
         } footer: {
@@ -353,7 +457,7 @@ struct AlternativeMappingEditView: View {
       }
       .padding()
     }
-    .frame(width: 500, height: 600)
+    .frame(width: 550, height: 600)
   }
   
   private func save() {

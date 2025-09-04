@@ -172,6 +172,26 @@ final class Karabiner2Exporter {
     
     // Insert activation section at the beginning
     var allSections = [activationSection]
+    
+    // Add modifier pass-through section right after activation
+    let modifierPassThroughSection = (
+      name: "Leader Key - Modifier Pass-Through",
+      groups: [ManipulatorGroup(
+        condition: nil,
+        rules: [
+          "   [:##left_shift :left_shift :leaderkey_active]",
+          "   [:##right_shift :right_shift :leaderkey_active]",
+          "   [:##left_command :left_command :leaderkey_active]",
+          "   [:##right_command :right_command :leaderkey_active]",
+          "   [:##left_option :left_option :leaderkey_active]",
+          "   [:##right_option :right_option :leaderkey_active]",
+          "   [:##left_control :left_control :leaderkey_active]",
+          "   [:##right_control :right_control :leaderkey_active]"
+        ]
+      )]
+    )
+    allSections.append(modifierPassThroughSection)
+    
     allSections.append(contentsOf: desSections)
     
     // 8. Format as hierarchical EDN
@@ -1138,59 +1158,16 @@ final class Karabiner2Exporter {
   }
   
   private static func generateCatchAllRules(fromState: Int32, appAlias: String?, definedKeys: Set<String>) -> [String] {
-    // Since Goku doesn't support a true "any key" catch-all, we need to explicitly list undefined keys
+    // Use Goku's {:any :key_code} syntax to match any key with any modifiers
+    // This replaces 50+ individual rules with a single catch-all rule
     var rules: [String] = []
     
-    // Define all possible single keys that could be pressed
-    let allLetters = "abcdefghijklmnopqrstuvwxyz"
-    let allNumbers = "0123456789"
-    let specialKeys = [
-      "spacebar", "return_or_enter", "tab", "delete_or_backspace",
-      "period", "comma", "semicolon", "slash", "hyphen", "equal_sign",
-      "open_bracket", "close_bracket", "quote", "grave_accent_and_tilde",
-      "backslash", "escape", "up_arrow", "down_arrow", "left_arrow", "right_arrow"
-    ]
-    
-    // Generate rules for undefined letters
-    for char in allLetters {
-      let key = String(char)
-      if !definedKeys.contains(key) {
-        if let alias = appAlias {
-          // Use ## prefix to match key with any modifier combination
-          // This ensures all variations are consumed when Leader Key is active
-          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
-        } else {
-          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
-        }
-      }
-    }
-    
-    // Generate rules for undefined numbers
-    for char in allNumbers {
-      let key = String(char)
-      if !definedKeys.contains(key) {
-        if let alias = appAlias {
-          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
-        } else {
-          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
-        }
-      }
-    }
-    
-    // Generate rules for undefined special keys
-    for key in specialKeys {
-      // Convert to simple form for checking (e.g., "spacebar" -> "space")
-      let simpleKey = key.replacingOccurrences(of: "_or_enter", with: "")
-        .replacingOccurrences(of: "bar", with: "")
-        .replacingOccurrences(of: "_or_backspace", with: "")
-      
-      if !definedKeys.contains(simpleKey) && !definedKeys.contains(key) {
-        if let alias = appAlias {
-          rules.append("   [:##\(key) [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
-        } else {
-          rules.append("   [:##\(key) [:vk_none] [\"leader_state\" \(fromState)]]")
-        }
-      }
+    if let alias = appAlias {
+      // App-specific catch-all with combined conditions
+      rules.append("   [{:any :key_code :modi :any} [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+    } else {
+      // Global catch-all with just state condition
+      rules.append("   [{:any :key_code :modi :any} [:vk_none] [\"leader_state\" \(fromState)]]")
     }
     
     return rules
@@ -1673,48 +1650,90 @@ final class Karabiner2Exporter {
   
   // MARK: - Alternative Mappings
   
-  // Apply alternative key mappings by duplicating rules with alternative keys and conditions
+  // Apply alternative key mappings by placing alternative rules with conditions first
+  // but respecting :condi group boundaries
   static func applyAlternativeKeyMappings(to rules: [String]) -> [String] {
     let manager = AlternativeMappingsManager.shared
     guard !manager.mappings.isEmpty else { return rules }
     
-    var modifiedRules = rules
-    var insertions: [(index: Int, rule: String)] = []
+    var result: [String] = []
+    var currentStateRules: [String] = []
+    var currentStateAlternatives: [String] = []
+    var inStateCondition = false
     
-    for (index, rule) in rules.enumerated() {
-      // Skip comments and empty lines
+    for rule in rules {
       let trimmed = rule.trimmingCharacters(in: .whitespaces)
-      if trimmed.isEmpty || trimmed.hasPrefix(";;") || trimmed.hasPrefix("#") {
+      
+      // Check if this is a :condi line with state condition
+      if trimmed.hasPrefix("[:condi") && trimmed.contains("\"leader_state\"") {
+        // This is a state condition line
+        // First, flush any accumulated rules from previous state
+        if !currentStateAlternatives.isEmpty || !currentStateRules.isEmpty {
+          result.append(contentsOf: currentStateAlternatives)
+          result.append(contentsOf: currentStateRules)
+          currentStateAlternatives.removeAll()
+          currentStateRules.removeAll()
+        }
+        
+        // Add the state condition line
+        result.append(rule)
+        inStateCondition = true
         continue
       }
       
-      // Parse the rule to extract the key
-      for mapping in manager.mappings {
-        let originalKeyPattern = ":\(mapping.originalKey)"
-        
-        // Check if this rule uses the original key
-        if rule.contains(originalKeyPattern) {
-          // Extract the action and conditions from the original rule
-          let alternativeRule = createAlternativeRule(
-            from: rule,
-            originalKey: mapping.originalKey,
-            alternativeKey: mapping.alternativeKey,
-            additionalConditions: mapping.conditions
-          )
+      // Check if this is a :condi line without state (mode condition)
+      if trimmed.hasPrefix("[:condi") && !trimmed.contains("\"leader_state\"") {
+        // Mode condition - just pass through
+        result.append(rule)
+        inStateCondition = false
+        continue
+      }
+      
+      // For empty lines and comments, preserve them
+      if trimmed.isEmpty || trimmed.hasPrefix(";;") || trimmed.hasPrefix("#") {
+        if inStateCondition {
+          currentStateRules.append(rule)
+        } else {
+          result.append(rule)
+        }
+        continue
+      }
+      
+      // Process regular rules
+      if inStateCondition {
+        // Check if this rule needs alternatives
+        var foundAlternative = false
+        for mapping in manager.mappings {
+          let originalKeyPattern = ":\(mapping.originalKey)"
           
-          if let alternativeRule = alternativeRule {
-            insertions.append((index: index + 1, rule: alternativeRule))
+          if rule.contains(originalKeyPattern) {
+            if let alternativeRule = createAlternativeRule(
+              from: rule,
+              originalKey: mapping.originalKey,
+              alternativeKey: mapping.alternativeKey,
+              additionalConditions: mapping.conditions
+            ) {
+              currentStateAlternatives.append(alternativeRule)
+              foundAlternative = true
+            }
           }
         }
+        
+        // Always add the original rule
+        currentStateRules.append(rule)
+      } else {
+        // Not in a state condition, just pass through
+        result.append(rule)
       }
     }
     
-    // Insert alternative rules after their original rules
-    for (offset, (index, rule)) in insertions.enumerated() {
-      modifiedRules.insert(rule, at: index + offset)
+    // Flush any remaining accumulated rules
+    if !currentStateAlternatives.isEmpty || !currentStateRules.isEmpty {
+      result.append(contentsOf: currentStateAlternatives)
+      result.append(contentsOf: currentStateRules)
     }
     
-    return modifiedRules
+    return result
   }
   
   // Helper to create an alternative rule from an original rule
