@@ -3177,6 +3177,18 @@ extension AppDelegate {
     }
   }
 
+  func inputMethodDidReceiveShake() {
+    // Handle shake command from catch-all rule
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      
+      debugLog("[InputMethod] Shake command received - undefined key pressed")
+      
+      // Call notFound which handles shake properly for each theme
+      self.controller.window?.notFound()
+    }
+  }
+
   func inputMethodDidRequestState() -> [String: Any] {
     // Return current Leader Key state
     return [

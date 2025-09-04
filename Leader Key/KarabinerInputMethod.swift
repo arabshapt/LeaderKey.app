@@ -137,6 +137,11 @@ extension KarabinerInputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveStateId(stateId, sticky: false)
   }
 
+  func unixSocketServerDidReceiveShake() {
+    debugLog("[KarabinerInputMethod] Received shake command")
+    delegate?.inputMethodDidReceiveShake()
+  }
+
   func unixSocketServerRequestState() -> [String: Any] {
     return delegate?.inputMethodDidRequestState() ?? ["active": false]
   }

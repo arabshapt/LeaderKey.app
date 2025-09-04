@@ -215,6 +215,10 @@ final class UnixSocketServer {
         sendResponse("{\"active\": false}", to: socket)
       }
 
+    case "shake":
+      delegate?.unixSocketServerDidReceiveShake()
+      sendResponse("OK", to: socket)
+
     default:
       sendResponse("ERROR: Unknown command: \(action)", to: socket)
     }
@@ -344,5 +348,6 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveSettings()
   func unixSocketServerDidReceiveSequence(_ sequence: String)
   func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
+  func unixSocketServerDidReceiveShake()
   func unixSocketServerRequestState() -> [String: Any]
 }

@@ -13,6 +13,7 @@ enum Command {
     case state
     case sequence(keys: String)
     case stateid(id: String, sticky: Bool)
+    case shake
     case help
 }
 
@@ -60,6 +61,9 @@ func parseArguments() -> Command {
         // Check for optional sticky flag
         let sticky = args.count > 3 && args[3].lowercased() == "sticky"
         return .stateid(id: args[2], sticky: sticky)
+        
+    case "shake":
+        return .shake
         
     case "help", "--help", "-h":
         return .help
@@ -139,6 +143,7 @@ func printHelp() {
         state                 Get current Leader Key state
         sequence <keys>       Send a sequence of keys
         stateid <id> [sticky] Send a state ID for action execution (sticky keeps popup open)
+        shake                 Trigger shake animation (for undefined keys)
         help                  Show this help message
     
     Examples:
@@ -181,6 +186,9 @@ case .sequence(let keys):
 case .stateid(let id, let sticky):
     let cmd = sticky ? "stateid \(id) sticky" : "stateid \(id)"
     success = sendViaSocket(cmd)
+    
+case .shake:
+    success = sendViaSocket("shake")
     
 case .help:
     printHelp()

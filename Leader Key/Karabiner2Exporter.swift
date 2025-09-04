@@ -1162,12 +1162,17 @@ final class Karabiner2Exporter {
     // This replaces 50+ individual rules with a single catch-all rule
     var rules: [String] = []
     
+    // Include shake command to provide visual feedback for undefined keys
+    let cliPath = "/usr/local/bin/leaderkey-cli"
+    let shakeCmd = FileManager.default.fileExists(atPath: cliPath)
+      ? "\(cliPath) shake" : "echo 'shake' | nc -U /tmp/leaderkey.sock"
+    
     if let alias = appAlias {
       // App-specific catch-all with combined conditions
-      rules.append("   [{:any :key_code :modi :any} [:vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
     } else {
       // Global catch-all with just state condition
-      rules.append("   [{:any :key_code :modi :any} [:vk_none] [\"leader_state\" \(fromState)]]")
+      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [\"leader_state\" \(fromState)]]")
     }
     
     return rules
