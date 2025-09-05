@@ -7,7 +7,9 @@
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(chmod:*)",
-      "Bash(swift:*)"
+      "Bash(swift:*)",
+      "Bash(/usr/local/bin/leaderkey-cli:*)",
+      "Bash(echo \"Exit code: $?\")"
     ],
     "deny": []
   }

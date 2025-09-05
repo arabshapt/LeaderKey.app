@@ -157,13 +157,7 @@ class Controller {
           - (screenFrame.size.height * verticalPercent) - windowSize.height
         calculatedOrigin = NSPoint(x: newOriginX, y: newOriginY)
 
-        // ---- DEBUG LOGGING START ----
-        // debugLog("[Controller show] Mouse Location: \(mouseLocation)")
-        // debugLog("[Controller show] Detected Screen Frame: \(targetScreen.frame)")
-        // debugLog("[Controller show] Detected Screen Visible Frame: \(screenFrame)")
-        // debugLog("[Controller show] Window Size: \(windowSize)")
         debugLog("[Controller show] Calculated Origin: \(calculatedOrigin!)")
-        // ---- DEBUG LOGGING END ----
 
       } else {
         // Fallback: Window size is zero.

@@ -36,6 +36,11 @@ extension NSWindow {
   }
 
   func shake() {
+    // First, ensure the window is at the correct vertical position
+    if let mainWindow = self as? MainWindow {
+      mainWindow.maintainVerticalPosition()
+    }
+    
     let numberOfShakes = 3
     let durationOfShake = 0.4
     let vigourOfShake = 0.03

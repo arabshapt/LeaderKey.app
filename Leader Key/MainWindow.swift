@@ -1,6 +1,7 @@
 import Cocoa
 import QuartzCore
 import SwiftUI
+import Defaults
 
 class PanelWindow: NSPanel {
   init(contentRect: NSRect) {
@@ -25,7 +26,7 @@ class MainWindow: PanelWindow, NSWindowDelegate {
 
   var hasCheatsheet: Bool { return true }
   var controller: Controller
-  private var shouldBeVisible = false  // Track if window should be visible
+  var shouldBeVisible = false  // Track if window should be visible
 
   required init(controller: Controller) {
     self.controller = controller
@@ -42,6 +43,45 @@ class MainWindow: PanelWindow, NSWindowDelegate {
 
   func windowDidResignKey(_ notification: Notification) {
     // controller.hide() // Remove this line
+  }
+  
+  // Handle window resize to maintain vertical position
+  func windowDidResize(_ notification: Notification) {
+    // Always maintain position on resize when visible
+    if alphaValue > 0 {
+      maintainVerticalPosition()
+    }
+  }
+  
+  // Also handle frame changes
+  override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+    super.setFrame(frameRect, display: flag)
+    // After frame is set, ensure we're at the correct vertical position
+    // Check actual visibility, not just the shouldBeVisible flag
+    if isVisible && alphaValue > 0 {
+      maintainVerticalPosition()
+    }
+  }
+  
+  func maintainVerticalPosition() {
+    // Only reposition if window is actually visible
+    guard isVisible && alphaValue > 0 else { return }
+    
+    // Get current screen
+    let mouseLocation = NSEvent.mouseLocation
+    guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else { return }
+    
+    let screenFrame = screen.visibleFrame
+    let verticalPercent = CGFloat(Defaults[.panelTopOffsetPercent])
+    
+    // Calculate correct Y position
+    let correctY = (screenFrame.origin.y + screenFrame.size.height) 
+      - (screenFrame.size.height * verticalPercent) - frame.height
+    
+    // Always adjust position to ensure accuracy (removed tolerance check)
+    if frame.minY != correctY {
+      setFrameOrigin(NSPoint(x: frame.minX, y: correctY))
+    }
   }
 
   // Helper function to create a readable string for modifier flags (duplicated from AppDelegate)
