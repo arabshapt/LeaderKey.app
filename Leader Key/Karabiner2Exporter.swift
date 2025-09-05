@@ -1754,24 +1754,35 @@ final class Karabiner2Exporter {
       with: ":\(alternativeKey)"
     )
     
-    // Add additional conditions
+    // Add additional conditions if provided
     if !additionalConditions.isEmpty {
+      // Format additional conditions for insertion
       let conditionsToAdd = additionalConditions.map { ":\($0)" }.joined(separator: " ")
       
-      // Find existing conditions and append to them
-      if let lastBracketIndex = alternativeRule.lastIndex(of: "]") {
-        // Check if there's already a condition array at the end
-        let beforeBracket = alternativeRule[..<lastBracketIndex]
-        if let conditionStart = beforeBracket.lastIndex(of: "["),
-           conditionStart < lastBracketIndex {
-          // Check if this is a condition array (contains : or quotes)
-          let conditionContent = String(alternativeRule[conditionStart...lastBracketIndex])
-          if conditionContent.contains("leader_state") || 
-             conditionContent.contains(":") || 
-             conditionContent.contains("leaderkey_") {
-            // Insert additional conditions before the closing bracket
-            alternativeRule.insert(contentsOf: " \(conditionsToAdd)", at: lastBracketIndex)
-          }
+      // Find the last closing bracket of the condition array
+      // The structure is: [key action conditions] where conditions might be like [:app ["leader_state" X]]
+      
+      // Find the last ]] pattern which indicates the end of the condition array
+      if let lastDoubleCloseBracket = alternativeRule.range(of: "]]", options: .backwards) {
+        // Check if this is really a condition array by looking for state or app conditions
+        let beforeDoubleBracket = alternativeRule[..<lastDoubleCloseBracket.lowerBound]
+        
+        // Look for the pattern that indicates a condition array (e.g., [:app [...]] or ["leader_state" ...])
+        if beforeDoubleBracket.contains("leader_state") || beforeDoubleBracket.contains("[:") {
+          // Find the closing bracket of the inner condition array to insert before it
+          let insertPosition = lastDoubleCloseBracket.lowerBound
+          
+          // Insert the conditions before the last closing bracket of the condition array
+          alternativeRule.insert(contentsOf: " " + conditionsToAdd, at: insertPosition)
+        }
+      } else if let lastSingleBracket = alternativeRule.range(of: "]", options: .backwards) {
+        // Fallback: if there's just a single bracket at the end (simple condition)
+        // Check if this looks like a condition by checking what comes before
+        let beforeBracket = alternativeRule[..<lastSingleBracket.lowerBound]
+        if beforeBracket.hasSuffix("\"leader_state\" \(inactiveStateId)") || 
+           beforeBracket.contains("[\"leader_state\"") {
+          // This is likely a simple state condition, add our conditions before the closing bracket
+          alternativeRule.insert(contentsOf: " " + conditionsToAdd, at: lastSingleBracket.lowerBound)
         }
       }
     }
