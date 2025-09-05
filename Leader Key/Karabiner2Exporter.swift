@@ -1168,11 +1168,11 @@ final class Karabiner2Exporter {
       ? "\(cliPath) shake" : "echo 'shake' | nc -U /tmp/leaderkey.sock"
     
     if let alias = appAlias {
-      // App-specific catch-all with combined conditions
-      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [:\(alias) [\"leader_state\" \(fromState)]]]")
+      // App-specific catch-all with combined conditions (excluding sticky mode)
+      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [:\(alias) [\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
     } else {
-      // Global catch-all with just state condition
-      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [\"leader_state\" \(fromState)]]")
+      // Global catch-all with just state condition (excluding sticky mode)
+      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [[\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
     }
     
     return rules
