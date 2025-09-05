@@ -556,7 +556,7 @@ final class Karabiner2Exporter {
     // Collect all unique state IDs for escape handlers
     var allStateIds = Set<Int32>([initialStateId])
 
-    var stateTransitions: [Int32: [String: Int32]] = [:]
+    var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
     var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     // Track processed keys to avoid duplicates
     var processedKeys: Set<String> = []
@@ -592,15 +592,22 @@ final class Karabiner2Exporter {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
         }
-        stateTransitions[parentStateId]?[key] = node.stateId
+        // Check if the target group has sticky mode
+        let groupHasStickyMode: Bool
+        if case .group(let targetGroup) = node.item {
+          groupHasStickyMode = targetGroup.stickyMode ?? false
+        } else {
+          groupHasStickyMode = false
+        }
+        stateTransitions[parentStateId]?[key] = (toState: node.stateId, hasStickyMode: groupHasStickyMode)
         allStateIds.insert(node.stateId)  // Also collect target state IDs
       }
     }
 
     for (fromState, transitions) in stateTransitions {
-      for (key, toState) in transitions {
+      for (key, transitionData) in transitions {
         manipulators.append(
-          generateStateTransition(key: key, fromState: fromState, toState: toState, bundleId: bundleId))
+          generateStateTransition(key: key, fromState: fromState, toState: transitionData.toState, bundleId: bundleId))
       }
     }
 
@@ -645,7 +652,7 @@ final class Karabiner2Exporter {
     )
     
     // Collect and organize rules by state
-    var stateTransitions: [Int32: [String: Int32]] = [:]
+    var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
     var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     var allStateIds = Set<Int32>([initialStateId])
     var processedKeys: Set<String> = []
@@ -678,7 +685,14 @@ final class Karabiner2Exporter {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
         }
-        stateTransitions[parentStateId]?[key] = node.stateId
+        // Check if the target group has sticky mode
+        let groupHasStickyMode: Bool
+        if case .group(let targetGroup) = node.item {
+          groupHasStickyMode = targetGroup.stickyMode ?? false
+        } else {
+          groupHasStickyMode = false
+        }
+        stateTransitions[parentStateId]?[key] = (toState: node.stateId, hasStickyMode: groupHasStickyMode)
         allStateIds.insert(node.stateId)
       }
     }
@@ -705,10 +719,10 @@ final class Karabiner2Exporter {
       
       // Add transitions from this state
       if let transitions = stateTransitions[stateId] {
-        for (key, toState) in transitions.sorted(by: { $0.key < $1.key }) {
+        for (key, transitionData) in transitions.sorted(by: { $0.key < $1.key }) {
           definedKeys.insert(key.lowercased())
           stateRules.append(
-            generateUnifiedStateTransition(key: key, fromState: stateId, toState: toState, appAlias: appAlias)
+            generateUnifiedStateTransition(key: key, fromState: stateId, toState: transitionData.toState, hasStickyMode: transitionData.hasStickyMode, appAlias: appAlias)
           )
         }
       }
@@ -779,7 +793,7 @@ final class Karabiner2Exporter {
     // Collect all unique state IDs for escape handlers
     var allStateIds = Set<Int32>([initialStateId])
     
-    var stateTransitions: [Int32: [String: Int32]] = [:]
+    var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
     var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
     var processedKeys: Set<String> = []
     
@@ -811,16 +825,23 @@ final class Karabiner2Exporter {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
         }
-        stateTransitions[parentStateId]?[key] = node.stateId
+        // Check if the target group has sticky mode
+        let groupHasStickyMode: Bool
+        if case .group(let targetGroup) = node.item {
+          groupHasStickyMode = targetGroup.stickyMode ?? false
+        } else {
+          groupHasStickyMode = false
+        }
+        stateTransitions[parentStateId]?[key] = (toState: node.stateId, hasStickyMode: groupHasStickyMode)
         allStateIds.insert(node.stateId)
       }
     }
     
     // Generate state transitions with cleaner app conditions
     for (fromState, transitions) in stateTransitions {
-      for (key, toState) in transitions {
+      for (key, transitionData) in transitions {
         manipulators.append(
-          generateUnifiedStateTransition(key: key, fromState: fromState, toState: toState, appAlias: appAlias)
+          generateUnifiedStateTransition(key: key, fromState: fromState, toState: transitionData.toState, hasStickyMode: transitionData.hasStickyMode, appAlias: appAlias)
         )
       }
     }
@@ -1109,7 +1130,7 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateUnifiedStateTransition(key: String, fromState: Int32, toState: Int32, appAlias: String?) -> String {
+  private static func generateUnifiedStateTransition(key: String, fromState: Int32, toState: Int32, hasStickyMode: Bool, appAlias: String?) -> String {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
     
@@ -1118,12 +1139,18 @@ final class Karabiner2Exporter {
       ? "\(cliPath) stateid \(toState)"
       : "echo 'stateid \(toState)' | nc -U /tmp/leaderkey.sock"
     
+    // Build action array
+    var actions = "[\"leader_state\" \(toState)] [:shell \"\(stateCmd)\"]"
+    if hasStickyMode {
+      actions += " [\"leaderkey_sticky\" 1]"
+    }
+    
     if let alias = appAlias {
       // App-specific transition with combined conditions
-      return "   [\(karabinerKey) [[\"leader_state\" \(toState)] [:shell \"\(stateCmd)\"]] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      return "   [\(karabinerKey) [\(actions)] [:\(alias) [\"leader_state\" \(fromState)]]]"
     } else {
       // Global transition with just state condition
-      return "   [\(karabinerKey) [[\"leader_state\" \(toState)] [:shell \"\(stateCmd)\"]] [\"leader_state\" \(fromState)]]"
+      return "   [\(karabinerKey) [\(actions)] [\"leader_state\" \(fromState)]]"
     }
   }
   
