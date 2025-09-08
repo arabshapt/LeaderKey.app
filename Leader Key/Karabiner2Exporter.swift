@@ -557,7 +557,7 @@ final class Karabiner2Exporter {
     var allStateIds = Set<Int32>([initialStateId])
 
     var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool, node: StateNode)]] = [:]
     // Track processed keys to avoid duplicates
     var processedKeys: Set<String> = []
 
@@ -587,7 +587,7 @@ final class Karabiner2Exporter {
         // Convert each key in path to Karabiner notation for CLI commands
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -614,7 +614,7 @@ final class Karabiner2Exporter {
     for (fromState, actions) in terminalActions {
       for (key, actionData) in actions {
         manipulators.append(
-          generateTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, bundleId: bundleId))
+          generateTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, bundleId: bundleId, node: actionData.node))
       }
     }
     
@@ -653,7 +653,7 @@ final class Karabiner2Exporter {
     
     // Collect and organize rules by state
     var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool, node: StateNode)]] = [:]
     var allStateIds = Set<Int32>([initialStateId])
     var processedKeys: Set<String> = []
     
@@ -680,7 +680,7 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -738,7 +738,8 @@ final class Karabiner2Exporter {
               toState: actionData.terminalStateId,
               actionPath: actionData.path,
               hasStickyMode: actionData.hasStickyMode,
-              appAlias: appAlias
+              appAlias: appAlias,
+              node: actionData.node
             )
           )
         }
@@ -794,7 +795,7 @@ final class Karabiner2Exporter {
     var allStateIds = Set<Int32>([initialStateId])
     
     var stateTransitions: [Int32: [String: (toState: Int32, hasStickyMode: Bool)]] = [:]
-    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool)]] = [:]
+    var terminalActions: [Int32: [String: (path: String, terminalStateId: Int32, hasStickyMode: Bool, node: StateNode)]] = [:]
     var processedKeys: Set<String> = []
     
     for node in nodes {
@@ -820,7 +821,7 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode)
+        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -850,7 +851,7 @@ final class Karabiner2Exporter {
     for (fromState, actions) in terminalActions {
       for (key, actionData) in actions {
         manipulators.append(
-          generateUnifiedTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, appAlias: appAlias)
+          generateUnifiedTerminalAction(key: key, fromState: fromState, toState: actionData.terminalStateId, actionPath: actionData.path, hasStickyMode: actionData.hasStickyMode, appAlias: appAlias, node: actionData.node)
         )
       }
     }
@@ -921,12 +922,44 @@ final class Karabiner2Exporter {
     }
   }
 
-  private static func generateTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, bundleId: String? = nil)
+  private static func generateTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, bundleId: String? = nil, node: StateNode? = nil)
     -> String
   {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
     
+    // Check if this is a shortcut action that can be exported directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .shortcut,
+       canExportShortcutToKarabiner(action.value) {
+      
+      // Convert shortcut to Karabiner format
+      let shortcutKeys = convertShortcutToKarabinerFormat(action.value)
+      
+      // Build the action sequence: deactivate + execute shortcuts
+      var actions = "[:shell \"\(cliPath) deactivate\"]"
+      for shortcutKey in shortcutKeys {
+        actions += " \(shortcutKey)"
+      }
+      
+      // Clear all variables since we're deactivating
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+      
+      if let bundleId = bundleId {
+        return """
+             [\(karabinerKey) 
+              [\(actions) \(stateVars)] 
+              {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+          """
+      } else {
+        return """
+             [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+          """
+      }
+    }
+    
+    // Default behavior for non-shortcut actions or complex shortcuts
     // Use stateid command with optional sticky flag
     let commandSuffix = hasStickyMode ? " sticky" : ""
     let sequenceCmd =
@@ -1154,11 +1187,207 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?) -> String {
+  // Check if a shortcut can be exported directly to Karabiner
+  private static func canExportShortcutToKarabiner(_ shortcut: String) -> Bool {
+    let parts = shortcut.split(separator: " ")
+    for part in parts {
+      let lower = part.lowercased()
+      // Skip shortcuts with delays or complex key operations
+      if lower.contains("delay:") || lower.contains("keydown:") || lower.contains("keyup:") {
+        return false
+      }
+    }
+    return true
+  }
+  
+  // Convert LeaderKey shortcut format to Karabiner/Goku format
+  private static func convertShortcutToKarabinerFormat(_ shortcut: String) -> [String] {
+    let parts = shortcut.split(separator: " ").map(String.init)
+    var karabinerKeys: [String] = []
+    
+    for part in parts {
+      if part.lowercased() == "vk_none" || part.lowercased() == "release_modifiers" {
+        karabinerKeys.append(":vk_none")
+      } else {
+        // Parse compact format like "CSa" to Karabiner format
+        if let converted = parseCompactShortcutToKarabiner(part) {
+          karabinerKeys.append(converted)
+        }
+      }
+    }
+    
+    return karabinerKeys
+  }
+  
+  // Parse a single compact shortcut like "CSa" to Karabiner format like ":!CSa"
+  private static func parseCompactShortcutToKarabiner(_ shortcut: String) -> String? {
+    guard !shortcut.isEmpty else { return nil }
+    
+    var modifierLetters = ""
+    var remainingString = shortcut
+    
+    // Parse modifier characters: C=Cmd, S=Shift, O=Option, T=Control, F=Function
+    while !remainingString.isEmpty {
+      let firstChar = remainingString.first!
+      var consumedModifier = false
+      
+      switch firstChar {
+      case "C":  // Command
+        modifierLetters += "C"
+        consumedModifier = true
+      case "S":  // Shift
+        modifierLetters += "S"
+        consumedModifier = true
+      case "O":  // Option/Alt
+        modifierLetters += "O"
+        consumedModifier = true
+      case "T":  // Control
+        modifierLetters += "T"
+        consumedModifier = true
+      case "F":  // Function
+        modifierLetters += "F"
+        consumedModifier = true
+      default:
+        break
+      }
+      
+      if consumedModifier {
+        remainingString.removeFirst()
+      } else {
+        break
+      }
+    }
+    
+    // The rest is the key name
+    var keyName = remainingString
+    guard !keyName.isEmpty else { return nil }
+    
+    // Map descriptive names back to their special characters
+    let descriptiveNameMap: [String: String] = [
+      "question": "?",
+      "exclamation": "!",
+      "at": "@",
+      "hash": "#",
+      "dollar": "$",
+      "percent": "%",
+      "caret": "^",
+      "ampersand": "&",
+      "asterisk": "*",
+      "parenleft": "(",
+      "parenright": ")",
+      "underscore": "_",
+      "plus": "+",
+      "braceleft": "{",
+      "braceright": "}",
+      "quote": "\"",
+      "tilde": "~",
+      "pipe": "|",
+      "colon": ":",
+      "less": "<",
+      "greater": ">",
+    ]
+    
+    // Check if the key name is a descriptive name that needs conversion
+    if let specialChar = descriptiveNameMap[keyName.lowercased()] {
+      keyName = specialChar
+    }
+    
+    // Special characters that require Shift modifier
+    let shiftedKeyMap: [String: String] = [
+      "!": "1",
+      "@": "2",
+      "#": "3",
+      "$": "4",
+      "%": "5",
+      "^": "6",
+      "&": "7",
+      "*": "8",
+      "(": "9",
+      ")": "0",
+      "_": "hyphen",
+      "+": "equal_sign",
+      "{": "open_bracket",
+      "}": "close_bracket",
+      "\"": "quote",
+      "~": "grave_accent_and_tilde",
+      "|": "backslash",
+      "?": "slash",
+      ":": "semicolon",
+      "<": "comma",
+      ">": "period",
+    ]
+    
+    // Check if it's a shifted special character
+    if let shiftedKey = shiftedKeyMap[keyName] {
+      // Add Shift modifier if not already present
+      if !modifierLetters.contains("S") {
+        modifierLetters += "S"
+      }
+      keyName = shiftedKey
+    }
+    
+    // Map special keys to Karabiner notation
+    let keyMap: [String: String] = [
+      "space": "spacebar",
+      "return": "return_or_enter",
+      "enter": "return_or_enter",
+      "tab": "tab",
+      "delete": "delete_or_backspace",
+      "backspace": "delete_or_backspace",
+      "escape": "escape",
+      "esc": "escape",
+      "up": "up_arrow",
+      "down": "down_arrow",
+      "left": "left_arrow",
+      "right": "right_arrow",
+    ]
+    
+    // Get the mapped key or use the key lowercased
+    let finalKey = keyMap[keyName.lowercased()] ?? keyName.lowercased()
+    
+    // Build the final format
+    if !modifierLetters.isEmpty {
+      // Format: :!CSa for Cmd+Shift+A (no brackets when used in action array)
+      // The ! prefix indicates modifiers are present, followed by modifier letters
+      return ":!\(modifierLetters)\(finalKey)"
+    } else {
+      // No modifiers, just the key
+      return ":\(finalKey)"
+    }
+  }
+  
+  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?, node: StateNode? = nil) -> String {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
     
-    // Use stateid command with optional sticky flag
+    // Check if this is a shortcut action that can be exported directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .shortcut,
+       canExportShortcutToKarabiner(action.value) {
+      
+      // Convert shortcut to Karabiner format
+      let shortcutKeys = convertShortcutToKarabinerFormat(action.value)
+      
+      // Build the action sequence: deactivate + execute shortcuts
+      var actions = "[:shell \"\(cliPath) deactivate\"]"
+      for shortcutKey in shortcutKeys {
+        actions += " \(shortcutKey)"
+      }
+      
+      // Clear all variables since we're deactivating
+      let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      
+      if let alias = appAlias {
+        // App-specific shortcut action
+        return "   [\(karabinerKey) [\(actions) \(clearVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      } else {
+        // Global shortcut action
+        return "   [\(karabinerKey) [\(actions) \(clearVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+    
+    // Default behavior for non-shortcut actions or complex shortcuts
     let commandSuffix = hasStickyMode ? " sticky" : ""
     let sequenceCmd = FileManager.default.fileExists(atPath: cliPath)
       ? "\(cliPath) stateid \(toState)\(commandSuffix)"
