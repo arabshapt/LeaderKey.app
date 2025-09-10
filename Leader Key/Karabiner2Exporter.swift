@@ -1369,21 +1369,33 @@ final class Karabiner2Exporter {
       // Convert shortcut to Karabiner format
       let shortcutKeys = convertShortcutToKarabinerFormat(action.value)
       
-      // Build the action sequence: deactivate + execute shortcuts
-      var actions = "[:shell \"\(cliPath) deactivate\"]"
-      for shortcutKey in shortcutKeys {
-        actions += " \(shortcutKey)"
-      }
+      // Build the action sequence based on sticky mode
+      var actions = ""
+      let stateVars: String
       
-      // Clear all variables since we're deactivating
-      let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      if hasStickyMode {
+        // In sticky mode: just execute shortcuts and stay in current state
+        for shortcutKey in shortcutKeys {
+          actions += actions.isEmpty ? "\(shortcutKey)" : " \(shortcutKey)"
+        }
+        // Keep leader_state at current group, set sticky flag
+        stateVars = "[\"leaderkey_sticky\" 1]"
+      } else {
+        // Normal mode: deactivate + execute shortcuts
+        actions = "[:shell \"\(cliPath) deactivate\"]"
+        for shortcutKey in shortcutKeys {
+          actions += " \(shortcutKey)"
+        }
+        // Clear all variables since we're deactivating
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      }
       
       if let alias = appAlias {
         // App-specific shortcut action
-        return "   [\(karabinerKey) [\(actions) \(clearVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
         // Global shortcut action
-        return "   [\(karabinerKey) [\(actions) \(clearVars)] [\"leader_state\" \(fromState)]]"
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
     
