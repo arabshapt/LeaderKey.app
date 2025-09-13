@@ -65,7 +65,7 @@ struct GeneralPane: View {
           // --- Left Sidebar: Config List --- START ---
           VStack(alignment: .leading) {
             // Profile selector with management buttons
-            HStack {
+            HStack(spacing: 4) {
               Picker("", selection: Binding(
                 get: { profileManager.activeProfile?.id ?? UUID() },
                 set: { newId in
@@ -80,7 +80,7 @@ struct GeneralPane: View {
                 }
               }
               .pickerStyle(.menu)
-              .frame(maxWidth: .infinity)
+              .frame(width: 120)
               
               Button(action: {
                 showingProfileSheet = true
