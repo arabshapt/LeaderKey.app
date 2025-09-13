@@ -27,10 +27,10 @@ extension UserConfig {
       return customNames[path] ?? defaultName
     }
 
-    // Add global default config first
+    // Add fallback config first
     let defaultPath = (configDir as NSString).appendingPathComponent(fileName)
     if fileManager.fileExists(atPath: defaultPath) {
-      let displayName = getDisplayName(for: defaultPath, defaultName: globalDefaultDisplayName)
+      let displayName = getDisplayName(for: defaultPath, defaultName: defaultAppConfigDisplayName)
       discovered[displayName] = defaultPath
     }
 
@@ -41,7 +41,7 @@ extension UserConfig {
         let currentFileName = fileURL.lastPathComponent
         let filePath = fileURL.path
 
-        // Skip the main global-config.json as it's handled above
+        // Skip the main fallback config as it's handled above
         if filePath == defaultPath {
           continue
         }
@@ -77,13 +77,11 @@ extension UserConfig {
     }
 
     // Sort the discovered files by display name for consistent UI presentation
-    // Keep Global Default first, then Fallback App Config, then others alphabetically
+    // Keep Fallback App Config first, then others alphabetically
     let sortedDiscovered = discovered.sorted { (pair1, pair2) -> Bool in
       let (name1, _) = pair1
       let (name2, _) = pair2
 
-      if name1 == globalDefaultDisplayName { return true }
-      if name2 == globalDefaultDisplayName { return false }
       if name1 == defaultAppConfigDisplayName { return true }
       if name2 == defaultAppConfigDisplayName { return false }
       return name1.localizedCompare(name2) == .orderedAscending
@@ -110,13 +108,13 @@ extension UserConfig {
       print(
         "Warning: Previously selected config key '\(selectedConfigKeyForEditing)' no longer exists or its name changed."
       )
-      print("Resetting selection to Global Default or its custom name.")
+      print("Resetting selection to Fallback config or its custom name.")
       // Attempt to find the key for the default path
       if let defaultKey = sortedDiscovered.first(where: { $0.value == defaultPath })?.key {
         selectedConfigKeyForEditing = defaultKey
       } else {
-        // If even the default config is missing/renamed weirdly, fallback to the literal default name
-        selectedConfigKeyForEditing = globalDefaultDisplayName
+        // If even the fallback config is missing/renamed weirdly, use the literal fallback name
+        selectedConfigKeyForEditing = defaultAppConfigDisplayName
       }
 
       // Force load the editing group based on the (potentially new) selected key

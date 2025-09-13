@@ -39,30 +39,44 @@ extension UserConfig {
   private func migrateConfigFilenames() {
     let configDir = Defaults[.configDir]
 
-    // Migrate config.json to global-config.json
-    let oldGlobalPath = (configDir as NSString).appendingPathComponent("config.json")
-    let newGlobalPath = (configDir as NSString).appendingPathComponent(fileName)
-
+    // Migrate old config files to app-fallback-config.json
+    // First try migrating global-config.json if it exists
+    let oldGlobalPath = (configDir as NSString).appendingPathComponent("global-config.json")
+    let newFallbackPath = (configDir as NSString).appendingPathComponent(fileName)
+    
     if fileManager.fileExists(atPath: oldGlobalPath)
-      && !fileManager.fileExists(atPath: newGlobalPath)
+      && !fileManager.fileExists(atPath: newFallbackPath)
     {
       do {
-        try fileManager.moveItem(atPath: oldGlobalPath, toPath: newGlobalPath)
+        try fileManager.moveItem(atPath: oldGlobalPath, toPath: newFallbackPath)
+        print("[Migration] Renamed global-config.json to \(fileName)")
+      } catch {
+        print("[Migration] Failed to rename global-config.json: \(error)")
+      }
+    }
+    
+    // Also migrate config.json if it still exists (from older versions)
+    let oldConfigPath = (configDir as NSString).appendingPathComponent("config.json")
+    if fileManager.fileExists(atPath: oldConfigPath)
+      && !fileManager.fileExists(atPath: newFallbackPath)
+    {
+      do {
+        try fileManager.moveItem(atPath: oldConfigPath, toPath: newFallbackPath)
         print("[Migration] Renamed config.json to \(fileName)")
       } catch {
         print("[Migration] Failed to rename config.json: \(error)")
       }
     }
 
-    // Migrate app.default.json to app-fallback-config.json
-    let oldFallbackPath = (configDir as NSString).appendingPathComponent("app.default.json")
-    let newFallbackPath = (configDir as NSString).appendingPathComponent(defaultAppConfigFileName)
+    // Migrate app.default.json to app-fallback-config.json  
+    let oldDefaultAppPath = (configDir as NSString).appendingPathComponent("app.default.json")
+    let finalFallbackPath = (configDir as NSString).appendingPathComponent(defaultAppConfigFileName)
 
-    if fileManager.fileExists(atPath: oldFallbackPath)
-      && !fileManager.fileExists(atPath: newFallbackPath)
+    if fileManager.fileExists(atPath: oldDefaultAppPath)
+      && !fileManager.fileExists(atPath: finalFallbackPath)
     {
       do {
-        try fileManager.moveItem(atPath: oldFallbackPath, toPath: newFallbackPath)
+        try fileManager.moveItem(atPath: oldDefaultAppPath, toPath: finalFallbackPath)
         print("[Migration] Renamed app.default.json to \(defaultAppConfigFileName)")
       } catch {
         print("[Migration] Failed to rename app.default.json: \(error)")
@@ -82,16 +96,6 @@ extension UserConfig {
     fileManager.fileExists(atPath: path)
   }
 
-  internal func ensureConfigFileExists() {
-    guard !exists else { return }
-
-    do {
-      try bootstrapConfig()
-    } catch {
-      handleError(error, critical: true)
-    }
-  }
-
   internal func ensureDefaultAppConfigExists() {
     let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
       defaultAppConfigFileName)
@@ -102,17 +106,6 @@ extension UserConfig {
     } catch {
       handleError(error, critical: false)  // Non-critical since it's a fallback config
     }
-  }
-
-  private func bootstrapConfig() throws {
-    guard let data = defaultConfig.data(using: .utf8) else {
-      throw NSError(
-        domain: "UserConfig",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to encode default config"]
-      )
-    }
-    try writeFile(data: data)
   }
 
   private func bootstrapDefaultAppConfig() throws {

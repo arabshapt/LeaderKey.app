@@ -34,7 +34,7 @@ extension UserConfig {
 
     // --- FALLBACK STRIPPING (for app-specific configs only) ---
     var groupToProcess = currentlyEditingGroup
-    let isAppSpecificConfig = selectedConfigKeyForEditing != globalDefaultDisplayName
+    let isAppSpecificConfig = selectedConfigKeyForEditing != defaultAppConfigDisplayName
 
     if isAppSpecificConfig {
       print(
@@ -44,7 +44,7 @@ extension UserConfig {
         "[SAVE LOG] saveCurrentlyEditingConfig: State after stripping fallbacks: \(groupToProcess)")
     } else {
       print(
-        "[SAVE LOG] saveCurrentlyEditingConfig: Saving global default config, keeping all items.")
+        "[SAVE LOG] saveCurrentlyEditingConfig: Saving fallback config, keeping all items.")
     }
     // -----------------
 
@@ -84,14 +84,14 @@ extension UserConfig {
         message: errorMsg
       )
       // Update validationErrors state (as before)
-      if selectedConfigKeyForEditing == globalDefaultDisplayName {
+      if selectedConfigKeyForEditing == defaultAppConfigDisplayName {
         self.validationErrors = errors
       } else {
         print("Validation issues found in \(selectedConfigKeyForEditing) config, but not saving.")
       }
       return  // PREVENT SAVING if errors exist
       // --- END MODIFICATION ---
-    } else if selectedConfigKeyForEditing == globalDefaultDisplayName {
+    } else if selectedConfigKeyForEditing == defaultAppConfigDisplayName {
       // Clear errors if default config is now valid
       self.validationErrors = []
       print(

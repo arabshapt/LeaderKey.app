@@ -63,20 +63,19 @@ class ClipboardManager: ObservableObject {
 }
 
 let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
-let globalDefaultDisplayName = "Global"
 let defaultAppConfigDisplayName = "Fallback App Config"
 
 class UserConfig: ObservableObject {
-  // Root for the default config (global-config.json)
+  // Root for the fallback config (app-fallback-config.json)
   @Published var root = emptyRoot
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
-  @Published var validationErrors: [ValidationError] = []  // Errors specific to the default config
+  @Published var validationErrors: [ValidationError] = []  // Errors specific to the fallback config
   @Published var discoveredConfigFiles: [String: String] = [:]  // Display Name -> File Path
-  @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName  // Initialize with the new default key
+  @Published var selectedConfigKeyForEditing: String = defaultAppConfigDisplayName  // Initialize with fallback key
   @Published var isActivelyEditing: Bool = false  // Track if user is actively editing vs ready to finalize
 
-  let fileName = "global-config.json"
+  let fileName = "app-fallback-config.json"  // Changed from global-config.json
   let appConfigPrefix = "app."
   let defaultAppConfigFileName = "app-fallback-config.json"  // Added default app config filename
   var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
@@ -106,7 +105,7 @@ class UserConfig: ObservableObject {
   // Helper function to extract bundle ID from config filename or display name
   func extractBundleId(from displayName: String) -> String? {
     // Check if this is an app-specific config
-    guard displayName != globalDefaultDisplayName && displayName != defaultAppConfigDisplayName
+    guard displayName != defaultAppConfigDisplayName
     else {
       return nil
     }
@@ -173,24 +172,23 @@ class UserConfig: ObservableObject {
 
   func ensureAndLoad() {
     self.ensureValidConfigDirectory()
-    self.ensureConfigFileExists()  // Ensures default global-config.json exists
     self.ensureDefaultAppConfigExists()  // Ensures default app-fallback-config.json exists
-    self.discoverConfigFiles()  // Discover after ensuring both files exist
-    self.loadConfig()  // Loads the default config into 'root'
-    // Initially, load the default config for editing
-    if let defaultPath = discoveredConfigFiles[globalDefaultDisplayName] {
+    self.discoverConfigFiles()  // Discover after ensuring file exists
+    self.loadConfig()  // Loads the fallback config into 'root'
+    // Initially, load the fallback config for editing
+    if let defaultPath = discoveredConfigFiles[defaultAppConfigDisplayName] {
       currentlyEditingGroup =
         self.decodeConfig(from: defaultPath, suppressAlerts: false, isDefaultConfig: true)
         ?? emptyRoot
-      selectedConfigKeyForEditing = globalDefaultDisplayName
-      // Set initial validation errors based on default config
+      selectedConfigKeyForEditing = defaultAppConfigDisplayName
+      // Set initial validation errors based on fallback config
       validationErrors = ConfigValidator.validate(group: root)
       // Start with sorted view when loading configs
       isActivelyEditing = false
     } else {
-      // If default doesn't exist somehow, ensure editor has empty root
+      // If fallback doesn't exist somehow, ensure editor has empty root
       currentlyEditingGroup = emptyRoot
-      selectedConfigKeyForEditing = globalDefaultDisplayName
+      selectedConfigKeyForEditing = defaultAppConfigDisplayName
       isActivelyEditing = false
     }
   }
@@ -216,8 +214,8 @@ class UserConfig: ObservableObject {
       if self.discoveredConfigFiles[self.selectedConfigKeyForEditing] != nil {
         self.loadConfigForEditing(key: self.selectedConfigKeyForEditing)
       } else {
-        // If current selection is no longer valid, fallback to default
-        self.loadConfigForEditing(key: globalDefaultDisplayName)
+        // If current selection is no longer valid, use fallback
+        self.loadConfigForEditing(key: defaultAppConfigDisplayName)
       }
 
       // Notify that reload is complete
@@ -564,8 +562,8 @@ extension UserConfig {
       // If this is the currently loaded config, search in the merged version that's being edited
       if configName == selectedConfigKeyForEditing {
         groupToSearch = currentlyEditingGroup
-      } else if configName == globalDefaultDisplayName {
-        // For the default config, use root
+      } else if configName == defaultAppConfigDisplayName {
+        // For the fallback config, use root
         groupToSearch = root
       } else {
         // For other configs, load and merge them the same way loadConfigForEditing does

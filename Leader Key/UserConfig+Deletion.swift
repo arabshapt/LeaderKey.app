@@ -12,13 +12,7 @@ extension UserConfig {
       alertHandler.showAlert(style: .warning, message: "Could not locate file for ‘\(displayKey)’.")
       return false
     }
-    // Prevent deleting the main default config
-    if displayKey == globalDefaultDisplayName {
-      alertHandler.showAlert(
-        style: .warning, message: "The Global Default configuration cannot be deleted.")
-      return false
-    }
-    // Additional protection for fallback app config
+    // Prevent deleting the fallback config
     if displayKey == defaultAppConfigDisplayName {
       alertHandler.showAlert(
         style: .warning, message: "The Fallback App configuration cannot be deleted.")

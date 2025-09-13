@@ -25,9 +25,6 @@ struct GeneralPane: View {
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
     config.discoveredConfigFiles.keys.sorted { key1, key2 in
-      // Prioritize Global Default
-      if key1 == globalDefaultDisplayName { return true }
-      if key2 == globalDefaultDisplayName { return false }
       // Prioritize Fallback App Config
       if key1 == defaultAppConfigDisplayName { return true }
       if key2 == defaultAppConfigDisplayName { return false }
@@ -50,7 +47,7 @@ struct GeneralPane: View {
     }  // Fallback is implicitly handled if path is nil
 
     messageText +=
-      "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
+      "\n\nReserved name '\(defaultAppConfigDisplayName)' is not allowed."
     return messageText
   }
 
@@ -84,7 +81,7 @@ struct GeneralPane: View {
                     .truncationMode(.middle)
                   Spacer()
                   // Simple Rename Button - could be improved with context menu later
-                  if key != globalDefaultDisplayName && key != defaultAppConfigDisplayName {
+                  if key != defaultAppConfigDisplayName {
                     Button {
                       // Get current custom name or default name to pre-fill
                       if let filePath = config.discoveredConfigFiles[key] {
@@ -327,7 +324,6 @@ struct GeneralPane: View {
 
           // Now use if let for the dictionary lookup and combine other checks
           if !newConfigNameInput.isEmpty,
-            newConfigNameInput != globalDefaultDisplayName,
             newConfigNameInput != defaultAppConfigDisplayName
           {
             // Check for name collisions
@@ -473,8 +469,6 @@ private struct AddConfigSheet: View {
     var options = ["Empty"]
     options.append(
       contentsOf: config.discoveredConfigFiles.keys.sorted { key1, key2 in
-        if key1 == globalDefaultDisplayName { return true }
-        if key2 == globalDefaultDisplayName { return false }
         if key1 == defaultAppConfigDisplayName { return true }
         if key2 == defaultAppConfigDisplayName { return false }
         return key1 < key2
@@ -617,7 +611,6 @@ struct GeneralPane_Previews: PreviewProvider {
     let previewConfig = UserConfig()
     // Manually add some discovered files for preview
     previewConfig.discoveredConfigFiles = [
-      globalDefaultDisplayName: "/path/to/global-config.json",
       defaultAppConfigDisplayName: "/path/to/app-fallback-config.json",
       "App: com.app.example": "/path/to/app.com.app.example.json",
       "App: com.another.app": "/path/to/app.com.another.app.json",

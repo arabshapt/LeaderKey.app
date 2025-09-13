@@ -322,7 +322,7 @@ struct SearchResultRow: View {
 
           // Config name and match reason
           HStack {
-            if result.configName != globalDefaultDisplayName {
+            if result.configName != defaultAppConfigDisplayName {
               Text(result.configName)
                 .font(.caption)
                 .foregroundColor(.secondary)

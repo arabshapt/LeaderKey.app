@@ -47,7 +47,7 @@ final class Karabiner2Exporter {
   // Generate unified EDN with hierarchical organization and :condi grouping
   // Returns: (ednContent, stateMappings)
   static func generateUnifiedGokuEDNHierarchical(
-    globalConfig: UserConfig,
+    fallbackConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) -> (edn: String, stateMappings: [StateMapping]) {
     debugLog("[Karabiner2Exporter] generateUnifiedGokuEDNHierarchical called with \(appConfigs.count) app configs")
@@ -85,14 +85,7 @@ final class Karabiner2Exporter {
     var allStateMappings: [StateMapping] = []
     var allActivations: [String] = []  // Collect all activation rules
     
-    // 4. Generate global mode section
-    let (globalStateTree, globalMappings) = buildStateTree(
-      from: globalConfig.root,
-      appAlias: nil,
-      bundleId: nil,
-      initialStateId: globalInitialStateId
-    )
-    allStateMappings.append(contentsOf: globalMappings)
+    // 4. Skip global mode section - we only use fallback and app-specific configs now
     
     // 5. Generate app-specific sections FIRST (most specific)
     for (bundleId, alias, config) in appAliases {
@@ -120,20 +113,9 @@ final class Karabiner2Exporter {
       desSections.append((name: "Leader Key - \(appName)", groups: appGroups))
     }
     
-    // 6. Generate global mode section SECOND
-    let (globalActivation, globalGroups) = generateManipulatorsForUnifiedHierarchical(
-      from: globalStateTree,
-      appAlias: nil,
-      bundleId: nil,
-      activationKey: "{:key :k :modi :command}",
-      initialStateId: globalInitialStateId
-    )
-    allActivations.append(globalActivation)
-    desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
-    
-    // 7. Generate fallback mode section (explicit activation for testing)
+    // 6. Generate fallback mode section
     // Load the fallback config using UserConfig's method
-    let fallbackRoot = globalConfig.getFallbackConfig()
+    let fallbackRoot = fallbackConfig.getFallbackConfig()
     
     // Build state tree for fallback config
     let (fallbackStateTree, fallbackMappings) = buildStateTree(
@@ -157,9 +139,9 @@ final class Karabiner2Exporter {
     
     // 8. Create activation section at the beginning with escape and settings rules
     // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode)
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -206,7 +188,7 @@ final class Karabiner2Exporter {
   // Generate unified EDN with all app configs in a single file (legacy flat version)
   // Returns: (ednContent, stateMappings)
   static func generateUnifiedGokuEDN(
-    globalConfig: UserConfig,
+    fallbackConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) -> (edn: String, stateMappings: [StateMapping]) {
     debugLog("[Karabiner2Exporter] generateUnifiedGokuEDN called with \(appConfigs.count) app configs")
@@ -242,17 +224,8 @@ final class Karabiner2Exporter {
     // 2. Generate applications section with unique aliases
     let applications = generateApplicationsSectionFromAliases(appAliases: appAliases)
     
-    // 3. Generate global manipulators (no app condition, Cmd+K activation)
+    // 3. Skip global manipulators - we only use fallback and app-specific configs now
     var allStateMappings: [StateMapping] = []
-    let (globalStateTree, globalMappings) = buildStateTree(from: globalConfig.root, appAlias: nil, bundleId: nil, initialStateId: globalInitialStateId)
-    allStateMappings.append(contentsOf: globalMappings)
-    let globalManipulators = generateManipulatorsForUnified(
-      from: globalStateTree,
-      appAlias: nil,
-      bundleId: nil,
-      activationKey: "{:key :k :modi :command}",  // Cmd+K for global
-      initialStateId: globalInitialStateId
-    )
     
     // 4. Generate app-specific manipulators (Cmd+Shift+K activation)
     var appSections: [(alias: String, manipulators: [String])] = []
@@ -282,7 +255,7 @@ final class Karabiner2Exporter {
     // 6. Format unified EDN
     let ednContent = formatUnifiedGokuEDN(
       applications: applications,
-      globalManipulators: globalManipulators,
+      globalManipulators: [],  // No global manipulators anymore
       appSections: appSections,
       fallbackManipulator: fallbackManipulator
     )
@@ -701,12 +674,13 @@ final class Karabiner2Exporter {
     let modeCondition: String
     if let alias = appAlias {
       // App-specific mode
-      modeCondition = "[:condi :\(alias) :leaderkey_appspecific :!leaderkey_global]"
+      modeCondition = "[:condi :\(alias) :leaderkey_appspecific]"
     } else if bundleId == "__FALLBACK__" {
       // Fallback is now treated as app-specific
-      modeCondition = "[:condi :leaderkey_appspecific :!leaderkey_global]"
+      modeCondition = "[:condi :leaderkey_appspecific]"
     } else {
-      modeCondition = "[:condi :leaderkey_global]"
+      // This case shouldn't happen anymore - we only have app-specific and fallback
+      modeCondition = "[:condi :leaderkey_appspecific]"
     }
     
     // No longer generating escape handlers per state - using single global escape
@@ -758,12 +732,12 @@ final class Karabiner2Exporter {
         let stateCondition: String
         if let alias = appAlias {
           // App-specific state
-          stateCondition = "[:condi :\(alias) :leaderkey_appspecific :!leaderkey_global [\"leader_state\" \(stateId)]]"
+          stateCondition = "[:condi :\(alias) :leaderkey_appspecific [\"leader_state\" \(stateId)]]"
         } else if bundleId == "__FALLBACK__" {
           // Fallback state (treated as app-specific)
-          stateCondition = "[:condi :leaderkey_appspecific :!leaderkey_global [\"leader_state\" \(stateId)]]"
+          stateCondition = "[:condi :leaderkey_appspecific [\"leader_state\" \(stateId)]]"
         } else {
-          stateCondition = "[:condi :leaderkey_global [\"leader_state\" \(stateId)]]"
+          stateCondition = "[:condi :leaderkey_appspecific [\"leader_state\" \(stateId)]]"
         }
         
         modeRules.append(stateCondition)
@@ -944,7 +918,7 @@ final class Karabiner2Exporter {
       }
       
       // Clear all variables since we're deactivating
-      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0]"
       
       if let bundleId = bundleId {
         return """
@@ -975,7 +949,7 @@ final class Karabiner2Exporter {
       stateVars = "[\"leaderkey_sticky\" 1]"
     } else {
       // Normal reset - clear everything
-      stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+      stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0]"
     }
     
     if let bundleId = bundleId {
@@ -1131,10 +1105,10 @@ final class Karabiner2Exporter {
     let modeVars: String
     if appAlias != nil || bundleId == "__FALLBACK__" {
       // App-specific mode (including fallback)
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1] [\"leaderkey_global\" 0]"
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1]"
     } else {
-      // Global mode
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_appspecific\" 0]"
+      // This shouldn't happen anymore - we only have app-specific mode
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1]"
     }
     
     if let alias = appAlias {
@@ -1152,7 +1126,7 @@ final class Karabiner2Exporter {
       ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
     
     // Clear all mode variables on escape, including sticky mode
-    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" \(inactiveStateId)]"
+    let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" \(inactiveStateId)]"
     
     if let alias = appAlias {
       // App-specific escape with combined conditions
@@ -1387,7 +1361,7 @@ final class Karabiner2Exporter {
           actions += " \(shortcutKey)"
         }
         // Clear all variables since we're deactivating
-        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
       
       if let alias = appAlias {
@@ -1413,7 +1387,7 @@ final class Karabiner2Exporter {
       clearVars = "[\"leaderkey_sticky\" 1]"
     } else {
       // Normal reset - clear everything
-      clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
     }
     
     if let alias = appAlias {

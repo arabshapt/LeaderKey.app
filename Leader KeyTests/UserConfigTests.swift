@@ -63,7 +63,7 @@ final class UserConfigTests: XCTestCase {
     // Remove both directory and config file
     try? FileManager.default.removeItem(atPath: defaultDir)
     try? FileManager.default.removeItem(
-      atPath: (defaultDir as NSString).appendingPathComponent("global-config.json"))
+      atPath: (defaultDir as NSString).appendingPathComponent("app-fallback-config.json"))
     Defaults[.configDir] = defaultDir
 
     subject.ensureAndLoad()

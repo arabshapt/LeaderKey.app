@@ -50,7 +50,7 @@ extension UserConfig {
       appConfigs[defaultAppKey] = nil
     }
     
-    // Fallback to default global-config.json (already loaded into self.root)
+    // Fallback to fallback config (already loaded into self.root)
     return root
   }
   
@@ -79,7 +79,7 @@ extension UserConfig {
     return markedGroup
   }
 
-  // Gets the config for a specific app bundle ID, falling back to app-fallback-config.json, then default global-config.json
+  // Gets the config for a specific app bundle ID, falling back to app-fallback-config.json
   func getConfig(for bundleId: String?) -> Group {
     // 1. Try specific app config
     if let bundleId = bundleId, !bundleId.isEmpty {
@@ -133,14 +133,14 @@ extension UserConfig {
         return defaultAppRoot
       } else {
         appConfigs[defaultAppKey] = nil  // Cache failed load as nil
-        // Fall through to default global-config.json
+        // Fall through to fallback config
       }
     } else {
       // File doesn't exist, cache this fact
       appConfigs[defaultAppKey] = nil
     }
 
-    // 3. Fallback to default global-config.json (already loaded into self.root)
+    // 3. Fallback to fallback config (already loaded into self.root)
     return root
   }
 
@@ -174,7 +174,7 @@ extension UserConfig {
         alertHandler.showAlert(
           style: .critical,
           message:
-            "Failed to read default config file (global-config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
+            "Failed to read fallback config file (app-fallback-config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
         )
       }
       // Don't show alerts for non-critical app-specific files that fail to read
@@ -193,7 +193,7 @@ extension UserConfig {
           // Store errors only if it's the default config being decoded in a context
           // where we should update the main validationErrors state (e.g., initial load)
           // self.validationErrors = errors // Caller should set this based on context
-          print("[UserConfig] Validation issues found in default config (global-config.json).")
+          print("[UserConfig] Validation issues found in fallback config (app-fallback-config.json).")
           showValidationAlert()  // Show general validation alert for default config
         } else {
           // Log validation issues for app-specific configs, but don't trigger primary alert/state
@@ -213,7 +213,7 @@ extension UserConfig {
         alertHandler.showAlert(
           style: .critical,
           message:
-            "Error decoding default config file (global-config.json):\n\(errorDesc)\n\nUsing empty configuration."
+            "Error decoding fallback config file (app-fallback-config.json):\n\(errorDesc)\n\nUsing empty configuration."
         )
       } else if !isDefaultConfig && !suppressAlerts {
         // Optionally show a less critical alert for app-specific file errors
@@ -233,7 +233,7 @@ extension UserConfig {
         alertHandler.showAlert(
           style: .critical,
           message:
-            "Unexpected error processing default config file (global-config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
+            "Unexpected error processing fallback config file (app-fallback-config.json):\n\(error.localizedDescription)\n\nUsing empty configuration."
         )
       }  // Ignore other errors for non-default configs unless alerts enabled
       return nil
@@ -265,7 +265,7 @@ extension UserConfig {
     alertHandler.showAlert(
       style: .warning,
       message:
-        "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your default configuration (global-config.json). Some keys may not work as expected."
+        "Found \(errorCount) validation issue\(errorCount > 1 ? "s" : "") in your fallback configuration (app-fallback-config.json). Some keys may not work as expected."
     )
   }
 

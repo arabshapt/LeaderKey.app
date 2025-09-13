@@ -25,21 +25,21 @@ extension UserConfig {
 
   // Loads the config identified by the key ("Default" or bundle ID) into currentlyEditingGroup
   func loadConfigForEditing(key: String) {
-    // Handle Global Default separately first
-    if key == globalDefaultDisplayName {
-      print("[UserConfig loadConfigForEditing] Loading Global Default (from root). Key: \(key)")
+    // Handle Fallback config separately first
+    if key == defaultAppConfigDisplayName {
+      print("[UserConfig loadConfigForEditing] Loading Fallback config (from root). Key: \(key)")
       currentlyEditingGroup = root
       selectedConfigKeyForEditing = key
       isActivelyEditing = false  // Start with sorted view when loading
-      return  // <- Exit after handling Global Default
+      return  // <- Exit after handling Fallback config
     }
 
     // If not Global Default, proceed with file path lookup
     guard let filePath = discoveredConfigFiles[key] else {
       print("Error: Config file path not found for key: \(key)")
-      // If lookup fails, fall back to showing the Global Default
+      // If lookup fails, fall back to showing the Fallback config
       currentlyEditingGroup = root
-      selectedConfigKeyForEditing = globalDefaultDisplayName  // Revert selection
+      selectedConfigKeyForEditing = defaultAppConfigDisplayName  // Revert selection
       isActivelyEditing = false  // Start with sorted view when loading
       return
     }
@@ -82,12 +82,12 @@ extension UserConfig {
         NSError(domain: "UserConfig", code: 4, userInfo: [NSLocalizedDescriptionKey: errorDesc]),
         critical: false)
       // Keep using emptyRoot which was set above
-      // Revert selection to Global Default if app config fails to load
+      // Revert selection to Fallback config if app config fails to load
       print(
-        "[UserConfig loadConfigForEditing] Failed to load app config '\(key)', reverting selection to Global Default."
+        "[UserConfig loadConfigForEditing] Failed to load app config '\(key)', reverting selection to Fallback config."
       )
       currentlyEditingGroup = root
-      selectedConfigKeyForEditing = globalDefaultDisplayName
+      selectedConfigKeyForEditing = defaultAppConfigDisplayName
       isActivelyEditing = false  // Start with sorted view when loading
     }
   }

@@ -12,7 +12,7 @@ extension UserConfig {
       currentlyEditingGroup = emptyRoot
       validationErrors = []
       // Maybe reset selection?
-      selectedConfigKeyForEditing = globalDefaultDisplayName
+      selectedConfigKeyForEditing = defaultAppConfigDisplayName
       // Re-discover files? Might be problematic if dir access is the issue.
       discoverConfigFiles()
     }

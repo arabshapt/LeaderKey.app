@@ -77,8 +77,8 @@ final class Karabiner2InputMethod: InputMethod {
       return
     }
 
-    // 1. Load global config (already loaded in userConfig)
-    let globalConfig = userConfig
+    // 1. Load fallback config (already loaded in userConfig)
+    let fallbackConfig = userConfig
     
     // 2. Discover all app configs in Application Support directory
     let configDir = NSHomeDirectory() + "/Library/Application Support/Leader Key"
@@ -119,7 +119,7 @@ final class Karabiner2InputMethod: InputMethod {
           if let appSpecificConfig = loadAndMergeAppConfig(
             bundleId: bundleId, 
             configPath: appConfigPath, 
-            globalConfig: globalConfig
+            fallbackConfig: fallbackConfig
           ) {
             debugLog("[Karabiner2InputMethod] Adding to appConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
             appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: customName))
@@ -137,7 +137,7 @@ final class Karabiner2InputMethod: InputMethod {
     
     // 3. Generate unified EDN with hierarchical organization
     let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
-      globalConfig: globalConfig,
+      fallbackConfig: fallbackConfig,
       appConfigs: appConfigs
     )
     
@@ -238,9 +238,9 @@ final class Karabiner2InputMethod: InputMethod {
   }
   
   // Helper to load an app config and merge with fallback
-  private func loadAndMergeAppConfig(bundleId: String, configPath: String, globalConfig: UserConfig) -> UserConfig? {
+  private func loadAndMergeAppConfig(bundleId: String, configPath: String, fallbackConfig: UserConfig) -> UserConfig? {
     // Use UserConfig's existing getConfig method which handles merging with fallback
-    let mergedRoot = globalConfig.getConfig(for: bundleId)
+    let mergedRoot = fallbackConfig.getConfig(for: bundleId)
     
     // Create a new UserConfig with the merged root
     let appConfig = UserConfig()

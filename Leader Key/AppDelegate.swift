@@ -714,22 +714,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       }
     }
 
-    // Default fallback - use global default
-    print("[AppDelegate] Falling back to global default config")
-    return globalDefaultDisplayName
+    // Default fallback - use fallback config
+    print("[AppDelegate] Falling back to fallback config")
+    return defaultAppConfigDisplayName
   }
 
   // Find the configuration key for a given Group
   private func findConfigKeyForGroup(_ group: Group) -> String {
-    // Check if this is the global default (root config)
+    // Check if this is the fallback config (root config)
     if areGroupsEqual(group, config.root) {
-      return globalDefaultDisplayName
+      return defaultAppConfigDisplayName
     }
 
     // Search through discovered config files to find a match
     for (key, filePath) in config.discoveredConfigFiles {
-      // Skip the global default entry
-      if key == globalDefaultDisplayName {
+      // Skip the fallback config entry
+      if key == defaultAppConfigDisplayName {
         continue
       }
 
@@ -762,7 +762,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     }
 
     // Final fallback
-    return globalDefaultDisplayName
+    return defaultAppConfigDisplayName
   }
 
   // Helper method to compare two Group objects for equality
@@ -886,7 +886,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     let configKey = determineConfigToFocus()
     let rootGroup: Group
 
-    if configKey == globalDefaultDisplayName {
+    if configKey == defaultAppConfigDisplayName {
       rootGroup = config.root
     } else if let filePath = config.discoveredConfigFiles[configKey],
       let loadedGroup = config.decodeConfig(
