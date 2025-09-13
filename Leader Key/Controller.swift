@@ -73,7 +73,6 @@ class Controller {
 
   // Define an enum for activation type
   enum ActivationType {
-    case defaultOnly
     case appSpecificWithFallback
     case fallbackOnly
   }
@@ -85,9 +84,9 @@ class Controller {
     let configKeyForSettings: String  // Track which config key to show in settings
 
     switch type {
-    case .defaultOnly:
+    case .fallbackOnly:
       configToLoad = userConfig.root  // Use the already loaded default config
-      configKeyForSettings = globalDefaultDisplayName
+      configKeyForSettings = defaultAppConfigDisplayName
     case .appSpecificWithFallback:
       // Check if we have a specific bundleId override (like "__FALLBACK__")
       if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
@@ -105,7 +104,7 @@ class Controller {
           // Look for the display name that matches this bundle ID in discovered configs
           var foundConfigKey: String? = nil
           for (displayKey, _) in userConfig.discoveredConfigFiles {
-            if displayKey != globalDefaultDisplayName && displayKey != defaultAppConfigDisplayName {
+            if displayKey != defaultAppConfigDisplayName {
               // Check if this key is for the current bundle ID
               if let extractedId = userConfig.extractBundleId(from: displayKey),
                 extractedId == bundleId
@@ -118,7 +117,7 @@ class Controller {
           configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
         } else {
           // No bundle ID, use the default
-          configKeyForSettings = globalDefaultDisplayName
+          configKeyForSettings = defaultAppConfigDisplayName
         }
       }
     case .fallbackOnly:

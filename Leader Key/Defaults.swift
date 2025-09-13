@@ -193,10 +193,6 @@ enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identif
 // Extend KeyboardShortcuts.Name to add app-specific names
 extension KeyboardShortcuts.Name {
   static let activate = KeyboardShortcuts.Name("activate")
-  static let activateDefaultOnly = KeyboardShortcuts.Name(
-    "activateDefaultOnly",
-    default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .shift])
-  )
   static let activateAppSpecific = KeyboardShortcuts.Name(
     "activateAppSpecific",
     default: KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])

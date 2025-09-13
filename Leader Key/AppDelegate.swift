@@ -240,14 +240,13 @@ private struct KeyboardShortcutsView: View {
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
-      Settings.Section(title: "Global Activation Shortcuts") {
+      Settings.Section(title: "Activation Shortcuts") {
         Form {
-          KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
           KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
           KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
         }
         Text(
-          "Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.\nForce Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck."
+          "App-Specific tries to load the config for the frontmost app, or falls back to the default.\nForce Reset immediately clears all state if LeaderKey gets stuck."
         )
         .font(.caption)
         .foregroundColor(.secondary)
@@ -1062,7 +1061,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         do {
           let newRoot: Group
           switch type {
-          case .defaultOnly:
+          case .fallbackOnly:
             newRoot = self.config.root
           case .appSpecificWithFallback:
             // Use the same overlay detection logic as initial activation
@@ -1510,7 +1509,7 @@ extension AppDelegate {
       cachedActivationKeyCodes.insert(keyCode)
       cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
       var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.defaultOnly))  // Use defaultOnly as placeholder for force reset
+      shortcuts.append((shortcut, Controller.ActivationType.fallbackOnly))  // Use fallbackOnly as placeholder for force reset
       cachedActivationShortcuts[keyCode] = shortcuts
     }
 
@@ -1524,15 +1523,6 @@ extension AppDelegate {
       cachedActivationShortcuts[keyCode] = shortcuts
     }
 
-    // Cache default-only shortcut
-    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly) {
-      let keyCode = UInt16(shortcut.carbonKeyCode)
-      cachedActivationKeyCodes.insert(keyCode)
-      cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-      var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.defaultOnly))
-      cachedActivationShortcuts[keyCode] = shortcuts
-    }
 
     print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes")
   }
@@ -2583,8 +2573,8 @@ extension AppDelegate {
     // Determine the bundle ID for caching
     let cacheId: String
     switch activationType {
-    case .defaultOnly:
-      cacheId = "global"
+    case .fallbackOnly:
+      cacheId = "fallback"
     case .appSpecificWithFallback:
       // Check if we have __FALLBACK__ bundleId
       if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
@@ -2943,7 +2933,7 @@ extension AppDelegate {
         // This ensures consistent behavior with CGEventTap mode
         activationType = .appSpecificWithFallback
       } else {
-        activationType = .defaultOnly
+        activationType = .fallbackOnly
       }
 
       // Check if window is already visible (same as handleActivation does)
@@ -2976,7 +2966,7 @@ extension AppDelegate {
           // Determine new active root based on activation type
           let newRoot: Group
           switch activationType {
-          case .defaultOnly:
+          case .fallbackOnly:
             newRoot = self.config.root
           case .appSpecificWithFallback:
             // Check if we have __FALLBACK__ bundleId
