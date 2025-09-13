@@ -234,29 +234,6 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 
 // MARK: - Settings Panes
 
-// Define the view for the Shortcuts pane
-private struct KeyboardShortcutsView: View {
-  private let contentWidth = SettingsConfig.contentWidth
-
-  var body: some View {
-    Settings.Container(contentWidth: contentWidth) {
-      Settings.Section(title: "Global Activation Shortcuts") {
-        Form {
-          KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
-          KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
-          KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
-        }
-        Text(
-          "Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.\nForce Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck."
-        )
-        .font(.caption)
-        .foregroundColor(.secondary)
-        .padding(.top, 4)
-      }
-    }
-  }
-}
-
 private struct OpacityPane: View {
   @Default(.normalModeOpacity) var normalModeOpacity
   @Default(.stickyModeOpacity) var stickyModeOpacity
@@ -288,6 +265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   var controller: Controller!
   let statusItem = StatusItem()
   let config = UserConfig()
+  let profileManager = ProfileManager()
   var fileMonitor: FileMonitor!
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
@@ -324,12 +302,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         toolbarIcon: NSImage(
           systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
         contentView: { SearchPane().environmentObject(self.config) }
-      ),
-      Settings.Pane(
-        identifier: .shortcuts, title: "Shortcuts",
-        toolbarIcon: NSImage(
-          systemSymbolName: "keyboard", accessibilityDescription: "Keyboard Shortcuts")!,
-        contentView: { KeyboardShortcutsView() }
       ),
       Settings.Pane(
         identifier: .advanced, title: "Advanced",
@@ -429,6 +401,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     #endif
     startEventTapMonitoring()  // Defined in Event Tap Handling extension
 
+    // Register shortcuts for profiles
+    registerProfileShortcuts()
+
     // Add a delayed check to retry starting the event tap if it failed initially.
     // This helps if Accessibility permissions were granted just before launch
     // and the system needs a moment to register them.
@@ -453,6 +428,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       window.styleMask.insert(NSWindow.StyleMask.resizable)
       window.minSize = NSSize(width: 450, height: 650)
     }
+  }
+
+  func registerProfileShortcuts() {
+      for profile in profileManager.profiles {
+          let shortcutName = profile.shortcutName
+          KeyboardShortcuts.onKeyDown(for: shortcutName) { [weak self] in
+              self?.handleActivation(for: profile.name, shortcut: KeyboardShortcuts.getShortcut(for: shortcutName))
+          }
+      }
   }
 
   func applicationDidBecomeActive(_ notification: Notification) {
@@ -592,21 +576,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   func settingsMenuItemActionHandler(_: NSMenuItem) {
     print("[AppDelegate] settingsMenuItemActionHandler called.")
 
-    // Determine which config to focus on based on current state
-    let configKeyToFocus = determineConfigToFocus()
-
-    // Update the UserConfig to select the appropriate config for editing
-    print("[AppDelegate] Setting config to focus on: \(configKeyToFocus)")
-    config.loadConfigForEditing(key: configKeyToFocus)
-
-    // Store the navigation path to be used after config loads
-    let userStateNavigationPath = controller.userState.navigationPath
-    let hasNavigationPath = !userStateNavigationPath.isEmpty
-    if hasNavigationPath {
-      print(
-        "[AppDelegate] User has navigation path with \(userStateNavigationPath.count) groups to restore"
-      )
-    }
+    let profileToFocus = determineConfigToFocus()
+    config.selectedProfileName = profileToFocus
+    config.reload(for: profileToFocus)
 
     // Ensure we have the window reference first
     guard let window = settingsWindowController.window else {
@@ -662,287 +634,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     NSApp.activate(ignoringOtherApps: true)  // Bring the app to the front for settings
     print("[AppDelegate] Settings window show() called (positioning deferred).")
 
-    // Post navigation notification if we have a navigation path
-    if hasNavigationPath {
-      // Build the navigation path using the loaded config
-      let navigationPath = buildNavigationPathFromLoadedConfig(userStateNavigationPath)
-      if let path = navigationPath, !path.isEmpty {
-        print("[AppDelegate] Posting NavigateToSearchResult notification with path: \(path)")
-        NotificationCenter.default.post(
-          name: Notification.Name("NavigateToSearchResult"),
-          object: nil,
-          userInfo: ["path": path]
-        )
-      } else {
-        print(
-          "[AppDelegate] Failed to build navigation path for groups: \(userStateNavigationPath.map { $0.key ?? "nil" })"
-        )
-      }
-    }
   }
 
-  // Determine which config to focus on based on current state
   private func determineConfigToFocus() -> String {
-    // First check if UserState has a stored config key
-    if let activeConfigKey = controller.userState.activeConfigKey {
-      print("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
-      return activeConfigKey
-    }
-
-    // Fallback: check if we have an active sequence state
-    if let activeRoot = self.activeRootGroup {
-      print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
-      return findConfigKeyForGroup(activeRoot)
-    }
-
-    // Check if the Controller's UserState has an active root (without stored key)
-    if let userStateActiveRoot = controller.userState.activeRoot {
-      print("[AppDelegate] Using UserState activeRoot to determine config")
-      return findConfigKeyForGroup(userStateActiveRoot)
-    }
-
-    // Check frontmost application to determine if we should use app-specific config
-    if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-      let bundleId = frontmostApp.bundleIdentifier
-    {
-      print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
-
-      // Check if an app-specific config exists for this bundle ID
-      let appConfig = config.getConfig(for: bundleId)
-      // If the returned config is not the default root, then an app-specific config exists
-      if !areGroupsEqual(appConfig, config.root) {
-        return findConfigKeyForGroup(appConfig)
-      }
-    }
-
-    // Default fallback - use global default
-    print("[AppDelegate] Falling back to global default config")
-    return globalDefaultDisplayName
-  }
-
-  // Find the configuration key for a given Group
-  private func findConfigKeyForGroup(_ group: Group) -> String {
-    // Check if this is the global default (root config)
-    if areGroupsEqual(group, config.root) {
-      return globalDefaultDisplayName
-    }
-
-    // Search through discovered config files to find a match
-    for (key, filePath) in config.discoveredConfigFiles {
-      // Skip the global default entry
-      if key == globalDefaultDisplayName {
-        continue
-      }
-
-      // Try to load the config from this file path and compare
-      if let loadedGroup = config.decodeConfig(
-        from: filePath, suppressAlerts: true, isDefaultConfig: false)
-      {
-        if areGroupsEqual(loadedGroup, group) {
-          return key
-        }
-      }
-    }
-
-    // If we can't find a specific match, try to infer from bundle ID
-    if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-      let bundleId = frontmostApp.bundleIdentifier
-    {
-
-      // Look for an app-specific config key pattern
-      for key in config.discoveredConfigFiles.keys {
-        if key.contains(bundleId) {
-          return key
-        }
-      }
-
-      // Check if there's a fallback app config
-      if config.discoveredConfigFiles.keys.contains(defaultAppConfigDisplayName) {
-        return defaultAppConfigDisplayName
-      }
-    }
-
-    // Final fallback
-    return globalDefaultDisplayName
-  }
-
-  // Helper method to compare two Group objects for equality
-  private func areGroupsEqual(_ group1: Group, _ group2: Group) -> Bool {
-    return group1.key == group2.key && group1.label == group2.label
-      && group1.actions.count == group2.actions.count
-  }
-
-  // Build navigation path from the loaded config using the navigationPath groups
-  private func buildNavigationPathFromLoadedConfig(_ navigationPath: [Group]) -> [Int]? {
-    guard !navigationPath.isEmpty else {
-      print("[AppDelegate] buildNavigationPathFromLoadedConfig: Navigation path is empty")
-      return nil
-    }
-
-    // Use the actually loaded config that's displayed in settings
-    let rootGroup = config.currentlyEditingGroup
-    print(
-      "[AppDelegate] buildNavigationPathFromLoadedConfig: Using currentlyEditingGroup with key '\(rootGroup.key ?? "nil")'"
-    )
-    print(
-      "[AppDelegate] buildNavigationPathFromLoadedConfig: Navigation path has \(navigationPath.count) groups"
-    )
-
-    // Check if the first group in navigationPath is the root itself (has same nil key and matches root)
-    var groupsToProcess = navigationPath
-    if let firstGroup = navigationPath.first,
-      firstGroup.key == rootGroup.key && firstGroup.key == nil
-    {
-      print(
-        "[AppDelegate] buildNavigationPathFromLoadedConfig: Skipping root group in navigation path")
-      groupsToProcess = Array(navigationPath.dropFirst())
-    }
-
-    // If no groups left after removing root, return empty path
-    guard !groupsToProcess.isEmpty else {
-      print(
-        "[AppDelegate] buildNavigationPathFromLoadedConfig: No groups to navigate after removing root"
-      )
-      return []
-    }
-
-    // Build the index path by finding each group in the hierarchy
-    var indexPath: [Int] = []
-    var currentGroup = rootGroup
-
-    for (navIndex, targetGroup) in groupsToProcess.enumerated() {
-      let targetKey = targetGroup.key ?? ""
-      let targetLabel = targetGroup.label ?? ""
-      print(
-        "[AppDelegate] buildNavigationPathFromLoadedConfig: Looking for group with key='\(targetKey)' label='\(targetLabel)' at level \(navIndex)"
-      )
-
-      // Find the index of this group in the current level
-      // Match by key if both have keys, otherwise try to match by label or other properties
-      if let index = currentGroup.actions.firstIndex(where: { item in
-        if case .group(let group) = item {
-          // If target has a key, match by key and label
-          if !targetKey.isEmpty {
-            let matches =
-              group.key == targetGroup.key
-              && (targetGroup.label == nil || group.label == targetGroup.label)
-            if matches {
-              print(
-                "[AppDelegate] buildNavigationPathFromLoadedConfig: Found match by key at index \(index)"
-              )
-            }
-            return matches
-          } else if !targetLabel.isEmpty {
-            // If no key but has label, try matching by label alone
-            let matches = group.label == targetGroup.label
-            if matches {
-              print(
-                "[AppDelegate] buildNavigationPathFromLoadedConfig: Found match by label at index \(index)"
-              )
-            }
-            return matches
-          }
-        }
-        return false
-      }) {
-        indexPath.append(index)
-        // Move to the next level
-        if case .group(let nextGroup) = currentGroup.actions[index] {
-          currentGroup = nextGroup
-          print(
-            "[AppDelegate] buildNavigationPathFromLoadedConfig: Moving to next level, now at group with key='\(nextGroup.key ?? "nil")' label='\(nextGroup.label ?? "")'"
-          )
-        }
-      } else {
-        // If we can't find the group, log available groups for debugging
-        let availableGroups = currentGroup.actions.compactMap { item -> String in
-          if case .group(let g) = item {
-            return "key='\(g.key ?? "nil")' label='\(g.label ?? "")'"
-          }
-          return ""
-        }.filter { !$0.isEmpty }
-        print(
-          "[AppDelegate] buildNavigationPathFromLoadedConfig: Could not find group with key='\(targetKey)' label='\(targetLabel)' at level \(navIndex)"
-        )
-        print(
-          "[AppDelegate] buildNavigationPathFromLoadedConfig: Available groups at this level: \(availableGroups)"
-        )
-        return nil
-      }
-    }
-
-    print(
-      "[AppDelegate] buildNavigationPathFromLoadedConfig: Successfully built path: \(indexPath)")
-    return indexPath
-  }
-
-  // Build navigation path from UserState's navigationPath to indices (legacy method kept for compatibility)
-  private func buildNavigationPath() -> [Int]? {
-    let navigationPath = controller.userState.navigationPath
-    guard !navigationPath.isEmpty else {
-      return nil
-    }
-
-    // Get the root group that settings will show
-    let configKey = determineConfigToFocus()
-    let rootGroup: Group
-
-    if configKey == globalDefaultDisplayName {
-      rootGroup = config.root
-    } else if let filePath = config.discoveredConfigFiles[configKey],
-      let loadedGroup = config.decodeConfig(
-        from: filePath, suppressAlerts: true, isDefaultConfig: false)
-    {
-      // Apply the same merging logic as loadConfigForEditing
-      // Check if this is an app-specific config (not the fallback)
-      if filePath.contains("app.") && !filePath.contains("app-fallback-config.json") {
-        // Extract bundle ID from the display name
-        let bundleId = config.extractBundleId(from: configKey) ?? ""
-        let rawMergedGroup = config.mergeConfigWithFallback(
-          appSpecificConfig: loadedGroup, bundleId: bundleId)
-        rootGroup = config.sortGroupRecursively(group: rawMergedGroup)
-      } else {
-        rootGroup = loadedGroup
-      }
-    } else {
-      return nil
-    }
-
-    // Build the index path by finding each group in the hierarchy
-    var indexPath: [Int] = []
-    var currentGroup = rootGroup
-
-    for targetGroup in navigationPath {
-      // Find the index of this group in the current level
-      if let index = currentGroup.actions.firstIndex(where: { item in
-        if case .group(let group) = item {
-          return group.key == targetGroup.key && group.label == targetGroup.label
-        }
-        return false
-      }) {
-        indexPath.append(index)
-        // Move to the next level
-        if case .group(let nextGroup) = currentGroup.actions[index] {
-          currentGroup = nextGroup
-        }
-      } else {
-        // If we can't find the group, the path is invalid
-        print(
-          "[AppDelegate] buildNavigationPath: Could not find group '\(targetGroup.key ?? "")' in current level"
-        )
-        return nil
-      }
-    }
-
-    return indexPath
-  }
-
-  // Convenience method to show the main Leader Key window
-  func show(
-    type: Controller.ActivationType = .appSpecificWithFallback, bundleId: String? = nil, completion: (() -> Void)? = nil
-  ) {
-    print("[AppDelegate] show(type: \(type), bundleId: \(bundleId ?? "nil")) called.")
-    controller.show(type: type, bundleId: bundleId, completion: completion)
+      // For now, we just return the active profile name.
+      // In the future, we could add logic to select a profile based on the frontmost app.
+      return config.selectedProfileName
   }
 
   // Convenience method to hide the main Leader Key window
@@ -985,6 +682,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     }
   }
 
+  func handleActivation(for profileName: String, shortcut: KeyboardShortcuts.Shortcut?) {
+      print("[AppDelegate] handleActivation: Received activation request for profile: \(profileName)")
+      activeActivationShortcut = shortcut
+
+      if controller.window.isVisible {
+          print("[AppDelegate] handleActivation: Window is already visible.")
+          switch Defaults[.reactivateBehavior] {
+          case .hide:
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence.")
+              hide()
+              return
+          case .reset:
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
+              if !controller.window.isVisible {
+                  print("[AppDelegate] handleActivation (Reset): Making window visible.")
+                  controller.window.orderFront(nil)
+              }
+              controller.userState.clear()
+              self.currentSequenceGroup = nil
+              self.activeRootGroup = nil
+              self.stickyModeToggled = false
+              self.lastModifierFlags = []
+              let newRoot = self.config.getConfig(for: nil, in: profileName)
+              self.controller.userState.activeRoot = newRoot
+              print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
+              controller.repositionWindowNearMouse()
+              startSequence(for: profileName)
+          case .nothing:
+              print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
+              if !controller.window.isVisible {
+                  print("[AppDelegate] handleActivation (Nothing): Making window visible.")
+                  controller.window.orderFront(nil)
+              }
+              if currentSequenceGroup == nil {
+                  print("[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
+                  startSequence(for: profileName)
+              } else {
+                  print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
+              }
+          }
+      } else {
+          controller.show(for: profileName) {
+              self.startSequence(for: profileName)
+          }
+      }
+  }
   // MARK: - Command Key Release Handling Methods
 
   private func handleCommandPressed(_ modifierFlags: NSEvent.ModifierFlags) {
@@ -1023,86 +766,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     }
   }
 
-  // --- Activation Logic (Called by Event Tap) ---
-  func handleActivation(
-    type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil
-  ) {
-    print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
-    // Track the activation shortcut to prevent immediate command release triggers
-    activeActivationShortcut = activationShortcut
-
-    // This function decides what to do when an activation shortcut is pressed.
-
-    if controller.window.isVisible {  // Check if the Leader Key window is already visible
-      print("[AppDelegate] handleActivation: Window is already visible.")
-      switch Defaults[.reactivateBehavior] {  // Check user preference for reactivation
-      case .hide:
-        // Preference: Hide the window if activated again while visible.
-        print(
-          "[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence."
-        )
-        hide()
-        return  // Stop processing here
-
-      case .reset:
-        // Preference: Reset the sequence if activated again while visible.
-        print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
-        // Ensure window is visible and frontmost (but not key to avoid interfering with overlays)
-        if !controller.window.isVisible {
-          print("[AppDelegate] handleActivation (Reset): Making window visible.")
-          controller.window.orderFront(nil)  // Just bring to front without making key
-        }
-        // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
-        controller.userState.clear()
-        self.currentSequenceGroup = nil
-        self.activeRootGroup = nil
-        self.stickyModeToggled = false
-        self.lastModifierFlags = []
-        // Determine new active root based on the activation shortcut that was just pressed
-        do {
-          let newRoot: Group
-          switch type {
-          case .defaultOnly:
-            newRoot = self.config.root
-          case .appSpecificWithFallback:
-            // Use the same overlay detection logic as initial activation
-            let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-            let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
-            newRoot = self.config.getConfig(for: configKey)
-          case .fallbackOnly:
-            newRoot = self.config.getFallbackConfig()
-          }
-          self.controller.userState.activeRoot = newRoot
-        }
-        print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
-        controller.repositionWindowNearMouse()
-        startSequence(activationType: type)
-
-      case .nothing:
-        // Preference: Do nothing if activated again while visible, unless window lost focus.
-        print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
-        // Ensure window is visible (but not key to avoid interfering with overlays)
-        if !controller.window.isVisible {
-          print("[AppDelegate] handleActivation (Nothing): Making window visible.")
-          controller.window.orderFront(nil)  // Just bring to front without making key
-        }
-        // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
-        // This prevents restarting if the user just presses the shortcut again mid-sequence.
-        if currentSequenceGroup == nil {
-          print(
-            "[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
-          startSequence(activationType: type)
-        } else {
-          print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
-        }
-      }
-    } else {
-      // Show window invisibly; when ready, start sequence, then the window will reveal.
-      show(type: type) {
-        self.startSequence(activationType: type)
-      }
-    }
-  }
 
   // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods,
   // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers
@@ -2547,98 +2210,28 @@ extension AppDelegate {
     }
   }
 
-  // This function is called when an activation shortcut is pressed or via URL scheme.
-  // It sets up the initial state for a new key sequence based on the loaded config.
-  private func startSequence(activationType: Controller.ActivationType, bundleId: String? = nil) {
-    print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
 
-    // Reset sticky mode when starting any new sequence
-    if stickyModeToggled {
-      print("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
-      stickyModeToggled = false
-    }
+  private func startSequence(for profileName: String) {
+      print("[AppDelegate] startSequence: Starting sequence for profile: \(profileName)")
 
-    // Get the root group determined by the show() method via the controller's UserState
-    // UserState.activeRoot should have been set by Controller.show() just before this.
-    guard let rootGroup = controller.userState.activeRoot else {
-      // This should ideally not happen if Controller.show() worked correctly.
-      print(
-        "[AppDelegate] startSequence: ERROR - controller.userState.activeRoot is nil! Falling back to default config root."
-      )
-      // Fallback logic, though this indicates a potential issue elsewhere
-      self.activeRootGroup = config.root  // Store the determined root group locally
-      self.currentSequenceGroup = config.root  // Start the sequence at this root
-      // If the window is somehow visible, try to update its UI state.
-      if self.controller.window.isVisible {
-        print(
-          "[AppDelegate] startSequence (Fallback): Window visible, navigating UI to default root.")
-        DispatchQueue.main.async {
-          self.controller.userState.navigateToGroup(self.config.root)
-        }
+      // Reset sticky mode when starting any new sequence
+      if stickyModeToggled {
+          print("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
+          stickyModeToggled = false
       }
-      return
-    }
 
-    // Preprocess the config for fast lookups
-    // Determine the bundle ID for caching
-    let cacheId: String
-    switch activationType {
-    case .defaultOnly:
-      cacheId = "global"
-    case .appSpecificWithFallback:
-      // Check if we have __FALLBACK__ bundleId
-      if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
-        cacheId = "fallback"
-      } else {
-        // Get the actual bundle ID that was detected
-        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectFrontmostAppWithOverlay()
-        let configKey =
-          isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
-        cacheId = configKey ?? "global"
-      }
-    case .fallbackOnly:
-      cacheId = "fallback"
-    }
+      // Get the root group for the profile
+      let rootGroup = config.getConfig(for: nil, in: profileName)
+      self.activeRootGroup = rootGroup
+      self.currentSequenceGroup = rootGroup
 
-    // Store current bundle ID for later use
-    self.currentBundleId = cacheId
-
-    // Preprocess and cache the config for O(1) lookups
-    let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(
-      rootGroup, for: cacheId)
-    self.currentKeyLookupCache = keyLookupCache
-
-    print(
-      "[AppDelegate] startSequence: Preprocessed config for '\(cacheId)' with \(keyLookupCache.getCacheStats())"
-    )
-
-    // Store the root group for the current sequence and set the current level to the root.
-    print(
-      "[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'"
-    )
-    self.activeRootGroup = rootGroup
-    self.currentSequenceGroup = rootGroup
-
-    // Pre-compute keycodes for sticky mode optimization
-    var state = callbackState
-    state.stickyModeKeycodes = keyLookupCache.getValidKeycodes(forGroupId: rootGroup.id)
-    callbackState = state
-    print(
-      "[AppDelegate] Pre-computed \(state.stickyModeKeycodes?.count ?? 0) keycodes for sticky mode")
-
-    // If the window is already visible (e.g., reactivation with .reset), update the UI state.
-    if self.controller.window.isVisible {
-      print("[AppDelegate] startSequence: Window is visible, updating UI state for root group.")
+      // Update UI state
       DispatchQueue.main.async {
-        // Ensure UI reflects the start of the sequence at the root group.
-        self.controller.userState.navigateToGroup(rootGroup)
-        // Reset window transparency when starting a new sequence
-        self.controller.window.alphaValue = Defaults[.normalModeOpacity]
+          self.controller.userState.activeRoot = rootGroup
+          self.controller.userState.navigateToGroup(rootGroup)
+          self.controller.window.alphaValue = Defaults[.normalModeOpacity]
       }
-    }
-    print("[AppDelegate] startSequence: Sequence setup complete.")
   }
-
   // Resets the internal state variables used to track the current key sequence.
   func resetSequenceState() {
     // Only perform reset if a sequence is actually active

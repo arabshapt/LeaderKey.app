@@ -37,258 +37,75 @@ final class Karabiner2Exporter {
   // Legacy constant for backward compatibility
   private static let initialStateId: Int32 = globalInitialStateId
 
-  static func generateGokuEDN(from config: UserConfig, bundleId: String? = nil) -> String {
-    let (stateTree, _) = buildStateTree(from: config.root, appAlias: nil, bundleId: bundleId)
-    let manipulators = generateManipulators(from: stateTree, bundleId: bundleId)
-
-    return formatGokuEDN(manipulators: manipulators, bundleId: bundleId)
-  }
-  
   // Generate unified EDN with hierarchical organization and :condi grouping
   // Returns: (ednContent, stateMappings)
-  static func generateUnifiedGokuEDNHierarchical(
-    globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
-  ) -> (edn: String, stateMappings: [StateMapping]) {
-    debugLog("[Karabiner2Exporter] generateUnifiedGokuEDNHierarchical called with \(appConfigs.count) app configs")
-    
-    // 1. Generate app aliases
-    var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
-    var usedAliases = Set<String>()
-    
-    for (bundleId, config, customName) in appConfigs {
-      if bundleId.contains(".meta") {
-        debugLog("[Karabiner2Exporter] WARNING: Skipping bundle ID with .meta: \(bundleId)")
-        continue
-      }
-      
-      var alias = generateAppAlias(from: bundleId, customName: customName)
-      
-      // Ensure uniqueness
-      var counter = 1
-      let baseAlias = alias
-      while usedAliases.contains(alias) {
-        alias = "\(baseAlias)_\(counter)"
-        counter += 1
-      }
-      usedAliases.insert(alias)
-      
-      debugLog("[Karabiner2Exporter] Generated alias: bundleId=\(bundleId) → alias=\(alias)")
-      appAliases.append((bundleId: bundleId, alias: alias, config: config))
+    static func generateUnifiedGokuEDNHierarchical(
+        profiles: [Profile],
+        profileConfigs: [String: UserConfig],
+        appConfigs: [String: [(bundleId: String, config: UserConfig, customName: String?)]]
+    ) -> (edn: String, stateMappings: [StateMapping]) {
+        debugLog("[Karabiner2Exporter] generateUnifiedGokuEDNHierarchical called with \(profiles.count) profiles")
+
+        var allStateMappings: [StateMapping] = []
+        var desSections: [(name: String, groups: [ManipulatorGroup])] = []
+        var allActivations: [String] = []
+
+        for profile in profiles {
+            guard let profileConfig = profileConfigs[profile.name] else { continue }
+            let profileInitialStateId = generateAppInitialStateId(appAlias: profile.name)
+
+            // Main profile config
+            let (stateTree, mappings) = buildStateTree(from: profileConfig.root, appAlias: profile.name, bundleId: nil, initialStateId: profileInitialStateId)
+            allStateMappings.append(contentsOf: mappings)
+            let activationKey = convertShortcutToGokuFormat(KeyboardShortcuts.getShortcut(for: profile.shortcutName))
+            let (activation, groups) = generateManipulatorsForUnifiedHierarchical(from: stateTree, appAlias: profile.name, bundleId: nil, activationKey: activationKey, initialStateId: profileInitialStateId)
+            allActivations.append(activation)
+            desSections.append((name: "Leader Key - Profile: \(profile.name)", groups: groups))
+
+            // App-specific configs for this profile
+            if let appConfigsForProfile = appConfigs[profile.name] {
+                for (bundleId, config, customName) in appConfigsForProfile {
+                    let appAlias = "\(profile.name)_\(generateAppAlias(from: bundleId, customName: customName))"
+                    let appInitialStateId = generateAppInitialStateId(appAlias: appAlias)
+                    let (appStateTree, appMappings) = buildStateTree(from: config.root, appAlias: appAlias, bundleId: bundleId, initialStateId: appInitialStateId)
+                    allStateMappings.append(contentsOf: appMappings)
+                    let (appActivation, appGroups) = generateManipulatorsForUnifiedHierarchical(from: appStateTree, appAlias: appAlias, bundleId: bundleId, activationKey: activationKey, initialStateId: appInitialStateId)
+                    allActivations.append(appActivation)
+                    desSections.append((name: "Leader Key - Profile: \(profile.name) - App: \(customName ?? bundleId)", groups: appGroups))
+                }
+            }
+
+            // Fallback config for this profile
+            let fallbackRoot = profileConfig.getFallbackConfig(for: profile.name)
+            let fallbackAlias = "\(profile.name)_fallback"
+            let (fallbackStateTree, fallbackMappings) = buildStateTree(from: fallbackRoot, appAlias: fallbackAlias, bundleId: "__FALLBACK__", initialStateId: fallbackInitialStateId)
+            allStateMappings.append(contentsOf: fallbackMappings)
+            let (fallbackActivation, fallbackGroups) = generateManipulatorsForUnifiedHierarchical(from: fallbackStateTree, appAlias: fallbackAlias, bundleId: "__FALLBACK__", activationKey: activationKey, initialStateId: fallbackInitialStateId)
+            allActivations.append(fallbackActivation)
+            desSections.append((name: "Leader Key - Profile: \(profile.name) - Fallback", groups: fallbackGroups))
+        }
+
+        var allAppAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
+        for (_, configs) in appConfigs {
+            for (bundleId, config, customName) in configs {
+                let alias = generateAppAlias(from: bundleId, customName: customName)
+                allAppAliases.append((bundleId: bundleId, alias: alias, config: config))
+            }
+        }
+        let applications = generateApplicationsSectionFromAliases(appAliases: allAppAliases)
+
+        let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+        let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
+        allActivations.append(escapeRule)
+        allActivations.append(settingsRule)
+
+        let activationSection = (name: "Leader Key - Activation Shortcuts", groups: [ManipulatorGroup(condition: nil, rules: allActivations)])
+        let finalSections = [activationSection] + desSections
+
+        let ednContent = formatUnifiedGokuEDNHierarchical(applications: applications, desSections: finalSections)
+
+        return (edn: ednContent, stateMappings: allStateMappings)
     }
-    
-    // 2. Generate applications section
-    let applications = generateApplicationsSectionFromAliases(appAliases: appAliases)
-    
-    // 3. Structure to hold all :des sections and activations
-    var desSections: [(name: String, groups: [ManipulatorGroup])] = []
-    var allStateMappings: [StateMapping] = []
-    var allActivations: [String] = []  // Collect all activation rules
-    
-    // 4. Generate global mode section
-    let (globalStateTree, globalMappings) = buildStateTree(
-      from: globalConfig.root,
-      appAlias: nil,
-      bundleId: nil,
-      initialStateId: globalInitialStateId
-    )
-    allStateMappings.append(contentsOf: globalMappings)
-    
-    // 5. Generate app-specific sections FIRST (most specific)
-    for (bundleId, alias, config) in appAliases {
-      let appInitialStateId = generateAppInitialStateId(appAlias: alias)
-      let (appStateTree, appMappings) = buildStateTree(
-        from: config.root,
-        appAlias: alias,
-        bundleId: bundleId,
-        initialStateId: appInitialStateId
-      )
-      allStateMappings.append(contentsOf: appMappings)
-      
-      let (appActivation, appGroups) = generateManipulatorsForUnifiedHierarchical(
-        from: appStateTree,
-        appAlias: alias,
-        bundleId: bundleId,
-        activationKey: "{:key :k :modi [:command :shift]}",
-        initialStateId: appInitialStateId
-      )
-      allActivations.append(appActivation)
-      
-      // Find custom name from original appConfigs
-      let customName = appConfigs.first(where: { $0.bundleId == bundleId })?.customName
-      let appName = customName ?? alias
-      desSections.append((name: "Leader Key - \(appName)", groups: appGroups))
-    }
-    
-    // 6. Generate global mode section SECOND
-    let (globalActivation, globalGroups) = generateManipulatorsForUnifiedHierarchical(
-      from: globalStateTree,
-      appAlias: nil,
-      bundleId: nil,
-      activationKey: "{:key :k :modi :command}",
-      initialStateId: globalInitialStateId
-    )
-    allActivations.append(globalActivation)
-    desSections.append((name: "Leader Key - Global Mode", groups: globalGroups))
-    
-    // 7. Generate fallback mode section (explicit activation for testing)
-    // Load the fallback config using UserConfig's method
-    let fallbackRoot = globalConfig.getFallbackConfig()
-    
-    // Build state tree for fallback config
-    let (fallbackStateTree, fallbackMappings) = buildStateTree(
-      from: fallbackRoot,
-      appAlias: nil,
-      bundleId: "__FALLBACK__",
-      initialStateId: fallbackInitialStateId
-    )
-    allStateMappings.append(contentsOf: fallbackMappings)
-    
-    // Generate manipulators for fallback
-    let (fallbackActivation, fallbackGroups) = generateManipulatorsForUnifiedHierarchical(
-      from: fallbackStateTree,
-      appAlias: nil,
-      bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",
-      initialStateId: fallbackInitialStateId
-    )
-    allActivations.append(fallbackActivation)
-    desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
-    
-    // 8. Create activation section at the beginning with escape and settings rules
-    // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode)
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
-    // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
-    
-    var activationRules = allActivations
-    activationRules.append(escapeRule)
-    activationRules.append(settingsRule)
-    
-    let activationSection = (
-      name: "Leader Key - Activation Shortcuts",
-      groups: [ManipulatorGroup(condition: nil, rules: activationRules)]
-    )
-    
-    // Insert activation section at the beginning
-    var allSections = [activationSection]
-    
-    // Add modifier pass-through section right after activation
-    let modifierPassThroughSection = (
-      name: "Leader Key - Modifier Pass-Through",
-      groups: [ManipulatorGroup(
-        condition: nil,
-        rules: [
-          "   [:##left_shift :left_shift :leaderkey_active]",
-          "   [:##right_shift :right_shift :leaderkey_active]",
-          "   [:##left_command :left_command :leaderkey_active]",
-          "   [:##right_command :right_command :leaderkey_active]",
-          "   [:##left_option :left_option :leaderkey_active]",
-          "   [:##right_option :right_option :leaderkey_active]",
-          "   [:##left_control :left_control :leaderkey_active]",
-          "   [:##right_control :right_control :leaderkey_active]"
-        ]
-      )]
-    )
-    allSections.append(modifierPassThroughSection)
-    
-    allSections.append(contentsOf: desSections)
-    
-    // 8. Format as hierarchical EDN
-    let ednContent = formatUnifiedGokuEDNHierarchical(
-      applications: applications,
-      desSections: allSections
-    )
-    
-    return (edn: ednContent, stateMappings: allStateMappings)
-  }
-  
-  // Generate unified EDN with all app configs in a single file (legacy flat version)
-  // Returns: (ednContent, stateMappings)
-  static func generateUnifiedGokuEDN(
-    globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
-  ) -> (edn: String, stateMappings: [StateMapping]) {
-    debugLog("[Karabiner2Exporter] generateUnifiedGokuEDN called with \(appConfigs.count) app configs")
-    for (bundleId, _, customName) in appConfigs {
-      debugLog("[Karabiner2Exporter] Received appConfig: bundleId=\(bundleId), customName=\(customName ?? "nil")")
-    }
-    // 1. First generate all unique aliases
-    var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
-    var usedAliases = Set<String>()
-    
-    for (bundleId, config, customName) in appConfigs {
-      // Skip any bundle IDs that contain .meta (defensive check)
-      if bundleId.contains(".meta") {
-        debugLog("[Karabiner2Exporter] WARNING: Skipping bundle ID with .meta: \(bundleId)")
-        continue
-      }
-      
-      var alias = generateAppAlias(from: bundleId, customName: customName)
-      
-      // Ensure uniqueness
-      var counter = 1
-      let baseAlias = alias
-      while usedAliases.contains(alias) {
-        alias = "\(baseAlias)_\(counter)"
-        counter += 1
-      }
-      usedAliases.insert(alias)
-      
-      debugLog("[Karabiner2Exporter] Generated alias: bundleId=\(bundleId) → alias=\(alias)")
-      appAliases.append((bundleId: bundleId, alias: alias, config: config))
-    }
-    
-    // 2. Generate applications section with unique aliases
-    let applications = generateApplicationsSectionFromAliases(appAliases: appAliases)
-    
-    // 3. Generate global manipulators (no app condition, Cmd+K activation)
-    var allStateMappings: [StateMapping] = []
-    let (globalStateTree, globalMappings) = buildStateTree(from: globalConfig.root, appAlias: nil, bundleId: nil, initialStateId: globalInitialStateId)
-    allStateMappings.append(contentsOf: globalMappings)
-    let globalManipulators = generateManipulatorsForUnified(
-      from: globalStateTree,
-      appAlias: nil,
-      bundleId: nil,
-      activationKey: "{:key :k :modi :command}",  // Cmd+K for global
-      initialStateId: globalInitialStateId
-    )
-    
-    // 4. Generate app-specific manipulators (Cmd+Shift+K activation)
-    var appSections: [(alias: String, manipulators: [String])] = []
-    for (bundleId, alias, config) in appAliases {
-      let appInitialStateId = generateAppInitialStateId(appAlias: alias)
-      let (appStateTree, appMappings) = buildStateTree(from: config.root, appAlias: alias, bundleId: bundleId, initialStateId: appInitialStateId)
-      allStateMappings.append(contentsOf: appMappings)
-      let manipulators = generateManipulatorsForUnified(
-        from: appStateTree,
-        appAlias: alias,
-        bundleId: bundleId,
-        activationKey: "{:key :k :modi [:command :shift]}",  // Cmd+Shift+K for app-specific
-        initialStateId: appInitialStateId
-      )
-      appSections.append((alias: alias, manipulators: manipulators))
-    }
-    
-    // 5. Generate fallback-only activation manipulator (Cmd+Option+K)
-    // Using app-specific variables but with __FALLBACK__ bundleId
-    let fallbackManipulator = generateUnifiedActivationManipulator(
-      appAlias: nil,
-      bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",  // Cmd+Option+K for fallback
-      initialStateId: fallbackInitialStateId
-    )
-    
-    // 6. Format unified EDN
-    let ednContent = formatUnifiedGokuEDN(
-      applications: applications,
-      globalManipulators: globalManipulators,
-      appSections: appSections,
-      fallbackManipulator: fallbackManipulator
-    )
-    
-    return (edn: ednContent, stateMappings: allStateMappings)
-  }
   
   // Generate simple app alias from bundle ID or custom name
   private static func generateAppAlias(from bundleId: String, customName: String? = nil) -> String {
@@ -546,6 +363,13 @@ final class Karabiner2Exporter {
     let baseId = generateStateId(from: ["app_initial", appAlias])
     // Keep it in a reasonable range (1000-99999) to avoid conflicts
     return 1000 + (abs(baseId) % 99000)
+  }
+
+  private static func convertShortcutToGokuFormat(_ shortcut: KeyboardShortcuts.Shortcut?) -> String {
+      guard let shortcut = shortcut else { return "{:key :k :modi :command}" } // Default shortcut
+      let key = ":\(shortcut.key)"
+      let modifiers = shortcut.modifiers.map { ":\($0)" }.joined(separator: " ")
+      return "{:key \(key) :modi [\(modifiers)]}"
   }
 
   private static func generateManipulators(from nodes: [StateNode], bundleId: String? = nil) -> [String] {

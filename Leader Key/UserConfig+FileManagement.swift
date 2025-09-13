@@ -5,134 +5,146 @@ import Foundation
 // MARK: - Directory Management & File Operations
 extension UserConfig {
 
-  static func defaultDirectory() -> String {
-    let appSupportDir = FileManager.default.urls(
-      for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let path = (appSupportDir.path as NSString).appendingPathComponent(
-      "Leader Key")
-    do {
-      try FileManager.default.createDirectory(
-        atPath: path, withIntermediateDirectories: true)
-    } catch {
-      fatalError("Failed to create config directory: \(error)")  // Include error
-    }
-    return path
-  }
-
-  internal func ensureValidConfigDirectory() {
-    let dir = Defaults[.configDir]
-    let defaultDir = Self.defaultDirectory()
-
-    if !fileManager.fileExists(atPath: dir) {
-      alertHandler.showAlert(
-        style: .warning,
-        message:
-          "Config directory does not exist: \(dir)\nResetting to default location."
-      )
-      Defaults[.configDir] = defaultDir
+    static func defaultDirectory() -> String {
+        let appSupportDir = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let path = (appSupportDir.path as NSString).appendingPathComponent(
+            "Leader Key")
+        do {
+            try FileManager.default.createDirectory(
+                atPath: path, withIntermediateDirectories: true)
+        } catch {
+            fatalError("Failed to create config directory: \(error)")  // Include error
+        }
+        return path
     }
 
-    // Migrate old config filenames to new ones
-    migrateConfigFilenames()
-  }
-
-  private func migrateConfigFilenames() {
-    let configDir = Defaults[.configDir]
-
-    // Migrate config.json to global-config.json
-    let oldGlobalPath = (configDir as NSString).appendingPathComponent("config.json")
-    let newGlobalPath = (configDir as NSString).appendingPathComponent(fileName)
-
-    if fileManager.fileExists(atPath: oldGlobalPath)
-      && !fileManager.fileExists(atPath: newGlobalPath)
-    {
-      do {
-        try fileManager.moveItem(atPath: oldGlobalPath, toPath: newGlobalPath)
-        print("[Migration] Renamed config.json to \(fileName)")
-      } catch {
-        print("[Migration] Failed to rename config.json: \(error)")
-      }
+    var profilesDirectory: String {
+        (Self.defaultDirectory() as NSString).appendingPathComponent("profiles")
     }
 
-    // Migrate app.default.json to app-fallback-config.json
-    let oldFallbackPath = (configDir as NSString).appendingPathComponent("app.default.json")
-    let newFallbackPath = (configDir as NSString).appendingPathComponent(defaultAppConfigFileName)
+    internal func ensureValidConfigDirectory() {
+        let dir = Defaults[.configDir]
+        let defaultDir = Self.defaultDirectory()
 
-    if fileManager.fileExists(atPath: oldFallbackPath)
-      && !fileManager.fileExists(atPath: newFallbackPath)
-    {
-      do {
-        try fileManager.moveItem(atPath: oldFallbackPath, toPath: newFallbackPath)
-        print("[Migration] Renamed app.default.json to \(defaultAppConfigFileName)")
-      } catch {
-        print("[Migration] Failed to rename app.default.json: \(error)")
-      }
+        if !fileManager.fileExists(atPath: dir) {
+            alertHandler.showAlert(
+                style: .warning,
+                message:
+                "Config directory does not exist: \(dir)\nResetting to default location."
+            )
+            Defaults[.configDir] = defaultDir
+        }
+
+        // Migrate to profiles structure if needed
+        migrateToProfiles()
     }
-  }
 
-  var path: String {
-    (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
-  }
+    private func migrateToProfiles() {
+        let configDir = Defaults[.configDir]
+        let profilesDir = self.profilesDirectory
+        let defaultProfileDir = (profilesDir as NSString).appendingPathComponent("default")
 
-  var url: URL {
-    URL(fileURLWithPath: path)
-  }
+        // If profiles directory already exists, we assume migration is done.
+        if fileManager.fileExists(atPath: profilesDir) {
+            return
+        }
 
-  var exists: Bool {
-    fileManager.fileExists(atPath: path)
-  }
+        do {
+            // 1. Create profiles and default profile directories
+            try fileManager.createDirectory(atPath: defaultProfileDir, withIntermediateDirectories: true)
 
-  internal func ensureConfigFileExists() {
-    guard !exists else { return }
+            // 2. Move all .json files to the default profile directory
+            let files = try fileManager.contentsOfDirectory(atPath: configDir)
+            for file in files {
+                if file.hasSuffix(".json") {
+                    let oldPath = (configDir as NSString).appendingPathComponent(file)
+                    let newPath = (defaultProfileDir as NSString).appendingPathComponent(file)
+                    try fileManager.moveItem(atPath: oldPath, toPath: newPath)
+                }
+            }
 
-    do {
-      try bootstrapConfig()
-    } catch {
-      handleError(error, critical: true)
+            // 3. Rename global-config.json to config.json
+            let oldGlobalConfigPath = (defaultProfileDir as NSString).appendingPathComponent("global-config.json")
+            let newGlobalConfigPath = (defaultProfileDir as NSString).appendingPathComponent("config.json")
+            if fileManager.fileExists(atPath: oldGlobalConfigPath) {
+                try fileManager.moveItem(atPath: oldGlobalConfigPath, toPath: newGlobalConfigPath)
+            }
+
+            // 4. Create profiles.json
+            let profilesURL = (configDir as NSString).appendingPathComponent("profiles.json")
+            let defaultProfile = Profile(name: "default")
+            let profiles = [defaultProfile]
+            let data = try JSONEncoder().encode(profiles)
+            try data.write(to: URL(fileURLWithPath: profilesURL))
+
+        } catch {
+            print("Failed to migrate to profiles: \(error)")
+        }
     }
-  }
 
-  internal func ensureDefaultAppConfigExists() {
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
-      defaultAppConfigFileName)
-    guard !fileManager.fileExists(atPath: defaultAppConfigPath) else { return }
 
-    do {
-      try bootstrapDefaultAppConfig()
-    } catch {
-      handleError(error, critical: false)  // Non-critical since it's a fallback config
+    func path(for profileName: String) -> String {
+        (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(fileName)")
     }
-  }
 
-  private func bootstrapConfig() throws {
-    guard let data = defaultConfig.data(using: .utf8) else {
-      throw NSError(
-        domain: "UserConfig",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to encode default config"]
-      )
+    func url(for profileName: String) -> URL {
+        URL(fileURLWithPath: path(for: profileName))
     }
-    try writeFile(data: data)
-  }
 
-  private func bootstrapDefaultAppConfig() throws {
-    guard let data = defaultConfig.data(using: .utf8) else {
-      throw NSError(
-        domain: "UserConfig",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to encode fallback app config"]
-      )
+    func exists(for profileName: String) -> Bool {
+        fileManager.fileExists(atPath: path(for: profileName))
     }
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
-      defaultAppConfigFileName)
-    try data.write(to: URL(fileURLWithPath: defaultAppConfigPath))
-  }
 
-  private func writeFile(data: Data) throws {
-    try data.write(to: url)
-  }
+    internal func ensureConfigFileExists(for profileName: String) {
+        guard !exists(for: profileName) else { return }
 
-  private func readFile() throws -> String {
-    try String(contentsOfFile: path, encoding: .utf8)
-  }
+        do {
+            try bootstrapConfig(for: profileName)
+        } catch {
+            handleError(error, critical: true)
+        }
+    }
+
+    internal func ensureDefaultAppConfigExists(for profileName: String) {
+        let defaultAppConfigPath = (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(defaultAppConfigFileName)")
+        guard !fileManager.fileExists(atPath: defaultAppConfigPath) else { return }
+
+        do {
+            try bootstrapDefaultAppConfig(for: profileName)
+        } catch {
+            handleError(error, critical: false)  // Non-critical since it's a fallback config
+        }
+    }
+
+    private func bootstrapConfig(for profileName: String) throws {
+        guard let data = defaultConfig.data(using: .utf8) else {
+            throw NSError(
+                domain: "UserConfig",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode default config"]
+            )
+        }
+        try writeFile(data: data, for: profileName)
+    }
+
+    private func bootstrapDefaultAppConfig(for profileName: String) throws {
+        guard let data = defaultConfig.data(using: .utf8) else {
+            throw NSError(
+                domain: "UserConfig",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode fallback app config"]
+            )
+        }
+        let defaultAppConfigPath = (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(defaultAppConfigFileName)")
+        try data.write(to: URL(fileURLWithPath: defaultAppConfigPath))
+    }
+
+    private func writeFile(data: Data, for profileName: String) throws {
+        try data.write(to: url(for: profileName))
+    }
+
+    private func readFile(for profileName: String) throws -> String {
+        try String(contentsOfFile: path(for: profileName), encoding: .utf8)
+    }
 }

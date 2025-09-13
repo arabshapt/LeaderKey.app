@@ -63,8 +63,6 @@ class ClipboardManager: ObservableObject {
 }
 
 let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
-let globalDefaultDisplayName = "Global"
-let defaultAppConfigDisplayName = "Fallback App Config"
 
 class UserConfig: ObservableObject {
   // Root for the default config (global-config.json)
@@ -72,11 +70,11 @@ class UserConfig: ObservableObject {
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
   @Published var validationErrors: [ValidationError] = []  // Errors specific to the default config
-  @Published var discoveredConfigFiles: [String: String] = [:]  // Display Name -> File Path
-  @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName  // Initialize with the new default key
+  @Published var discoveredProfiles: [String] = []  // Display Name -> File Path
+  @Published var selectedProfileName: String = "default"  // Initialize with the new default key
   @Published var isActivelyEditing: Bool = false  // Track if user is actively editing vs ready to finalize
 
-  let fileName = "global-config.json"
+  let fileName = "config.json"
   let appConfigPrefix = "app."
   let defaultAppConfigFileName = "app-fallback-config.json"  // Added default app config filename
   var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
@@ -99,130 +97,44 @@ class UserConfig: ObservableObject {
   ) {
     self.alertHandler = alertHandler
     self.fileManager = fileManager
+
+    ensureValidConfigDirectory()
+    discoverProfiles()
+    ensureAndLoad(for: selectedProfileName)
   }
 
-  // MARK: - Public Interface
+  func ensureAndLoad(for profileName: String) {
+      ensureConfigFileExists(for: profileName)
+      ensureDefaultAppConfigExists(for: profileName)
+      loadConfig(for: profileName)
+  }
 
-  // Helper function to extract bundle ID from config filename or display name
-  func extractBundleId(from displayName: String) -> String? {
-    // Check if this is an app-specific config
-    guard displayName != globalDefaultDisplayName && displayName != defaultAppConfigDisplayName
-    else {
-      return nil
-    }
-
-    // First check if we have the file path for this display name
-    if let filePath = discoveredConfigFiles[displayName] {
-      let url = URL(fileURLWithPath: filePath)
-      let filename = url.lastPathComponent
-
-      // Extract bundle ID from filename (app.bundleId.json or app.bundleId.overlay.json)
-      if filename.hasPrefix(appConfigPrefix) && filename.hasSuffix(".json") {
-        var bundleId = String(filename.dropFirst(appConfigPrefix.count))
-
-        // Handle overlay configs
-        if bundleId.hasSuffix(".overlay.json") {
-          bundleId = String(bundleId.dropLast(".overlay.json".count))
-        } else {
-          bundleId = String(bundleId.dropLast(".json".count))
-        }
-
-        return bundleId.isEmpty ? nil : bundleId
+  func discoverProfiles() {
+      do {
+          let profileDirs = try fileManager.contentsOfDirectory(atPath: profilesDirectory)
+          self.discoveredProfiles = profileDirs.filter { !$0.hasPrefix(".") }
+      } catch {
+          print("Failed to discover profiles: \(error)")
+          self.discoveredProfiles = ["default"]
       }
-    }
-
-    // Fallback: try to extract from display name if it starts with "App: "
-    if displayName.hasPrefix("App: ") {
-      return String(displayName.dropFirst("App: ".count))
-    }
-
-    return nil
   }
 
-  // Helper function to get app icon from bundle ID
-  func getAppIcon(for bundleId: String) -> NSImage? {
-    let cacheKey = bundleId as NSString
-    if let cached = appBundleIconCache.object(forKey: cacheKey) {
-      return cached
-    }
+  func reload(for profileName: String) {
+      Events.send(.willReload)
 
-    // Prefer running app icon if available
-    var baseIcon: NSImage?
-    if let runningApp = NSWorkspace.shared.runningApplications.first(where: {
-      $0.bundleIdentifier == bundleId
-    }) {
-      baseIcon = runningApp.icon
-    } else if let appPath = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)?
-      .path
-    {
-      baseIcon = NSWorkspace.shared.icon(forFile: appPath)
-    }
+      // Clear caches and reset state
+      appConfigs = [:]  // Clear app-specific cache
+      configCache.clearCache()  // Clear parsed config cache
+      ConfigPreprocessor.shared.invalidateAll()  // Clear preprocessed key lookup caches
 
-    guard let icon = baseIcon else { return nil }
+      // Re-discover available profiles
+      discoverProfiles()
 
-    // Create a small resized representation (16x16) that matches sidebar usage
-    let targetSize = NSSize(width: 16, height: 16)
-    let resized = NSImage(size: targetSize, flipped: false) { rect in
-      let iconRect = NSRect(origin: .zero, size: icon.size)
-      icon.draw(in: rect, from: iconRect, operation: .sourceOver, fraction: 1)
-      return true
-    }
-    appBundleIconCache.setObject(resized, forKey: cacheKey)
-    return resized
-  }
-
-  func ensureAndLoad() {
-    self.ensureValidConfigDirectory()
-    self.ensureConfigFileExists()  // Ensures default global-config.json exists
-    self.ensureDefaultAppConfigExists()  // Ensures default app-fallback-config.json exists
-    self.discoverConfigFiles()  // Discover after ensuring both files exist
-    self.loadConfig()  // Loads the default config into 'root'
-    // Initially, load the default config for editing
-    if let defaultPath = discoveredConfigFiles[globalDefaultDisplayName] {
-      currentlyEditingGroup =
-        self.decodeConfig(from: defaultPath, suppressAlerts: false, isDefaultConfig: true)
-        ?? emptyRoot
-      selectedConfigKeyForEditing = globalDefaultDisplayName
-      // Set initial validation errors based on default config
-      validationErrors = ConfigValidator.validate(group: root)
-      // Start with sorted view when loading configs
-      isActivelyEditing = false
-    } else {
-      // If default doesn't exist somehow, ensure editor has empty root
-      currentlyEditingGroup = emptyRoot
-      selectedConfigKeyForEditing = globalDefaultDisplayName
-      isActivelyEditing = false
-    }
-  }
-
-  func reloadConfig() {
-    Events.send(.willReload)
-
-    // Clear caches and reset state
-    appConfigs = [:]  // Clear app-specific cache
-    configCache.clearCache()  // Clear parsed config cache
-    ConfigPreprocessor.shared.invalidateAll()  // Clear preprocessed key lookup caches
-
-    // Re-discover available config files
-    self.discoverConfigFiles()
-
-    // First reload default config with caution
-    self.loadConfig(suppressAlerts: true)  // Reload default config into 'root'
-
-    // Then safely reload the currently selected config for editing
-    // Using a dispatch async to separate the state updates
-    DispatchQueue.main.async {
-      // Check if current selection is still valid
-      if self.discoveredConfigFiles[self.selectedConfigKeyForEditing] != nil {
-        self.loadConfigForEditing(key: self.selectedConfigKeyForEditing)
-      } else {
-        // If current selection is no longer valid, fallback to default
-        self.loadConfigForEditing(key: globalDefaultDisplayName)
-      }
+      // Reload the specified profile
+      loadConfig(for: profileName)
 
       // Notify that reload is complete
       Events.send(.didReload)
-    }
   }
 
   // Placeholder for methods moved to extensions
