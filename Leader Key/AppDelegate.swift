@@ -234,6 +234,26 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 
 // MARK: - Settings Panes
 
+private struct KeyboardShortcutsView: View {
+  private let contentWidth = SettingsConfig.contentWidth
+
+  var body: some View {
+    Settings.Container(contentWidth: contentWidth) {
+      Settings.Section(title: "Global Shortcuts") {
+        Form {
+          KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
+        }
+        Text(
+          "Force Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck."
+        )
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .padding(.top, 4)
+      }
+    }
+  }
+}
+
 private struct OpacityPane: View {
   @Default(.normalModeOpacity) var normalModeOpacity
   @Default(.stickyModeOpacity) var stickyModeOpacity
@@ -302,6 +322,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         toolbarIcon: NSImage(
           systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
         contentView: { SearchPane().environmentObject(self.config) }
+      ),
+      Settings.Pane(
+        identifier: .shortcuts, title: "Shortcuts",
+        toolbarIcon: NSImage(
+          systemSymbolName: "keyboard", accessibilityDescription: "Keyboard Shortcuts")!,
+        contentView: { KeyboardShortcutsView() }
       ),
       Settings.Pane(
         identifier: .advanced, title: "Advanced",
@@ -2845,57 +2871,51 @@ extension AppDelegate {
   }
   
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
-    // Determine which root to use based on bundle ID
-    let rootGroup: Group
-    if let bundleId = mapping.bundleId {
-      if bundleId == "__FALLBACK__" {
-        // For fallback mode, use the fallback config
-        rootGroup = config.getFallbackConfig()
-      } else {
-        // Regular app-specific config
-        if let appRoot = config.appConfigs[bundleId],
-           let root = appRoot {
-          rootGroup = root
-        } else {
-          // App config not found, use the merged config (app-specific + fallback)
-          rootGroup = config.getConfig(for: bundleId)
-        }
+      // 1. Get profile name from appAlias. The alias is structured as "profileName_configName".
+      guard let appAlias = mapping.appAlias,
+            let separatorIndex = appAlias.firstIndex(of: "_") else {
+          debugLog("[AppDelegate] findActionForMapping: Could not determine profile from appAlias: \(mapping.appAlias ?? "nil"). Cannot look up action.")
+          return nil
       }
-    } else {
-      // No bundle ID means use global config
-      rootGroup = config.root
-    }
-    
-    var currentGroup = rootGroup
-    
-    // Navigate through path to find the group containing the action
-    for i in 0..<mapping.path.count - 1 {
-      let key = mapping.path[i]
-      var found = false
-      for item in currentGroup.actions {
-        if case .group(let group) = item, group.key == key {
-          currentGroup = group
-          found = true
-          break
-        }
+
+      let profileName = String(appAlias[..<separatorIndex])
+
+      // 2. Determine the root group from the correct profile's configuration.
+      // The `bundleId` from the mapping tells us if it's an app-specific config or the profile's fallback.
+      let bundleIdForLookup = (mapping.bundleId == "__FALLBACK__") ? nil : mapping.bundleId
+      let rootGroup = config.getConfig(for: bundleIdForLookup, in: profileName)
+
+      var currentGroup = rootGroup
+
+      // 3. Navigate through the path to find the group containing the action.
+      // The path contains all keys leading to the action, but not the action key itself.
+      for i in 0..<mapping.path.count - 1 {
+          let key = mapping.path[i]
+          var found = false
+          for item in currentGroup.actions {
+              if case .group(let group) = item, group.key == key {
+                  currentGroup = group
+                  found = true
+                  break
+              }
+          }
+          if !found {
+              debugLog("[AppDelegate] findActionForMapping: Could not find group with key '\(key)' in path for state ID \(mapping.stateId) in profile '\(profileName)'")
+              return nil
+          }
       }
-      if !found { 
-        debugLog("[AppDelegate] Could not find group with key '\(key)' in path for state ID \(mapping.stateId)")
-        return nil 
+
+      // 4. Find the action with the last key in the path.
+      if let lastKey = mapping.path.last {
+          for item in currentGroup.actions {
+              if case .action(let action) = item, action.key == lastKey {
+                  return action
+              }
+          }
+          debugLog("[AppDelegate] findActionForMapping: Could not find action with key '\(lastKey)' for state ID \(mapping.stateId) in profile '\(profileName)'")
       }
-    }
-    
-    // Find the action with the last key
-    if let lastKey = mapping.path.last {
-      for item in currentGroup.actions {
-        if case .action(let action) = item, action.key == lastKey {
-          return action
-        }
-      }
-      debugLog("[AppDelegate] Could not find action with key '\(lastKey)' for state ID \(mapping.stateId)")
-    }
-    
-    return nil
+
+      return nil
   }
   
   private func executeActionByStateId(_ stateId: Int32, sticky: Bool = false) {

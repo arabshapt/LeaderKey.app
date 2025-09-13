@@ -4,9 +4,9 @@ import Foundation
 // MARK: - Config Loading & Decoding
 extension UserConfig {
 
-    internal func loadConfig(for profileName: String, suppressAlerts: Bool = false) {
-        let configPath = self.path(for: profileName)
-        if let loadedRoot = decodeConfig(from: configPath, for: profileName, suppressAlerts: suppressAlerts, isDefaultConfig: true) {
+    internal func loadProfileFallbackConfig(for profileName: String, suppressAlerts: Bool = false) {
+        let fallbackPath = (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(defaultAppConfigFileName)")
+        if let loadedRoot = decodeConfig(from: fallbackPath, for: profileName, suppressAlerts: suppressAlerts) {
             self.root = loadedRoot
             self.validationErrors = ConfigValidator.validate(group: self.root)
             if !validationErrors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
@@ -82,7 +82,7 @@ extension UserConfig {
         return getFallbackConfig(for: profileName)
     }
 
-    internal func decodeConfig(from filePath: String, for profileName: String, suppressAlerts: Bool, isDefaultConfig: Bool) -> Group? {
+    internal func decodeConfig(from filePath: String, for profileName: String, suppressAlerts: Bool) -> Group? {
         let configName = (filePath as NSString).lastPathComponent
 
         let fileURL = URL(fileURLWithPath: filePath)
@@ -96,10 +96,10 @@ extension UserConfig {
         do {
             data = try Data(contentsOf: fileURL)
         } catch {
-            if isDefaultConfig && !suppressAlerts {
+            if !suppressAlerts {
                 alertHandler.showAlert(
-                    style: .critical,
-                    message: "Failed to read config file (\(configName)) for profile '\(profileName)':\n\(error.localizedDescription)\n\nUsing empty configuration."
+                    style: .warning,
+                    message: "Failed to read config file (\(configName)) for profile '\(profileName)':\n\(error.localizedDescription)"
                 )
             }
             return nil
@@ -111,32 +111,25 @@ extension UserConfig {
 
             let errors = ConfigValidator.validate(group: decodedRoot)
             if !errors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
-                if isDefaultConfig {
-                    showValidationAlert(for: profileName)
-                }
+                showValidationAlert(for: profileName)
             }
 
             configCache.setConfig(decodedRoot, for: filePath, fileModificationDate: fileModDate)
             return decodedRoot
         } catch let decodingError as DecodingError {
             let errorDesc = formatDecodingError(decodingError, in: configName)
-            if isDefaultConfig && !suppressAlerts {
-                alertHandler.showAlert(
-                    style: .critical,
-                    message: "Error decoding config file (\(configName)) for profile '\(profileName)':\n\(errorDesc)\n\nUsing empty configuration."
-                )
-            } else if !isDefaultConfig && !suppressAlerts {
+            if !suppressAlerts {
                 alertHandler.showAlert(
                     style: .warning,
-                    message: "Error decoding app-specific config file \(configName) for profile '\(profileName)':\n\(errorDesc)\n\nThis config will be ignored."
+                    message: "Error decoding config file \(configName) for profile '\(profileName)':\n\(errorDesc)"
                 )
             }
             return nil
         } catch {
-            if isDefaultConfig && !suppressAlerts {
+            if !suppressAlerts {
                 alertHandler.showAlert(
-                    style: .critical,
-                    message: "Unexpected error processing config \(configName) for profile '\(profileName)':\n\(error.localizedDescription)\n\nUsing empty configuration."
+                    style: .warning,
+                    message: "Unexpected error processing config \(configName) for profile '\(profileName)':\n\(error.localizedDescription)"
                 )
             }
             return nil

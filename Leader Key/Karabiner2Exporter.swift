@@ -54,13 +54,7 @@ final class Karabiner2Exporter {
             guard let profileConfig = profileConfigs[profile.name] else { continue }
             let profileInitialStateId = generateAppInitialStateId(appAlias: profile.name)
 
-            // Main profile config
-            let (stateTree, mappings) = buildStateTree(from: profileConfig.root, appAlias: profile.name, bundleId: nil, initialStateId: profileInitialStateId)
-            allStateMappings.append(contentsOf: mappings)
             let activationKey = convertShortcutToGokuFormat(KeyboardShortcuts.getShortcut(for: profile.shortcutName))
-            let (activation, groups) = generateManipulatorsForUnifiedHierarchical(from: stateTree, appAlias: profile.name, bundleId: nil, activationKey: activationKey, initialStateId: profileInitialStateId)
-            allActivations.append(activation)
-            desSections.append((name: "Leader Key - Profile: \(profile.name)", groups: groups))
 
             // App-specific configs for this profile
             if let appConfigsForProfile = appConfigs[profile.name] {

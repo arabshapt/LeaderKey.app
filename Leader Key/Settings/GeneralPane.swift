@@ -23,6 +23,7 @@ struct GeneralPane: View {
   @StateObject private var profileManager = ProfileManager()
   @State private var newProfileName = ""
   @State private var showingAddProfileAlert = false
+  @State private var showingAddConfigSheet = false
 
   var renameAlertMessage: String {
     var messageText =
@@ -74,6 +75,15 @@ struct GeneralPane: View {
                 showingAddProfileAlert = true
             } label: {
                 Label("Add Profile", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 4)
+
+            // --- Add Config Button ---
+            Button {
+                showingAddConfigSheet = true
+            } label: {
+                Label("Add App Config", systemImage: "plus.square.on.square")
             }
             .buttonStyle(.borderless)
             .padding(.top, 4)
@@ -248,6 +258,10 @@ struct GeneralPane: View {
     } message: {
         Text("Are you sure you want to delete the profile ‘\(config.selectedProfileName)’? This action cannot be undone.")
     }
+    .sheet(isPresented: $showingAddConfigSheet) {
+        AddConfigSheet(profileName: config.selectedProfileName)
+            .environmentObject(config)
+    }
   }
 
   private func expandAllGroups(in group: Group, parentPath: [Int]) {
@@ -291,17 +305,131 @@ struct GeneralPane: View {
 }
 
 
+private struct AddConfigSheet: View {
+    @EnvironmentObject var config: UserConfig
+    @Environment(\.dismiss) private var dismiss
+    let profileName: String
+
+    private var runningApps: [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.bundleIdentifier != nil && $0.activationPolicy == .regular }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+    }
+
+    @State private var selectedApp: NSRunningApplication? = NSWorkspace.shared.frontmostApplication
+    @State private var showManualEntry = false
+    @State private var manualBundleId = ""
+    @State private var customDisplayName = ""
+    @State private var isOverlayConfig = false
+
+    private var effectiveBundleId: String {
+        if showManualEntry {
+            return manualBundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return selectedApp?.bundleIdentifier ?? ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Create New App-Specific Config")
+                .font(.title2)
+
+            Picker("Application", selection: $selectedApp) {
+                ForEach(runningApps, id: \.processIdentifier) { app in
+                    HStack {
+                        Image(nsImage: app.icon ?? NSImage())
+                            .resizable()
+                            .frame(width: 16, height: 16)
+                        Text(app.localizedName ?? app.bundleIdentifier ?? "Unknown")
+                    }
+                    .tag(app as NSRunningApplication?)
+                }
+            }
+            .disabled(showManualEntry)
+
+            Toggle("Advanced: Enter bundle identifier manually", isOn: $showManualEntry)
+                .onChange(of: showManualEntry) { manual in
+                    if manual {
+                        selectedApp = nil
+                    }
+                }
+
+            if showManualEntry {
+                TextField("com.example.app", text: $manualBundleId)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            Button("Choose App from Disk…") {
+                presentOpenPanel()
+            }
+
+            Divider()
+
+            TextField("Optional sidebar name", text: $customDisplayName)
+                .textFieldStyle(.roundedBorder)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Overlay Configuration", isOn: $isOverlayConfig)
+                    .font(.headline)
+                Text("Overlay configurations are used when apps like Raycast or Alfred show overlay windows. They have a '.overlay' suffix in the filename.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Create") {
+                    createConfig()
+                }
+                .disabled(effectiveBundleId.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 400)
+    }
+
+    private func createConfig() {
+        config.createAppConfig(
+            for: effectiveBundleId,
+            in: profileName,
+            customName: customDisplayName.isEmpty ? nil : customDisplayName,
+            isOverlay: isOverlayConfig
+        )
+        dismiss()
+    }
+
+    private func presentOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.title = "Select an Application"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if let bundle = Bundle(url: url), let bundleId = bundle.bundleIdentifier {
+                manualBundleId = bundleId
+                showManualEntry = true
+                if let name = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String {
+                    customDisplayName = name
+                } else {
+                    customDisplayName = url.deletingPathExtension().lastPathComponent
+                }
+            }
+        }
+    }
+}
+
 struct GeneralPane_Previews: PreviewProvider {
   static var previews: some View {
     // Preview needs adjustment if UserConfig init requires more
     let previewConfig = UserConfig()
     // Manually add some discovered files for preview
-    previewConfig.discoveredConfigFiles = [
-      globalDefaultDisplayName: "/path/to/global-config.json",
-      defaultAppConfigDisplayName: "/path/to/app-fallback-config.json",
-      "App: com.app.example": "/path/to/app.com.app.example.json",
-      "App: com.another.app": "/path/to/app.com.another.app.json",
-    ]
+    previewConfig.discoveredProfiles = ["default", "work"]
     previewConfig.currentlyEditingGroup = previewConfig.root  // Set initial editing group for preview
 
     return GeneralPane()

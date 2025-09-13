@@ -53,7 +53,7 @@ class Controller {
         // This should all be handled by the themes
         ViewSizeCache.shared.clear()  // invalidate cached sizes when config changes
         self.userState.isShowingRefreshState = true
-        self.show()
+        self.show(for: self.userConfig.selectedProfileName)
         // Delay for 4 * 300ms to wait for animation to be noticeable
         delay(Int(Pulsate.singleDurationS * 1000) * 3) {
           self.hide()
@@ -65,10 +65,6 @@ class Controller {
 
     // Lazily create cheatsheet to reduce baseline memory
     self.cheatsheetWindow = nil
-  }
-
-  func show() {
-    show(completion: nil)
   }
 
   func show(for profileName: String, bundleId: String? = nil, completion: (() -> Void)? = nil) {

@@ -74,7 +74,6 @@ class UserConfig: ObservableObject {
   @Published var selectedProfileName: String = "default"  // Initialize with the new default key
   @Published var isActivelyEditing: Bool = false  // Track if user is actively editing vs ready to finalize
 
-  let fileName = "config.json"
   let appConfigPrefix = "app."
   let defaultAppConfigFileName = "app-fallback-config.json"  // Added default app config filename
   var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
@@ -104,9 +103,8 @@ class UserConfig: ObservableObject {
   }
 
   func ensureAndLoad(for profileName: String) {
-      ensureConfigFileExists(for: profileName)
       ensureDefaultAppConfigExists(for: profileName)
-      loadConfig(for: profileName)
+      loadProfileFallbackConfig(for: profileName)
   }
 
   func discoverProfiles() {

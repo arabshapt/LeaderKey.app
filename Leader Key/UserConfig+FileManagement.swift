@@ -64,11 +64,18 @@ extension UserConfig {
                 }
             }
 
-            // 3. Rename global-config.json to config.json
+            // 3. Handle global-config.json migration
             let oldGlobalConfigPath = (defaultProfileDir as NSString).appendingPathComponent("global-config.json")
-            let newGlobalConfigPath = (defaultProfileDir as NSString).appendingPathComponent("config.json")
+            let newFallbackConfigPath = (defaultProfileDir as NSString).appendingPathComponent(defaultAppConfigFileName)
             if fileManager.fileExists(atPath: oldGlobalConfigPath) {
-                try fileManager.moveItem(atPath: oldGlobalConfigPath, toPath: newGlobalConfigPath)
+                if fileManager.fileExists(atPath: newFallbackConfigPath) {
+                    // If app-fallback-config.json already exists, back up global-config.json and then remove it
+                    let backupPath = (defaultProfileDir as NSString).appendingPathComponent("global-config.json.backup")
+                    try fileManager.moveItem(atPath: oldGlobalConfigPath, toPath: backupPath)
+                } else {
+                    // Otherwise, rename global-config.json to app-fallback-config.json
+                    try fileManager.moveItem(atPath: oldGlobalConfigPath, toPath: newFallbackConfigPath)
+                }
             }
 
             // 4. Create profiles.json
@@ -83,29 +90,6 @@ extension UserConfig {
         }
     }
 
-
-    func path(for profileName: String) -> String {
-        (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(fileName)")
-    }
-
-    func url(for profileName: String) -> URL {
-        URL(fileURLWithPath: path(for: profileName))
-    }
-
-    func exists(for profileName: String) -> Bool {
-        fileManager.fileExists(atPath: path(for: profileName))
-    }
-
-    internal func ensureConfigFileExists(for profileName: String) {
-        guard !exists(for: profileName) else { return }
-
-        do {
-            try bootstrapConfig(for: profileName)
-        } catch {
-            handleError(error, critical: true)
-        }
-    }
-
     internal func ensureDefaultAppConfigExists(for profileName: String) {
         let defaultAppConfigPath = (profilesDirectory as NSString).appendingPathComponent("\(profileName)/\(defaultAppConfigFileName)")
         guard !fileManager.fileExists(atPath: defaultAppConfigPath) else { return }
@@ -115,17 +99,6 @@ extension UserConfig {
         } catch {
             handleError(error, critical: false)  // Non-critical since it's a fallback config
         }
-    }
-
-    private func bootstrapConfig(for profileName: String) throws {
-        guard let data = defaultConfig.data(using: .utf8) else {
-            throw NSError(
-                domain: "UserConfig",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to encode default config"]
-            )
-        }
-        try writeFile(data: data, for: profileName)
     }
 
     private func bootstrapDefaultAppConfig(for profileName: String) throws {
@@ -140,11 +113,38 @@ extension UserConfig {
         try data.write(to: URL(fileURLWithPath: defaultAppConfigPath))
     }
 
-    private func writeFile(data: Data, for profileName: String) throws {
-        try data.write(to: url(for: profileName))
-    }
+    func createAppConfig(for bundleId: String, in profileName: String, customName: String?, isOverlay: Bool) {
+        let profileDir = (profilesDirectory as NSString).appendingPathComponent(profileName)
+        let suffix = isOverlay ? ".overlay.json" : ".json"
+        let fileName = "app.\(bundleId)\(suffix)"
+        let filePath = (profileDir as NSString).appendingPathComponent(fileName)
 
-    private func readFile(for profileName: String) throws -> String {
-        try String(contentsOfFile: path(for: profileName), encoding: .utf8)
+        if fileManager.fileExists(atPath: filePath) {
+            alertHandler.showAlert(
+                style: .warning,
+                message: "A configuration file for this application already exists in this profile."
+            )
+            return
+        }
+
+        do {
+            let emptyConfig = Group(key: nil, label: nil, actions: [])
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(emptyConfig)
+            try data.write(to: URL(fileURLWithPath: filePath))
+
+            if let customName = customName, !customName.isEmpty {
+                // We would need a way to store custom names per profile.
+                // This is not implemented yet.
+            }
+
+            reload(for: profileName)
+        } catch {
+            alertHandler.showAlert(
+                style: .critical,
+                message: "Failed to create application-specific configuration file: \(error.localizedDescription)"
+            )
+        }
     }
 }
