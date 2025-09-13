@@ -1,5 +1,6 @@
 import Cocoa
 import Defaults
+import Foundation
 import KeyboardShortcuts
 import SwiftUI
 
@@ -7,6 +8,36 @@ var defaultsSuite =
   ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
   ? UserDefaults(suiteName: UUID().uuidString)!
   : .standard
+
+// MARK: - LeaderKey Profile Model
+struct LeaderKeyProfile: Codable, Identifiable, Defaults.Serializable, Equatable {
+  let id: UUID
+  var name: String
+  var isActive: Bool
+  var shortcutName: String  // Unique identifier for KeyboardShortcuts.Name
+  
+  init(id: UUID = UUID(), name: String, isActive: Bool = false) {
+    self.id = id
+    self.name = name
+    self.isActive = isActive
+    self.shortcutName = "profile_\(id.uuidString)"
+  }
+  
+  // Directory path for this profile's configurations
+  var directoryPath: String {
+    let appSupportDir = FileManager.default.urls(
+      for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let leaderKeyDir = appSupportDir.appendingPathComponent("Leader Key")
+    let profilesDir = leaderKeyDir.appendingPathComponent("profiles")
+    let profileDir = profilesDir.appendingPathComponent(id.uuidString)
+    return profileDir.path
+  }
+  
+  // Get the KeyboardShortcuts.Name for this profile
+  var keyboardShortcutName: KeyboardShortcuts.Name {
+    KeyboardShortcuts.Name(shortcutName)
+  }
+}
 
 extension Defaults.Keys {
   static let configDir = Key<String>(
@@ -57,6 +88,12 @@ extension Defaults.Keys {
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>(
     "configFileCustomNames", default: [:], suite: defaultsSuite)
+
+  // Profile-related settings
+  static let leaderKeyProfiles = Key<[LeaderKeyProfile]>(
+    "leaderKeyProfiles", default: [], suite: defaultsSuite)
+  static let activeProfileId = Key<UUID?>(
+    "activeProfileId", default: nil, suite: defaultsSuite)
 
   // Overlay detection settings
   /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs

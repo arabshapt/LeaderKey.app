@@ -1027,6 +1027,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil
   ) {
     print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
+    
+    // Check if this is a profile activation
+    if let shortcut = activationShortcut {
+      let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
+      if let profileId = profileShortcutMap[shortcutKey] {
+        // Switch to the profile
+        let profileManager = ProfileManager()
+        if let profile = profileManager.profiles.first(where: { $0.id == profileId }) {
+          print("[AppDelegate] Switching to profile: \(profile.name)")
+          profileManager.setActiveProfile(profile)
+          controller.userConfig.switchToProfile(profile)
+        }
+      }
+    }
+    
     // Track the activation shortcut to prevent immediate command release triggers
     activeActivationShortcut = activationShortcut
 
@@ -1441,6 +1456,12 @@ extension AppDelegate {
     get { getAssociatedObject(self, &AssociatedKeys.cachedActivationShortcuts) ?? [:] }
     set { setAssociatedObject(self, &AssociatedKeys.cachedActivationShortcuts, newValue) }
   }
+  
+  // Maps shortcuts to profile IDs for profile activation
+  private var profileShortcutMap: [String: UUID] {
+    get { getAssociatedObject(self, &AssociatedKeys.profileShortcutMap) ?? [:] }
+    set { setAssociatedObject(self, &AssociatedKeys.profileShortcutMap, newValue) }
+  }
 
   // --- Config Preprocessing for Fast Lookups ---
   private var currentKeyLookupCache: KeyLookupCache? {
@@ -1479,6 +1500,7 @@ extension AppDelegate {
     static var cachedActivationKeyCodes = "cachedActivationKeyCodes"
     static var cachedActivationShortcuts = "cachedActivationShortcuts"
     static var cachedActivationModifiers = "cachedActivationModifiers"
+    static var profileShortcutMap = "profileShortcutMap"
     static var callbackOptimizationState = "callbackOptimizationState"
     static var currentKeyLookupCache = "currentKeyLookupCache"
     static var currentBundleId = "currentBundleId"
@@ -1513,7 +1535,7 @@ extension AppDelegate {
       cachedActivationShortcuts[keyCode] = shortcuts
     }
 
-    // Cache app-specific shortcut
+    // Cache app-specific shortcut (legacy - kept for backward compatibility)
     if let shortcut = KeyboardShortcuts.getShortcut(for: .activateAppSpecific) {
       let keyCode = UInt16(shortcut.carbonKeyCode)
       cachedActivationKeyCodes.insert(keyCode)
@@ -1522,7 +1544,24 @@ extension AppDelegate {
       shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
       cachedActivationShortcuts[keyCode] = shortcuts
     }
-
+    
+    // Cache profile shortcuts
+    profileShortcutMap.removeAll()
+    let profileManager = ProfileManager()
+    for profile in profileManager.profiles {
+      if let shortcut = KeyboardShortcuts.getShortcut(for: profile.keyboardShortcutName) {
+        let keyCode = UInt16(shortcut.carbonKeyCode)
+        cachedActivationKeyCodes.insert(keyCode)
+        cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
+        var shortcuts = cachedActivationShortcuts[keyCode] ?? []
+        shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
+        cachedActivationShortcuts[keyCode] = shortcuts
+        
+        // Store profile ID for this shortcut (use string key for dictionary)
+        let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
+        profileShortcutMap[shortcutKey] = profile.id
+      }
+    }
 
     print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes")
   }

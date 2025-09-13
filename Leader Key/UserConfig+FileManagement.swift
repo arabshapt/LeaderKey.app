@@ -20,6 +20,28 @@ extension UserConfig {
   }
 
   internal func ensureValidConfigDirectory() {
+    // If we have a current profile, use its directory
+    if let profile = currentProfile {
+      let profileDir = profile.directoryPath
+      
+      // Ensure profile directory exists
+      if !fileManager.fileExists(atPath: profileDir) {
+        do {
+          try fileManager.createDirectory(
+            atPath: profileDir,
+            withIntermediateDirectories: true,
+            attributes: nil
+          )
+        } catch {
+          print("Failed to create profile directory: \(error)")
+        }
+      }
+      
+      // Don't use the old configDir for profiles
+      return
+    }
+    
+    // Fallback to old behavior if no profile (shouldn't happen)
     let dir = Defaults[.configDir]
     let defaultDir = Self.defaultDirectory()
 
@@ -85,7 +107,10 @@ extension UserConfig {
   }
 
   var path: String {
-    (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
+    if let profile = currentProfile {
+      return (profile.directoryPath as NSString).appendingPathComponent(fileName)
+    }
+    return (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
   }
 
   var url: URL {
@@ -97,7 +122,8 @@ extension UserConfig {
   }
 
   internal func ensureDefaultAppConfigExists() {
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+    let configDir = currentProfile?.directoryPath ?? Defaults[.configDir]
+    let defaultAppConfigPath = (configDir as NSString).appendingPathComponent(
       defaultAppConfigFileName)
     guard !fileManager.fileExists(atPath: defaultAppConfigPath) else { return }
 

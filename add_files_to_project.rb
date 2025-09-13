@@ -26,7 +26,9 @@ files_to_add = [
   'InputMethod.swift',
   'CGEventTapInputMethod.swift',
   'KarabinerInputMethod.swift',
-  'UnixSocketServer.swift'
+  'UnixSocketServer.swift',
+  'LeaderKeyProfile.swift',
+  'ProfileManagementSheet.swift'
 ]
 
 # Add each file

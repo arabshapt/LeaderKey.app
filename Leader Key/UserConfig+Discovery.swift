@@ -10,7 +10,7 @@ extension UserConfig {
     migrateCustomNamesToMetadata()
 
     var discovered: [String: String] = [:]
-    let configDir = Defaults[.configDir]
+    let configDir = currentProfile?.directoryPath ?? Defaults[.configDir]
     let configDirUrl = URL(fileURLWithPath: configDir)
     let customNames = Defaults[.configFileCustomNames]  // Get custom names (for fallback)
 

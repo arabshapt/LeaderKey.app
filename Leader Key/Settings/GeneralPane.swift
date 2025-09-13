@@ -21,6 +21,11 @@ struct GeneralPane: View {
   @State private var showingAddConfigSheet = false
   @State private var keyToDelete: String?
   @State private var highlightedPath: [Int]?
+  
+  // Profile management
+  @StateObject private var profileManager = ProfileManager()
+  @State private var showingProfileSheet = false
+  @State private var profileToEdit: LeaderKeyProfile?
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -59,9 +64,59 @@ struct GeneralPane: View {
         HStack(alignment: .top) {
           // --- Left Sidebar: Config List --- START ---
           VStack(alignment: .leading) {
-            Text("Configurations")
-              .font(.title2)
-              .padding(.bottom, 5)
+            // Profile selector with management buttons
+            HStack {
+              Picker("", selection: Binding(
+                get: { profileManager.activeProfile?.id ?? UUID() },
+                set: { newId in
+                  if let profile = profileManager.profiles.first(where: { $0.id == newId }) {
+                    profileManager.setActiveProfile(profile)
+                    config.switchToProfile(profile)
+                  }
+                }
+              )) {
+                ForEach(profileManager.profiles) { profile in
+                  Text(profile.name).tag(profile.id)
+                }
+              }
+              .pickerStyle(.menu)
+              .frame(maxWidth: .infinity)
+              
+              Button(action: {
+                showingProfileSheet = true
+                profileToEdit = nil
+              }) {
+                Image(systemName: "plus")
+              }
+              .buttonStyle(.borderless)
+              .help("Add new profile")
+              
+              Button(action: {
+                if let activeProfile = profileManager.activeProfile {
+                  profileToEdit = activeProfile
+                  showingProfileSheet = true
+                }
+              }) {
+                Image(systemName: "pencil")
+              }
+              .buttonStyle(.borderless)
+              .disabled(profileManager.activeProfile == nil)
+              .help("Edit current profile")
+              
+              Button(action: {
+                if let activeProfile = profileManager.activeProfile,
+                   profileManager.profiles.count > 1 {
+                  _ = profileManager.deleteProfile(activeProfile)
+                }
+              }) {
+                Image(systemName: "trash")
+              }
+              .buttonStyle(.borderless)
+              .foregroundColor(.red)
+              .disabled(profileManager.profiles.count <= 1)
+              .help("Delete current profile")
+            }
+            .padding(.bottom, 5)
 
             List(selection: $listSelection) {
               ForEach(sortedConfigKeys, id: \.self) { key in
@@ -396,6 +451,19 @@ struct GeneralPane: View {
       AddConfigSheet()
         .environmentObject(config)  // Pass environment
     }
+    // Sheet for managing profiles
+    .sheet(isPresented: $showingProfileSheet) {
+      ProfileManagementSheet(
+        profileManager: profileManager,
+        profileToEdit: profileToEdit
+      )
+    }
+    .onAppear {
+      // Set initial profile if needed
+      if let activeProfile = profileManager.activeProfile {
+        config.currentProfile = activeProfile
+      }
+    }
   }
 
   private func expandAllGroups(in group: Group, parentPath: [Int]) {
@@ -686,6 +754,136 @@ private struct ValidationSummaryView: View {
   private var summaryBackgroundColor: Color {
     let hasErrors = errors.contains { $0.severity == .error }
     return hasErrors ? Color.red.opacity(0.1) : Color.orange.opacity(0.1)
+  }
+}
+
+// MARK: - ProfileManagementSheet
+struct ProfileManagementSheet: View {
+  @ObservedObject var profileManager: ProfileManager
+  let profileToEdit: LeaderKeyProfile?
+  
+  @Environment(\.dismiss) private var dismiss
+  @State private var profileName: String = ""
+  @State private var showingError = false
+  @State private var errorMessage = ""
+  
+  var isEditing: Bool {
+    profileToEdit != nil
+  }
+  
+  var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      Text(isEditing ? "Edit Profile" : "Create New Profile")
+        .font(.title2)
+        .fontWeight(.semibold)
+      
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Profile Name")
+          .font(.headline)
+        
+        TextField("Enter profile name", text: $profileName)
+          .textFieldStyle(.roundedBorder)
+        
+        Text("Choose a descriptive name for this profile (e.g., Work, Personal, Gaming)")
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+      
+      if !isEditing {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Activation Shortcut")
+            .font(.headline)
+          
+          if let profile = profileToEdit {
+            KeyboardShortcuts.Recorder("", name: profile.keyboardShortcutName)
+          } else {
+            Text("Set the keyboard shortcut after creating the profile")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
+        }
+      } else if let profile = profileToEdit {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Activation Shortcut")
+            .font(.headline)
+          
+          KeyboardShortcuts.Recorder("", name: profile.keyboardShortcutName)
+          
+          Text("This shortcut will activate the \(profile.name) profile")
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
+      }
+      
+      Spacer()
+      
+      HStack {
+        Button("Cancel") {
+          dismiss()
+        }
+        .keyboardShortcut(.escape)
+        
+        Spacer()
+        
+        Button(isEditing ? "Save" : "Create") {
+          if validateAndSave() {
+            dismiss()
+          }
+        }
+        .keyboardShortcut(.return)
+        .disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }
+    .padding(24)
+    .frame(minWidth: 400, minHeight: 250)
+    .onAppear {
+      if let profile = profileToEdit {
+        profileName = profile.name
+      }
+    }
+    .alert("Error", isPresented: $showingError) {
+      Button("OK") { }
+    } message: {
+      Text(errorMessage)
+    }
+  }
+  
+  private func validateAndSave() -> Bool {
+    let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    guard !trimmedName.isEmpty else {
+      errorMessage = "Profile name cannot be empty"
+      showingError = true
+      return false
+    }
+    
+    // Check for duplicate names (excluding current profile if editing)
+    let isDuplicate = profileManager.profiles.contains { profile in
+      if let editing = profileToEdit, editing.id == profile.id {
+        return false
+      }
+      return profile.name.lowercased() == trimmedName.lowercased()
+    }
+    
+    if isDuplicate {
+      errorMessage = "A profile with this name already exists"
+      showingError = true
+      return false
+    }
+    
+    if let profile = profileToEdit {
+      // Edit existing profile
+      profileManager.renameProfile(profile, to: trimmedName)
+    } else {
+      // Create new profile
+      let newProfile = profileManager.createProfile(name: trimmedName)
+      // Make it active if it's the only one
+      if profileManager.profiles.count == 1 {
+        profileManager.setActiveProfile(newProfile)
+      }
+    }
+    
+    return true
   }
 }
 

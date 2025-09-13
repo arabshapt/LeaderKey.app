@@ -3,6 +3,7 @@ import Cocoa
 import Combine
 import Defaults
 import Foundation
+import KeyboardShortcuts
 
 // MARK: - ClipboardManager
 class ClipboardManager: ObservableObject {
@@ -74,6 +75,7 @@ class UserConfig: ObservableObject {
   @Published var discoveredConfigFiles: [String: String] = [:]  // Display Name -> File Path
   @Published var selectedConfigKeyForEditing: String = defaultAppConfigDisplayName  // Initialize with fallback key
   @Published var isActivelyEditing: Bool = false  // Track if user is actively editing vs ready to finalize
+  @Published var currentProfile: LeaderKeyProfile?  // Current active profile
 
   let fileName = "app-fallback-config.json"  // Changed from global-config.json
   let appConfigPrefix = "app."
@@ -191,6 +193,25 @@ class UserConfig: ObservableObject {
       selectedConfigKeyForEditing = defaultAppConfigDisplayName
       isActivelyEditing = false
     }
+  }
+  
+  // Switch to a different profile
+  func switchToProfile(_ profile: LeaderKeyProfile) {
+    currentProfile = profile
+    // Clear current state
+    appConfigs.removeAll()
+    configCache.clearCache()
+    discoveredConfigFiles.removeAll()
+    
+    // Reload for new profile
+    ensureAndLoad()
+    
+    // Post notification
+    NotificationCenter.default.post(
+      name: .profileDidChange,
+      object: nil,
+      userInfo: ["profile": profile]
+    )
   }
 
   func reloadConfig() {
@@ -952,4 +973,181 @@ extension ActionOrGroup {
         ))
     }
   }
+}
+
+// MARK: - Profile Manager
+class ProfileManager: ObservableObject {
+  @Published var profiles: [LeaderKeyProfile] = []
+  @Published var activeProfile: LeaderKeyProfile?
+  
+  private let fileManager = FileManager.default
+  
+  init() {
+    loadProfiles()
+    ensureDefaultProfile()
+  }
+  
+  // MARK: - Profile Management
+  
+  func loadProfiles() {
+    profiles = Defaults[.leaderKeyProfiles]
+    activeProfile = profiles.first { $0.isActive }
+  }
+  
+  func saveProfiles() {
+    Defaults[.leaderKeyProfiles] = profiles
+  }
+  
+  func createProfile(name: String) -> LeaderKeyProfile {
+    let profile = LeaderKeyProfile(name: name)
+    
+    // Create directory for the profile
+    createProfileDirectory(for: profile)
+    
+    // Add to profiles list
+    profiles.append(profile)
+    
+    // If this is the first profile, make it active
+    if profiles.count == 1 {
+      setActiveProfile(profile)
+    } else {
+      saveProfiles()
+    }
+    
+    return profile
+  }
+  
+  func deleteProfile(_ profile: LeaderKeyProfile) -> Bool {
+    // Don't delete if it's the only profile
+    guard profiles.count > 1 else { return false }
+    
+    // Remove profile directory
+    do {
+      try fileManager.removeItem(atPath: profile.directoryPath)
+    } catch {
+      print("Failed to delete profile directory: \(error)")
+    }
+    
+    // If this was the active profile, activate another one
+    if profile.isActive, let firstOther = profiles.first(where: { $0.id != profile.id }) {
+      setActiveProfile(firstOther)
+    }
+    
+    // Remove from list
+    profiles.removeAll { $0.id == profile.id }
+    saveProfiles()
+    
+    // Remove keyboard shortcut
+    KeyboardShortcuts.reset(profile.keyboardShortcutName)
+    
+    return true
+  }
+  
+  func renameProfile(_ profile: LeaderKeyProfile, to newName: String) {
+    if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+      profiles[index].name = newName
+      saveProfiles()
+    }
+  }
+  
+  func setActiveProfile(_ profile: LeaderKeyProfile) {
+    // Deactivate all profiles
+    for i in profiles.indices {
+      profiles[i].isActive = false
+    }
+    
+    // Activate the selected profile
+    if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+      profiles[index].isActive = true
+      activeProfile = profiles[index]
+    }
+    
+    saveProfiles()
+    
+    // Post notification for profile change
+    NotificationCenter.default.post(
+      name: .profileDidChange,
+      object: nil,
+      userInfo: ["profile": profile]
+    )
+  }
+  
+  // MARK: - Directory Management
+  
+  private func createProfileDirectory(for profile: LeaderKeyProfile) {
+    let path = profile.directoryPath
+    
+    if !fileManager.fileExists(atPath: path) {
+      do {
+        try fileManager.createDirectory(
+          atPath: path,
+          withIntermediateDirectories: true,
+          attributes: nil
+        )
+        
+        // Create default app-fallback-config.json for new profile
+        createDefaultConfig(for: profile)
+      } catch {
+        print("Failed to create profile directory: \(error)")
+      }
+    }
+  }
+  
+  private func createDefaultConfig(for profile: LeaderKeyProfile) {
+    let configPath = (profile.directoryPath as NSString)
+      .appendingPathComponent("app-fallback-config.json")
+    
+    // Default minimal config
+    let defaultConfig = """
+      {
+        "type": "group",
+        "label": "\(profile.name) Config",
+        "actions": []
+      }
+      """
+    
+    do {
+      try defaultConfig.write(toFile: configPath, atomically: true, encoding: .utf8)
+    } catch {
+      print("Failed to create default config: \(error)")
+    }
+  }
+  
+  private func ensureDefaultProfile() {
+    if profiles.isEmpty {
+      let defaultProfile = createProfile(name: "Default")
+      migrateExistingConfigs(to: defaultProfile)
+    }
+  }
+  
+  // MARK: - Migration
+  
+  func migrateExistingConfigs(to profile: LeaderKeyProfile) {
+    let oldConfigDir = Defaults[.configDir]
+    let newProfileDir = profile.directoryPath
+    
+    // Get all json files from old directory
+    do {
+      let contents = try fileManager.contentsOfDirectory(atPath: oldConfigDir)
+      let jsonFiles = contents.filter { $0.hasSuffix(".json") }
+      
+      for file in jsonFiles {
+        let oldPath = (oldConfigDir as NSString).appendingPathComponent(file)
+        let newPath = (newProfileDir as NSString).appendingPathComponent(file)
+        
+        // Copy file to new location if it doesn't exist
+        if !fileManager.fileExists(atPath: newPath) {
+          try fileManager.copyItem(atPath: oldPath, toPath: newPath)
+          print("Migrated \(file) to profile \(profile.name)")
+        }
+      }
+    } catch {
+      print("Migration failed: \(error)")
+    }
+  }
+}
+
+// MARK: - Notification Names
+extension Notification.Name {
+  static let profileDidChange = Notification.Name("profileDidChange")
 }
