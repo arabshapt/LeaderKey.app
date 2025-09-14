@@ -237,7 +237,7 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 // Define the view for the Shortcuts pane
 private struct KeyboardShortcutsView: View {
   private let contentWidth = SettingsConfig.contentWidth
-  @ObservedObject private var profileManager = ProfileManager()
+  @ObservedObject private var profileManager = ProfileManager.shared
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
@@ -465,7 +465,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         // Check if shortcuts have changed and refresh if needed
         // This is a lightweight check that only updates if shortcuts actually changed
         guard let self = self else { return }
-        let profileManager = ProfileManager()
+        let profileManager = ProfileManager.shared
         var hasChanges = false
         
         // Check each profile's shortcut
@@ -1122,10 +1122,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
       if let profileId = profileShortcutMap[shortcutKey] {
         // Switch to the profile
-        let profileManager = ProfileManager()
+        let profileManager = ProfileManager.shared
+        print("[AppDelegate] ProfileManager.shared instance: \(ObjectIdentifier(profileManager))")
+        print("[AppDelegate] Current activeProfile before switch: \(profileManager.activeProfile?.name ?? "nil")")
+        
         if let profile = profileManager.profiles.first(where: { $0.id == profileId }) {
           print("[AppDelegate] Switching to profile: \(profile.name)")
           profileManager.setActiveProfile(profile)
+          print("[AppDelegate] After setActiveProfile - activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
           controller.userConfig.switchToProfile(profile)
           // Use normal app-specific merging within the profile
           actualType = .appSpecificWithFallback
@@ -1637,7 +1641,7 @@ extension AppDelegate {
     
     // Cache profile shortcuts
     profileShortcutMap.removeAll()
-    let profileManager = ProfileManager()
+    let profileManager = ProfileManager.shared
     for profile in profileManager.profiles {
       if let shortcut = KeyboardShortcuts.getShortcut(for: profile.keyboardShortcutName) {
         let keyCode = UInt16(shortcut.carbonKeyCode)
