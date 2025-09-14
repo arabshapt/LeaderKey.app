@@ -66,7 +66,7 @@ struct GeneralPane: View {
         // Main Horizontal Layout
         HStack(alignment: .top, spacing: 0) {
           // --- Profile Vertical Bar --- START ---
-          VStack(spacing: 12) {
+          VStack(spacing: 6) {
             ForEach(profileManager.profiles) { profile in
               ProfileIconView(
                 profile: profile,
@@ -84,7 +84,7 @@ struct GeneralPane: View {
               showingProfileSheet = true
             }) {
               Image(systemName: "plus.circle.fill")
-                .font(.system(size: 28))
+                .font(.system(size: 24))
                 .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
@@ -92,17 +92,17 @@ struct GeneralPane: View {
             
             Spacer()
           }
-          .frame(width: 48)
-          .padding(.vertical, 8)
+          .frame(width: 44)
+          .padding(.vertical, 4)
           .background(Color.black.opacity(0.05))
           
           Divider()
           
           // --- Left Sidebar: Config List --- START ---
-          VStack(alignment: .leading, spacing: 8) {
+          VStack(alignment: .leading, spacing: 4) {
             
             // Profile selector with management buttons
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
               Picker("", selection: Binding(
                 get: { profileManager.activeProfile?.id ?? UUID() },
                 set: { newId in
@@ -343,6 +343,7 @@ struct GeneralPane: View {
           .frame(maxWidth: .infinity)  // Allow right side to expand
           // --- Right Content Area: Config Editor --- END ---
         }
+        .padding(.leading, -80)  // Pull left edge to window border
         .task(id: keyToLoad) {
           guard let key = keyToLoad else { return }  // Only run if keyToLoad is set
 

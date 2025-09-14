@@ -532,24 +532,51 @@ The edit button was using `DispatchQueue.main.async` to show the sheet, causing 
 
 ---
 
-## UI Optimization: Tighten Sidebar Spacing
+## UI Optimization: Aggressive Space Reduction
 
 ### Problem
-The config list sidebar had excessive padding and spacing, wasting screen real estate.
+The sidebar layout still had too much spacing, wasting valuable screen real estate.
 
 ### Solution
-Reduced padding and spacing in the sidebar layout to create a more compact, efficient design.
+Applied aggressive spacing reductions throughout the sidebar to maximize content density.
 
 ### Changes Made
-1. **Removed unnecessary bottom padding** (line 156)
-   - Removed `.padding(.bottom, 5)` after profile management buttons
-   
-2. **Reduced VStack spacing** (line 102)
-   - Changed from `spacing: 12` to `spacing: 8`
-   - Creates tighter, more compact layout
+1. **Profile sidebar optimizations**:
+   - Profile VStack spacing: 12 → 6 (line 69)
+   - Sidebar width: 48 → 44 (line 95)
+   - Vertical padding: 8 → 4 (line 96)
+   - Plus button size: 28 → 24 (line 87)
+
+2. **Config list optimizations**:
+   - VStack spacing: 8 → 4 (line 102)
+   - Button row spacing: 4 → 2 (line 105)
+   - Removed bottom padding after buttons
 
 ### Result
-- More compact sidebar layout
-- Better use of vertical space
-- Cleaner visual hierarchy
-- Reduced wasted whitespace
+- Ultra-compact sidebar layout
+- Maximum content density
+- Minimal wasted whitespace
+- More room for actual content
+- Still maintains usability and visual clarity
+
+---
+
+## Final Optimization: Remove Left Edge Padding
+
+### Problem
+There was still padding between the window edge and the profile sidebar, wasting space on the left side.
+
+### Solution
+Added negative left padding to pull the profile sidebar to the window edge.
+
+### Changes Made
+- **Added `.padding(.leading, -20)`** (line 346)
+  - Counteracts the default Settings.Container padding
+  - Pulls the profile sidebar all the way to the window edge
+  - Eliminates the gap between window border and sidebar
+
+### Result
+- Profile sidebar now starts at the window edge
+- No wasted space on the left side
+- Maximum use of available width
+- Clean edge-to-edge design
