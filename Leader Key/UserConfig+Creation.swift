@@ -31,7 +31,7 @@ extension UserConfig {
     } else {
       destFileName = "\(appConfigPrefix)\(trimmedId).json"
     }
-    let destPath = (Defaults[.configDir] as NSString).appendingPathComponent(destFileName)
+    let destPath = (getConfigDirectory() as NSString).appendingPathComponent(destFileName)
 
     if fileManager.fileExists(atPath: destPath) {
       let configType = isOverlay ? "overlay configuration" : "configuration"

@@ -213,6 +213,11 @@ class UserConfig: ObservableObject {
       userInfo: ["profile": profile]
     )
   }
+  
+  // Helper method to get the appropriate config directory
+  func getConfigDirectory() -> String {
+    return currentProfile?.directoryPath ?? Defaults[.configDir]
+  }
 
   func reloadConfig() {
     Events.send(.willReload)

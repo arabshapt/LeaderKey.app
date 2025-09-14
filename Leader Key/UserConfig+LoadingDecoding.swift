@@ -5,7 +5,7 @@ import Foundation
 extension UserConfig {
 
   internal func loadConfig(suppressAlerts: Bool = false) {
-    let defaultPath = (Defaults[.configDir] as NSString).appendingPathComponent(fileName)
+    let defaultPath = (getConfigDirectory() as NSString).appendingPathComponent(fileName)
     // Use decodeConfig, indicating it's the default config
     if let loadedRoot = decodeConfig(
       from: defaultPath, suppressAlerts: suppressAlerts, isDefaultConfig: true)
@@ -33,7 +33,7 @@ extension UserConfig {
       return cachedDefaultAppConfig ?? root  // Return cached or default if nil
     }
     
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+    let defaultAppConfigPath = (getConfigDirectory() as NSString).appendingPathComponent(
       defaultAppConfigFileName)
     if fileManager.fileExists(atPath: defaultAppConfigPath) {
       // Attempt to load and decode app-fallback-config.json
@@ -90,7 +90,7 @@ extension UserConfig {
 
       // Construct app-specific config path
       let appFileName = "\(appConfigPrefix)\(bundleId).json"
-      let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
+      let appConfigPath = (getConfigDirectory() as NSString).appendingPathComponent(appFileName)
 
       if fileManager.fileExists(atPath: appConfigPath) {
         // Attempt to load and decode app-specific config
@@ -362,7 +362,7 @@ extension UserConfig {
   // Merges app-specific config with Fallback App Config if available
   internal func mergeConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
     // Get the fallback app config
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+    let defaultAppConfigPath = (getConfigDirectory() as NSString).appendingPathComponent(
       defaultAppConfigFileName)
 
     guard fileManager.fileExists(atPath: defaultAppConfigPath),

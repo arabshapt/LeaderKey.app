@@ -237,10 +237,12 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 // Define the view for the Shortcuts pane
 private struct KeyboardShortcutsView: View {
   private let contentWidth = SettingsConfig.contentWidth
+  @ObservedObject private var profileManager = ProfileManager()
 
   var body: some View {
     Settings.Container(contentWidth: contentWidth) {
-      Settings.Section(title: "Activation Shortcuts") {
+      // System Shortcuts Section
+      Settings.Section(title: "System Shortcuts", bottomDivider: true) {
         Form {
           KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
           KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
@@ -251,6 +253,44 @@ private struct KeyboardShortcutsView: View {
         .font(.caption)
         .foregroundColor(.secondary)
         .padding(.top, 4)
+      }
+      
+      // Profile Shortcuts Section
+      Settings.Section(title: "Profile Shortcuts", bottomDivider: false) {
+        if profileManager.profiles.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("No profiles configured yet.")
+              .foregroundColor(.secondary)
+            Text("Create profiles in the General tab to set up profile-specific shortcuts.")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
+          .padding(.vertical, 8)
+        } else {
+          Form {
+            ForEach(profileManager.profiles) { profile in
+              HStack {
+                KeyboardShortcuts.Recorder(profile.name, name: profile.keyboardShortcutName)
+                Spacer()
+                if profile.isActive {
+                  HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                      .foregroundColor(.green)
+                      .font(.system(size: 12))
+                    Text("Active")
+                      .font(.caption)
+                      .foregroundColor(.green)
+                  }
+                  .help("This profile is currently active")
+                }
+              }
+            }
+          }
+          Text("Each profile has its own Leader Key configuration and can be activated with these shortcuts.")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .padding(.top, 4)
+        }
       }
     }
   }
@@ -408,6 +448,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         break
       }
     }.store(in: &cancellables)
+    
+    // Subscribe to profile changes to refresh shortcuts cache
+    NotificationCenter.default.publisher(for: .profileDidChange)
+      .sink { [weak self] _ in
+        self?.refreshActivationShortcuts()
+        debugLog("[AppDelegate] Profile changed - refreshing shortcuts cache")
+      }
+      .store(in: &cancellables)
+    
+    // Set up observers for keyboard shortcut changes
+    // This will refresh the cache whenever any keyboard shortcut is modified
+    Timer.publish(every: 1.0, on: .main, in: .common)
+      .autoconnect()
+      .sink { [weak self] _ in
+        // Check if shortcuts have changed and refresh if needed
+        // This is a lightweight check that only updates if shortcuts actually changed
+        guard let self = self else { return }
+        let profileManager = ProfileManager()
+        var hasChanges = false
+        
+        // Check each profile's shortcut
+        for profile in profileManager.profiles {
+          if let shortcut = KeyboardShortcuts.getShortcut(for: profile.keyboardShortcutName) {
+            let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
+            if self.profileShortcutMap[shortcutKey] != profile.id {
+              hasChanges = true
+              break
+            }
+          } else {
+            // Shortcut was removed
+            let existingKeys = self.profileShortcutMap.keys.filter { key in
+              self.profileShortcutMap[key] == profile.id
+            }
+            if !existingKeys.isEmpty {
+              hasChanges = true
+              break
+            }
+          }
+        }
+        
+        if hasChanges {
+          self.refreshActivationShortcuts()
+          debugLog("[AppDelegate] Keyboard shortcuts changed - refreshing cache")
+        }
+      }
+      .store(in: &cancellables)
 
     // Setup background services and UI elements
     setupFileMonitor()  // Defined in private extension
@@ -1028,6 +1114,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   ) {
     print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
     
+    // Mutable copy of type to allow override for profile activations
+    var actualType = type
+    
     // Check if this is a profile activation
     if let shortcut = activationShortcut {
       let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
@@ -1038,6 +1127,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
           print("[AppDelegate] Switching to profile: \(profile.name)")
           profileManager.setActiveProfile(profile)
           controller.userConfig.switchToProfile(profile)
+          // Override type to use profile's fallback config
+          actualType = .profileFallback
+          print("[AppDelegate] Using profileFallback activation type for profile: \(profile.name)")
         }
       }
     }
@@ -1075,22 +1167,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         // Determine new active root based on the activation shortcut that was just pressed
         do {
           let newRoot: Group
-          switch type {
+          switch actualType {
           case .fallbackOnly:
-            newRoot = self.config.root
+            newRoot = self.config.getFallbackConfig()
+          case .profileFallback:
+            newRoot = self.config.root  // Use profile's fallback config
           case .appSpecificWithFallback:
             // Use the same overlay detection logic as initial activation
             let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
             let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
             newRoot = self.config.getConfig(for: configKey)
-          case .fallbackOnly:
-            newRoot = self.config.getFallbackConfig()
           }
           self.controller.userState.activeRoot = newRoot
         }
         print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
         controller.repositionWindowNearMouse()
-        startSequence(activationType: type)
+        startSequence(activationType: actualType)
 
       case .nothing:
         // Preference: Do nothing if activated again while visible, unless window lost focus.
@@ -1105,15 +1197,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         if currentSequenceGroup == nil {
           print(
             "[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
-          startSequence(activationType: type)
+          startSequence(activationType: actualType)
         } else {
           print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
         }
       }
     } else {
       // Show window invisibly; when ready, start sequence, then the window will reveal.
-      show(type: type) {
-        self.startSequence(activationType: type)
+      show(type: actualType) {
+        self.startSequence(activationType: actualType)
       }
     }
   }
@@ -1554,16 +1646,25 @@ extension AppDelegate {
         cachedActivationKeyCodes.insert(keyCode)
         cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
         var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-        shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
+        // Use profileFallback type for profile shortcuts to ensure they load profile's config
+        shortcuts.append((shortcut, Controller.ActivationType.profileFallback))
         cachedActivationShortcuts[keyCode] = shortcuts
         
         // Store profile ID for this shortcut (use string key for dictionary)
         let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
         profileShortcutMap[shortcutKey] = profile.id
+        
+        print("[AppDelegate] Cached profile shortcut for '\(profile.name)': keyCode=\(keyCode), modifiers=\(shortcut.modifiers.rawValue), type=profileFallback")
       }
     }
 
-    print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes")
+    print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes (including \(profileShortcutMap.count) profile shortcuts)")
+  }
+  
+  // Public method to refresh cached shortcuts (can be called when shortcuts change)
+  func refreshActivationShortcuts() {
+    print("[AppDelegate] Refreshing activation shortcuts cache")
+    cacheActivationShortcuts()
   }
 
   func startEventTapMonitoring() {
@@ -2612,7 +2713,7 @@ extension AppDelegate {
     // Determine the bundle ID for caching
     let cacheId: String
     switch activationType {
-    case .fallbackOnly:
+    case .fallbackOnly, .profileFallback:
       cacheId = "fallback"
     case .appSpecificWithFallback:
       // Check if we have __FALLBACK__ bundleId
@@ -2625,8 +2726,6 @@ extension AppDelegate {
           isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
         cacheId = configKey ?? "global"
       }
-    case .fallbackOnly:
-      cacheId = "fallback"
     }
 
     // Store current bundle ID for later use
@@ -3006,7 +3105,9 @@ extension AppDelegate {
           let newRoot: Group
           switch activationType {
           case .fallbackOnly:
-            newRoot = self.config.root
+            newRoot = self.config.getFallbackConfig()
+          case .profileFallback:
+            newRoot = self.config.root  // Use profile's fallback config
           case .appSpecificWithFallback:
             // Check if we have __FALLBACK__ bundleId
             if let bundleId = bundleId, bundleId == "__FALLBACK__" {
@@ -3020,8 +3121,6 @@ extension AppDelegate {
                 ? "\(detectedBundleId!).overlay" : detectedBundleId
               newRoot = self.config.getConfig(for: configKey)
             }
-          case .fallbackOnly:
-            newRoot = self.config.getFallbackConfig()
           }
           self.controller.userState.activeRoot = newRoot
           self.controller.userState.isActive = true  // Ensure keys are processed after reset

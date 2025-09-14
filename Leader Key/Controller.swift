@@ -75,6 +75,7 @@ class Controller {
   enum ActivationType {
     case appSpecificWithFallback
     case fallbackOnly
+    case profileFallback  // Always use profile's fallback, ignore app-specific configs
   }
 
   func show(type: ActivationType = .appSpecificWithFallback, bundleId: String? = nil, completion: (() -> Void)? = nil) {
@@ -85,8 +86,13 @@ class Controller {
 
     switch type {
     case .fallbackOnly:
-      configToLoad = userConfig.root  // Use the already loaded default config
-      configKeyForSettings = defaultAppConfigDisplayName
+      configToLoad = userConfig.getFallbackConfig()  // Load only the fallback config
+      configKeyForSettings = defaultAppConfigDisplayName  // Use fallback display name
+    case .profileFallback:
+      // For profile activations, always use the profile's fallback config (root)
+      // This ensures profiles show their own configs, not app-specific ones
+      configToLoad = userConfig.root  // Use the profile's fallback config directly
+      configKeyForSettings = defaultAppConfigDisplayName  // Show as fallback
     case .appSpecificWithFallback:
       // Check if we have a specific bundleId override (like "__FALLBACK__")
       if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
@@ -120,9 +126,6 @@ class Controller {
           configKeyForSettings = defaultAppConfigDisplayName
         }
       }
-    case .fallbackOnly:
-      configToLoad = userConfig.getFallbackConfig()  // Load only the fallback config
-      configKeyForSettings = defaultAppConfigDisplayName  // Use fallback display name
     }
 
     // Now send activation events after detection is complete

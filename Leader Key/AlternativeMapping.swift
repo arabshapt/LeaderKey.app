@@ -52,7 +52,15 @@ class AlternativeMappingsManager: ObservableObject {
   // MARK: - Directory Management
   
   func getMappingsDirectory() -> String {
-    let configDir = Defaults[.configDir]
+    // Check if there's an active profile
+    let configDir: String
+    if let activeProfileId = Defaults[.activeProfileId],
+       let profiles = Defaults[.leaderKeyProfiles] as? [LeaderKeyProfile],
+       let activeProfile = profiles.first(where: { $0.id == activeProfileId }) {
+      configDir = activeProfile.directoryPath
+    } else {
+      configDir = Defaults[.configDir]
+    }
     return (configDir as NSString).appendingPathComponent(mappingsFolder)
   }
   
