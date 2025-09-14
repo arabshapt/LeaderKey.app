@@ -342,6 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   private var stateMappings: [Int32: Karabiner2Exporter.StateMapping] = [:]
   private var actionCache: [Int32: Action] = [:]  // Cache stateId -> Action for efficient lookup
   private var stateMappingsLastLoaded: Date?
+  private var profileConfigCache: [UUID: UserConfig] = [:]  // Cache profile configs to avoid reloading
   private var cancellables = Set<AnyCancellable>()
 
   // --- Dual Event Tap Manager for Redundancy ---
@@ -3372,8 +3373,10 @@ extension AppDelegate {
           let karabiner2Method = currentInputMethod as? Karabiner2InputMethod else {
       return
     }
-    
+
     debugLog("[AppDelegate] Refreshing state mappings after config change")
+    // Clear profile config cache when refreshing
+    profileConfigCache.removeAll()
     karabiner2Method.exportCurrentConfiguration()
     loadStateMappings()
   }
@@ -3390,9 +3393,23 @@ extension AppDelegate {
         return nil
       }
 
-      // Load the profile's config
-      let profileConfig = UserConfig()
-      profileConfig.currentProfile = profile
+      // Check cache first
+      let profileConfig: UserConfig
+      if let cachedConfig = profileConfigCache[profileId] {
+        profileConfig = cachedConfig
+      } else {
+        // Load the profile's config
+        profileConfig = UserConfig()
+        profileConfig.currentProfile = profile
+        // Clear cache to ensure fresh load from profile's directory
+        profileConfig.appConfigs = [:]
+
+        // Load the fallback config for this profile
+        profileConfig.loadConfig(suppressAlerts: true)
+
+        // Cache for future use
+        profileConfigCache[profileId] = profileConfig
+      }
 
       // Determine which root to use based on bundle ID
       if let bundleId = mapping.bundleId {
@@ -3400,7 +3417,7 @@ extension AppDelegate {
           // For fallback mode, use the fallback config
           rootGroup = profileConfig.getFallbackConfig()
         } else {
-          // Regular app-specific config
+          // Regular app-specific config - will load from profile's directory
           rootGroup = profileConfig.getConfig(for: bundleId)
         }
       } else {

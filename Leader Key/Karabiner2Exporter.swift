@@ -107,7 +107,8 @@ final class Karabiner2Exporter {
           bundleId: bundleId,
           activationKey: profileShortcutToGokuKey(profile: profile),
           initialStateId: appInitialStateId,
-          profile: profile
+          profile: profile,
+          profileIndex: profileIndex
         )
         allActivationRules.append(appActivation)
 
@@ -137,7 +138,8 @@ final class Karabiner2Exporter {
         bundleId: "__FALLBACK__",
         activationKey: profileShortcutToGokuKey(profile: profile),
         initialStateId: fallbackInitialId,
-        profile: profile
+        profile: profile,
+        profileIndex: profileIndex
       )
       allActivationRules.append(fallbackActivation)
       allSections.append((name: "Leader Key - \(profile.name) - Fallback", groups: fallbackGroups))
@@ -146,13 +148,13 @@ final class Karabiner2Exporter {
     // Create unified activation section with all profiles' activations
     if !allActivationRules.isEmpty {
       // Add escape and settings rules for all profiles
-      for profileConfig in allProfileConfigs {
+      for (profileIndex, profileConfig) in allProfileConfigs.enumerated() {
         let profile = profileConfig.profile
-        let varNames = getProfileVariableNames(profile: profile)
+        let varNames = getProfileVariableNames(profile: profile, profileIndex: profileIndex)
 
         // Clear both global and profile-specific variables on escape/settings
-        let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
-        let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
+        let escapeRule = "   [:escape [[\"lk_on\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
+        let settingsRule = "   [{:key :comma :modi :command} [[\"lk_on\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
 
         allActivationRules.append(escapeRule)
         allActivationRules.append(settingsRule)
@@ -290,13 +292,13 @@ final class Karabiner2Exporter {
     desSections.append((name: "Leader Key - Fallback Mode", groups: fallbackGroups))
     
     // 8. Create activation section at the beginning with escape and settings rules
-    // Get profile-specific variable names
-    let varNames = getProfileVariableNames(profile: profile)
-    
+    // Get profile-specific variable names (no index for single profile export)
+    let varNames = getProfileVariableNames(profile: profile, profileIndex: nil)
+
     // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode and global active)
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
+    let escapeRule = "   [:escape [[\"lk_on\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"lk_on\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -554,14 +556,14 @@ final class Karabiner2Exporter {
   private static func generateModifierPassThroughRules(profiles: [LeaderKeyProfile]) -> [String] {
     var rules: [String] = []
 
-    // Use the global leaderkey_active variable for simpler conditions
+    // Use the global lk_on variable for simpler conditions
     // This applies to ANY active Leader Key profile
     let modifiers = ["left_shift", "right_shift", "left_command", "right_command",
                     "left_option", "right_option", "left_control", "right_control"]
 
     for modifier in modifiers {
       // Use global variable so modifiers pass through when ANY profile is active
-      let rule = "   [:##\(modifier) :\(modifier) :leaderkey_active]"
+      let rule = "   [:##\(modifier) :\(modifier) :lk_on]"
       rules.append(rule)
     }
 
@@ -855,7 +857,8 @@ final class Karabiner2Exporter {
     bundleId: String?,
     activationKey: String,
     initialStateId: Int32,
-    profile: LeaderKeyProfile? = nil
+    profile: LeaderKeyProfile? = nil,
+    profileIndex: Int? = nil
   ) -> (activation: String, groups: [ManipulatorGroup]) {
     var groups: [ManipulatorGroup] = []
     
@@ -865,7 +868,8 @@ final class Karabiner2Exporter {
       bundleId: bundleId,
       activationKey: activationKey,
       initialStateId: initialStateId,
-      profile: profile
+      profile: profile,
+      profileIndex: profileIndex
     )
     
     // Collect and organize rules by state
@@ -915,7 +919,7 @@ final class Karabiner2Exporter {
     }
     
     // Get profile-specific variable names
-    let varNames = getProfileVariableNames(profile: profile)
+    let varNames = getProfileVariableNames(profile: profile, profileIndex: profileIndex)
     
     // 2. Mode-level condition group
     let modeCondition: String
@@ -943,7 +947,7 @@ final class Karabiner2Exporter {
         for (key, transitionData) in transitions.sorted(by: { $0.key < $1.key }) {
           definedKeys.insert(key.lowercased())
           stateRules.append(
-            generateUnifiedStateTransition(key: key, fromState: stateId, toState: transitionData.toState, hasStickyMode: transitionData.hasStickyMode, appAlias: appAlias, profile: profile)
+            generateUnifiedStateTransition(key: key, fromState: stateId, toState: transitionData.toState, hasStickyMode: transitionData.hasStickyMode, appAlias: appAlias, profile: profile, profileIndex: profileIndex)
           )
         }
       }
@@ -961,7 +965,8 @@ final class Karabiner2Exporter {
               hasStickyMode: actionData.hasStickyMode,
               appAlias: appAlias,
               node: actionData.node,
-              profile: profile
+              profile: profile,
+              profileIndex: profileIndex
             )
           )
         }
@@ -973,7 +978,8 @@ final class Karabiner2Exporter {
           fromState: stateId,
           appAlias: appAlias,
           definedKeys: definedKeys,
-          profile: profile
+          profile: profile,
+          profileIndex: profileIndex
         )
         stateRules.append(contentsOf: catchAllRules)
         
@@ -1335,20 +1341,28 @@ final class Karabiner2Exporter {
   }
 
   // Helper function to generate profile-specific variable names
-  private static func getProfileVariableNames(profile: LeaderKeyProfile?) -> (
+  private static func getProfileVariableNames(profile: LeaderKeyProfile?, profileIndex: Int? = nil) -> (
     stateVar: String,
     activeVar: String,
     appSpecificVar: String,
     stickyVar: String
   ) {
-    if let profile = profile {
-      // Use profile ID to create unique variable names (Karabiner variables must be alphanumeric)
+    if let _ = profile, let index = profileIndex {
+      // Use short names with profile index
+      return (
+        stateVar: "lkst_\(index)",
+        activeVar: "lk_\(index)",
+        appSpecificVar: "lka_\(index)",
+        stickyVar: "lks_\(index)"
+      )
+    } else if let profile = profile {
+      // Fallback to UUID-based names if no index provided (shouldn't happen)
       let profileSuffix = profile.id.uuidString.replacingOccurrences(of: "-", with: "_").lowercased()
       return (
-        stateVar: "leader_state_\(profileSuffix)",
-        activeVar: "leaderkey_active_\(profileSuffix)",
-        appSpecificVar: "leaderkey_appspecific_\(profileSuffix)",
-        stickyVar: "leaderkey_sticky_\(profileSuffix)"
+        stateVar: "lkst_\(profileSuffix)",
+        activeVar: "lk_\(profileSuffix)",
+        appSpecificVar: "lka_\(profileSuffix)",
+        stickyVar: "lks_\(profileSuffix)"
       )
     } else {
       // Default variable names for backward compatibility
@@ -1434,7 +1448,7 @@ final class Karabiner2Exporter {
   }
   
   // Unified manipulator generators with cleaner app alias conditions
-  private static func generateUnifiedActivationManipulator(appAlias: String?, bundleId: String?, activationKey: String, initialStateId: Int32, profile: LeaderKeyProfile? = nil) -> String {
+  private static func generateUnifiedActivationManipulator(appAlias: String?, bundleId: String?, activationKey: String, initialStateId: Int32, profile: LeaderKeyProfile? = nil, profileIndex: Int? = nil) -> String {
     let cliPath = "/usr/local/bin/leaderkey-cli"
     
     // Include bundleId in activation command for app-specific activations
@@ -1450,16 +1464,16 @@ final class Karabiner2Exporter {
     }
     
     // Get profile-specific variable names
-    let varNames = getProfileVariableNames(profile: profile)
+    let varNames = getProfileVariableNames(profile: profile, profileIndex: profileIndex)
     
-    // Determine which mode variables to set (including global leaderkey_active)
+    // Determine which mode variables to set (including global lk_on)
     let modeVars: String
     if appAlias != nil || bundleId == "__FALLBACK__" {
       // App-specific mode (including fallback) - set both global and profile-specific
-      modeVars = "[\"leaderkey_active\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
+      modeVars = "[\"lk_on\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
     } else {
       // This shouldn't happen anymore - we only have app-specific mode
-      modeVars = "[\"leaderkey_active\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
+      modeVars = "[\"lk_on\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
     }
     
     if let alias = appAlias {
@@ -1488,7 +1502,7 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateUnifiedStateTransition(key: String, fromState: Int32, toState: Int32, hasStickyMode: Bool, appAlias: String?, profile: LeaderKeyProfile? = nil) -> String {
+  private static func generateUnifiedStateTransition(key: String, fromState: Int32, toState: Int32, hasStickyMode: Bool, appAlias: String?, profile: LeaderKeyProfile? = nil, profileIndex: Int? = nil) -> String {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
     let varNames = getProfileVariableNames(profile: profile)
@@ -1682,7 +1696,7 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?, node: StateNode? = nil, profile: LeaderKeyProfile? = nil) -> String {
+  private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?, node: StateNode? = nil, profile: LeaderKeyProfile? = nil, profileIndex: Int? = nil) -> String {
     let karabinerKey = convertToKarabinerKey(key)
     let cliPath = "/usr/local/bin/leaderkey-cli"
     let varNames = getProfileVariableNames(profile: profile)
@@ -1752,7 +1766,7 @@ final class Karabiner2Exporter {
     }
   }
   
-  private static func generateCatchAllRules(fromState: Int32, appAlias: String?, definedKeys: Set<String>, profile: LeaderKeyProfile? = nil) -> [String] {
+  private static func generateCatchAllRules(fromState: Int32, appAlias: String?, definedKeys: Set<String>, profile: LeaderKeyProfile? = nil, profileIndex: Int? = nil) -> [String] {
     // Use Goku's {:any :key_code} syntax to match any key with any modifiers
     // This replaces 50+ individual rules with a single catch-all rule
     var rules: [String] = []
