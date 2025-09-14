@@ -244,11 +244,10 @@ private struct KeyboardShortcutsView: View {
       // System Shortcuts Section
       Settings.Section(title: "System Shortcuts", bottomDivider: true) {
         Form {
-          KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
           KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
         }
         Text(
-          "App-Specific tries to load the config for the frontmost app, or falls back to the default.\nForce Reset immediately clears all state if LeaderKey gets stuck."
+          "Force Reset immediately clears all state if LeaderKey gets stuck."
         )
         .font(.caption)
         .foregroundColor(.secondary)
@@ -1625,16 +1624,6 @@ extension AppDelegate {
       cachedActivationShortcuts[keyCode] = shortcuts
     }
 
-    // Cache app-specific shortcut (legacy - kept for backward compatibility)
-    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateAppSpecific) {
-      let keyCode = UInt16(shortcut.carbonKeyCode)
-      cachedActivationKeyCodes.insert(keyCode)
-      cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-      var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
-      cachedActivationShortcuts[keyCode] = shortcuts
-    }
-    
     // Cache profile shortcuts
     profileShortcutMap.removeAll()
     let profileManager = ProfileManager.shared
