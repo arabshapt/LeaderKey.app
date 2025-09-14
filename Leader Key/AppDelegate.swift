@@ -1127,9 +1127,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
           print("[AppDelegate] Switching to profile: \(profile.name)")
           profileManager.setActiveProfile(profile)
           controller.userConfig.switchToProfile(profile)
-          // Override type to use profile's fallback config
-          actualType = .profileFallback
-          print("[AppDelegate] Using profileFallback activation type for profile: \(profile.name)")
+          // Use normal app-specific merging within the profile
+          actualType = .appSpecificWithFallback
+          print("[AppDelegate] Using appSpecificWithFallback activation type for profile: \(profile.name)")
         }
       }
     }
@@ -1170,8 +1170,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
           switch actualType {
           case .fallbackOnly:
             newRoot = self.config.getFallbackConfig()
-          case .profileFallback:
-            newRoot = self.config.root  // Use profile's fallback config
           case .appSpecificWithFallback:
             // Use the same overlay detection logic as initial activation
             let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
@@ -1646,8 +1644,8 @@ extension AppDelegate {
         cachedActivationKeyCodes.insert(keyCode)
         cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
         var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-        // Use profileFallback type for profile shortcuts to ensure they load profile's config
-        shortcuts.append((shortcut, Controller.ActivationType.profileFallback))
+        // Use appSpecificWithFallback type for profile shortcuts to get merged configs
+        shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
         cachedActivationShortcuts[keyCode] = shortcuts
         
         // Store profile ID for this shortcut (use string key for dictionary)
@@ -2713,7 +2711,7 @@ extension AppDelegate {
     // Determine the bundle ID for caching
     let cacheId: String
     switch activationType {
-    case .fallbackOnly, .profileFallback:
+    case .fallbackOnly:
       cacheId = "fallback"
     case .appSpecificWithFallback:
       // Check if we have __FALLBACK__ bundleId
@@ -3106,8 +3104,6 @@ extension AppDelegate {
           switch activationType {
           case .fallbackOnly:
             newRoot = self.config.getFallbackConfig()
-          case .profileFallback:
-            newRoot = self.config.root  // Use profile's fallback config
           case .appSpecificWithFallback:
             // Check if we have __FALLBACK__ bundleId
             if let bundleId = bundleId, bundleId == "__FALLBACK__" {

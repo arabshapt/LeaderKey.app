@@ -122,7 +122,7 @@ extension UserConfig {
       return cachedDefaultAppConfig ?? root  // Return cached or default if nil
     }
 
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+    let defaultAppConfigPath = (getConfigDirectory() as NSString).appendingPathComponent(
       defaultAppConfigFileName)
     if fileManager.fileExists(atPath: defaultAppConfigPath) {
       // Attempt to load and decode app-fallback-config.json
