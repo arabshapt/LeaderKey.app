@@ -339,3 +339,67 @@ Over the past 7 commits (Aug 11-13, 2025), the Leader Key app has undergone sign
 
 ### Conclusion
 These experimental changes represent a significant improvement to the Leader Key app's performance and user experience. The modular approach and experimental flags allow for safe testing and gradual rollout. Priority should be given to stability testing before promoting features to production.
+
+---
+
+## Recent Fix: LeaderKey activation preserves settings view (Latest)
+
+### Problem
+When LeaderKey is activated, the General Settings pane was switching to show the currently active profile's configuration instead of preserving whatever config/profile was being viewed when settings were already open.
+
+### Root Cause
+The `.onAppear` modifier in GeneralPane.swift (line 484-489) was automatically switching to the active profile whenever the GeneralPane appeared, including when LeaderKey was activated while settings were open.
+
+### Solution Implemented
+Added state tracking to ensure profile switching only happens on initial load:
+
+1. **Added `@State private var hasInitialized = false`** (line 24)
+   - Tracks whether the settings pane has been initialized
+
+2. **Modified `.onAppear` block** (lines 485-494)
+   - Only switches to active profile when `!hasInitialized`
+   - Sets `hasInitialized = true` after first load
+   - Preserves user's current selection when LeaderKey is activated
+
+### Testing Status
+- ✅ Build successful - No compilation errors
+- ⏳ Manual testing required:
+  1. Open Leader Key settings
+  2. Switch to a different profile or config
+  3. Activate Leader Key (without closing settings)
+  4. Verify that the settings window still shows the same config/profile
+  5. Close and reopen settings
+  6. Verify it correctly shows the active profile on fresh open
+
+### Files Modified
+- `Leader Key/Settings/GeneralPane.swift` (lines 24, 485-498)
+
+### Impact
+The fix is minimal and targeted, only affecting the initialization behavior of the GeneralPane. This ensures that:
+- Settings remain stable when LeaderKey is activated
+- Users don't lose their place when browsing configs
+- Initial load still correctly shows the active profile
+- No other functionality is affected
+
+---
+
+## Additional Fix: Profile dropdown sync with keyboard shortcuts
+
+### Problem
+When switching profiles via keyboard shortcuts, the profile dropdown in settings wasn't updating to reflect the newly active profile.
+
+### Root Cause
+GeneralPane created its own local `ProfileManager` instance that didn't sync with profile changes made elsewhere in the app.
+
+### Solution Implemented
+Added a notification observer to reload the ProfileManager when profiles change externally:
+
+**Added `.onReceive` modifier** (lines 495-498)
+- Listens for `.profileDidChange` notifications
+- Reloads ProfileManager to sync with the active profile
+- Ensures dropdown always shows the correct active profile
+
+### Result
+- Profile dropdown now correctly updates when switching via keyboard shortcuts
+- Config list selection remains stable (preserved by previous fix)
+- Both fixes work together to provide a consistent settings experience

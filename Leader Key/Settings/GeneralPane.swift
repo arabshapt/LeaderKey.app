@@ -21,6 +21,7 @@ struct GeneralPane: View {
   @State private var showingAddConfigSheet = false
   @State private var keyToDelete: String?
   @State private var highlightedPath: [Int]?
+  @State private var hasInitialized = false
   
   // Profile management
   @StateObject private var profileManager = ProfileManager()
@@ -482,10 +483,18 @@ struct GeneralPane: View {
       }
     }
     .onAppear {
-      // Switch to active profile's config when opening settings
-      if let activeProfile = profileManager.activeProfile {
-        config.switchToProfile(activeProfile)
+      // Only switch to active profile's config on initial load
+      // This prevents switching when LeaderKey is activated while settings are open
+      if !hasInitialized {
+        if let activeProfile = profileManager.activeProfile {
+          config.switchToProfile(activeProfile)
+        }
+        hasInitialized = true
       }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .profileDidChange)) { _ in
+      // Reload profiles when changed externally (e.g., via keyboard shortcut)
+      profileManager.loadProfiles()
     }
   }
 
