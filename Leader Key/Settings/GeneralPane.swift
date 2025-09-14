@@ -979,8 +979,14 @@ struct ProfileManagementSheet: View {
         VStack(alignment: .leading, spacing: 8) {
           Text("Activation Shortcut")
             .font(.headline)
-          
-          if let profile = profileToEdit {
+
+          if Defaults[.inputMethodPreference] == .karabiner2 {
+            Text("Managed by Karabiner")
+              .foregroundColor(.secondary)
+            Text("Profile shortcuts are defined in your Karabiner configuration")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          } else if let profile = profileToEdit {
             KeyboardShortcuts.Recorder("", name: profile.keyboardShortcutName)
           } else {
             Text("Set the keyboard shortcut after creating the profile")
@@ -992,12 +998,20 @@ struct ProfileManagementSheet: View {
         VStack(alignment: .leading, spacing: 8) {
           Text("Activation Shortcut")
             .font(.headline)
-          
-          KeyboardShortcuts.Recorder("", name: profile.keyboardShortcutName)
-          
-          Text("This shortcut will activate the \(profile.name) profile")
-            .font(.caption)
-            .foregroundColor(.secondary)
+
+          if Defaults[.inputMethodPreference] == .karabiner2 {
+            Text("Managed by Karabiner")
+              .foregroundColor(.secondary)
+            Text("Profile shortcuts are defined in your Karabiner configuration")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          } else {
+            KeyboardShortcuts.Recorder("", name: profile.keyboardShortcutName)
+
+            Text("This shortcut will activate the \(profile.name) profile")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
         }
       }
       

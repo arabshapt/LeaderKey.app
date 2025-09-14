@@ -269,7 +269,15 @@ private struct KeyboardShortcutsView: View {
           Form {
             ForEach(profileManager.profiles) { profile in
               HStack {
-                KeyboardShortcuts.Recorder(profile.name, name: profile.keyboardShortcutName)
+                if Defaults[.inputMethodPreference] == .karabiner2 {
+                  Text(profile.name)
+                    .foregroundColor(.secondary)
+                  Text("(Managed by Karabiner)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                } else {
+                  KeyboardShortcuts.Recorder(profile.name, name: profile.keyboardShortcutName)
+                }
                 Spacer()
                 if profile.isActive {
                   HStack(spacing: 4) {
@@ -1624,25 +1632,31 @@ extension AppDelegate {
       cachedActivationShortcuts[keyCode] = shortcuts
     }
 
-    // Cache profile shortcuts
+    // Cache profile shortcuts (skip if using Karabiner 2.0 mode)
     profileShortcutMap.removeAll()
-    let profileManager = ProfileManager.shared
-    for profile in profileManager.profiles {
-      if let shortcut = KeyboardShortcuts.getShortcut(for: profile.keyboardShortcutName) {
-        let keyCode = UInt16(shortcut.carbonKeyCode)
-        cachedActivationKeyCodes.insert(keyCode)
-        cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-        var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-        // Use appSpecificWithFallback type for profile shortcuts to get merged configs
-        shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
-        cachedActivationShortcuts[keyCode] = shortcuts
-        
-        // Store profile ID for this shortcut (use string key for dictionary)
-        let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
-        profileShortcutMap[shortcutKey] = profile.id
-        
-        print("[AppDelegate] Cached profile shortcut for '\(profile.name)': keyCode=\(keyCode), modifiers=\(shortcut.modifiers.rawValue), type=profileFallback")
+
+    // In Karabiner 2.0 mode, profile shortcuts are handled by Karabiner, not the app
+    if Defaults[.inputMethodPreference] != .karabiner2 {
+      let profileManager = ProfileManager.shared
+      for profile in profileManager.profiles {
+        if let shortcut = KeyboardShortcuts.getShortcut(for: profile.keyboardShortcutName) {
+          let keyCode = UInt16(shortcut.carbonKeyCode)
+          cachedActivationKeyCodes.insert(keyCode)
+          cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
+          var shortcuts = cachedActivationShortcuts[keyCode] ?? []
+          // Use appSpecificWithFallback type for profile shortcuts to get merged configs
+          shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
+          cachedActivationShortcuts[keyCode] = shortcuts
+
+          // Store profile ID for this shortcut (use string key for dictionary)
+          let shortcutKey = "\(shortcut.carbonKeyCode)-\(shortcut.modifiers.rawValue)"
+          profileShortcutMap[shortcutKey] = profile.id
+
+          print("[AppDelegate] Cached profile shortcut for '\(profile.name)': keyCode=\(keyCode), modifiers=\(shortcut.modifiers.rawValue), type=profileFallback")
+        }
       }
+    } else {
+      print("[AppDelegate] Skipping profile shortcut caching - handled by Karabiner 2.0")
     }
 
     print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes (including \(profileShortcutMap.count) profile shortcuts)")
@@ -3365,25 +3379,54 @@ extension AppDelegate {
   }
   
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
-    // Determine which root to use based on bundle ID
+    // If mapping has a profile ID, we need to use that profile's config
     let rootGroup: Group
-    if let bundleId = mapping.bundleId {
-      if bundleId == "__FALLBACK__" {
-        // For fallback mode, use the fallback config
-        rootGroup = config.getFallbackConfig()
-      } else {
-        // Regular app-specific config
-        if let appRoot = config.appConfigs[bundleId],
-           let root = appRoot {
-          rootGroup = root
+
+    if let profileId = mapping.profileId {
+      // Get the profile's configuration
+      let profileManager = ProfileManager.shared
+      guard let profile = profileManager.profiles.first(where: { $0.id == profileId }) else {
+        debugLog("[AppDelegate] Profile not found for ID: \(profileId)")
+        return nil
+      }
+
+      // Load the profile's config
+      let profileConfig = UserConfig()
+      profileConfig.currentProfile = profile
+
+      // Determine which root to use based on bundle ID
+      if let bundleId = mapping.bundleId {
+        if bundleId == "__FALLBACK__" {
+          // For fallback mode, use the fallback config
+          rootGroup = profileConfig.getFallbackConfig()
         } else {
-          // App config not found, use the merged config (app-specific + fallback)
-          rootGroup = config.getConfig(for: bundleId)
+          // Regular app-specific config
+          rootGroup = profileConfig.getConfig(for: bundleId)
         }
+      } else {
+        // No bundle ID means use profile's root config
+        rootGroup = profileConfig.root
       }
     } else {
-      // No bundle ID means use global config
-      rootGroup = config.root
+      // No profile ID - use current config (legacy behavior)
+      if let bundleId = mapping.bundleId {
+        if bundleId == "__FALLBACK__" {
+          // For fallback mode, use the fallback config
+          rootGroup = config.getFallbackConfig()
+        } else {
+          // Regular app-specific config
+          if let appRoot = config.appConfigs[bundleId],
+             let root = appRoot {
+            rootGroup = root
+          } else {
+            // App config not found, use the merged config (app-specific + fallback)
+            rootGroup = config.getConfig(for: bundleId)
+          }
+        }
+      } else {
+        // No bundle ID means use global config
+        rootGroup = config.root
+      }
     }
     
     var currentGroup = rootGroup

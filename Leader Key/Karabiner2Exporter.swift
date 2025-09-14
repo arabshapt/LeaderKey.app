@@ -22,6 +22,7 @@ final class Karabiner2Exporter {
   struct StateMapping: Codable {
     let stateId: Int32
     let path: [String]          // Path in key notation (e.g., ["o", "a"])
+    let profileId: UUID?        // Profile ID this mapping belongs to
     let appAlias: String?        // App alias if app-specific
     let bundleId: String?        // Bundle ID if app-specific
     let actionType: String       // "action" or "group"
@@ -39,7 +40,7 @@ final class Karabiner2Exporter {
   private static let initialStateId: Int32 = 1
 
   static func generateGokuEDN(from config: UserConfig, bundleId: String? = nil) -> String {
-    let (stateTree, _) = buildStateTree(from: config.root, appAlias: nil, bundleId: bundleId)
+    let (stateTree, _) = buildStateTree(from: config.root, appAlias: nil, bundleId: bundleId, profileId: nil)
     let manipulators = generateManipulators(from: stateTree, bundleId: bundleId)
 
     return formatGokuEDN(manipulators: manipulators, bundleId: bundleId)
@@ -95,6 +96,7 @@ final class Karabiner2Exporter {
           from: config.root,
           appAlias: alias,
           bundleId: bundleId,
+          profileId: profile.id,
           initialStateId: appInitialStateId
         )
         allStateMappings.append(contentsOf: appMappings)
@@ -124,6 +126,7 @@ final class Karabiner2Exporter {
         from: fallbackRoot,
         appAlias: nil,
         bundleId: "__FALLBACK__",
+        profileId: profile.id,
         initialStateId: fallbackInitialId
       )
       allStateMappings.append(contentsOf: fallbackMappings)
@@ -237,6 +240,7 @@ final class Karabiner2Exporter {
         from: config.root,
         appAlias: alias,
         bundleId: bundleId,
+        profileId: profile?.id,
         initialStateId: appInitialStateId
       )
       allStateMappings.append(contentsOf: appMappings)
@@ -268,6 +272,7 @@ final class Karabiner2Exporter {
       from: fallbackRoot,
       appAlias: nil,
       bundleId: "__FALLBACK__",
+      profileId: profile?.id,
       initialStateId: fallbackInitialStateId
     )
     allStateMappings.append(contentsOf: fallbackMappings)
@@ -383,7 +388,7 @@ final class Karabiner2Exporter {
     var appSections: [(alias: String, manipulators: [String])] = []
     for (bundleId, alias, config) in appAliases {
       let appInitialStateId = generateAppInitialStateId(appAlias: alias)
-      let (appStateTree, appMappings) = buildStateTree(from: config.root, appAlias: alias, bundleId: bundleId, initialStateId: appInitialStateId)
+      let (appStateTree, appMappings) = buildStateTree(from: config.root, appAlias: alias, bundleId: bundleId, profileId: profile?.id, initialStateId: appInitialStateId)
       allStateMappings.append(contentsOf: appMappings)
       let manipulators = generateManipulatorsForUnified(
         from: appStateTree,
@@ -611,7 +616,7 @@ final class Karabiner2Exporter {
     return " :applications {\n\(appLines.joined(separator: "\n"))\n }"
   }
 
-  private static func buildStateTree(from group: Group, appAlias: String? = nil, bundleId: String? = nil, initialStateId: Int32 = initialStateId) -> ([StateNode], [StateMapping]) {
+  private static func buildStateTree(from group: Group, appAlias: String? = nil, bundleId: String? = nil, profileId: UUID? = nil, initialStateId: Int32 = initialStateId) -> ([StateNode], [StateMapping]) {
     var nodes: [StateNode] = []
     var stateMappings: [StateMapping] = []
     var queue: [(item: ActionOrGroup, path: [String], originalPath: [String], parentStateId: Int32, parentGroupHasStickyMode: Bool)] = []
@@ -652,6 +657,7 @@ final class Karabiner2Exporter {
         let mapping = StateMapping(
           stateId: terminalStateId,  // Use terminal's own unique state ID
           path: currentOriginalPath,
+          profileId: profileId,
           appAlias: appAlias,
           bundleId: bundleId,
           actionType: "action",
@@ -675,6 +681,7 @@ final class Karabiner2Exporter {
         let groupMapping = StateMapping(
           stateId: stateId,
           path: currentOriginalPath,
+          profileId: profileId,
           appAlias: appAlias,
           bundleId: bundleId,
           actionType: "group",
