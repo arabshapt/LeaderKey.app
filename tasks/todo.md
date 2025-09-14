@@ -403,3 +403,153 @@ Added a notification observer to reload the ProfileManager when profiles change 
 - Profile dropdown now correctly updates when switching via keyboard shortcuts
 - Config list selection remains stable (preserved by previous fix)
 - Both fixes work together to provide a consistent settings experience
+
+---
+
+## Feature: Profile Icons in Sidebar for Quick Switching
+
+### Implementation
+Added profile icon badges to the left sidebar for quick visual profile switching.
+
+### Changes Made
+
+1. **Added ProfileIconView component** (lines 739-776)
+   - Displays circular badges with profile initials
+   - Shows active profile with accent color
+   - Includes hover tooltips with profile names
+   - Clean, minimal design matching the UI
+
+2. **Added profile icons section to sidebar** (lines 70-99)
+   - Horizontal row of profile icons above config list
+   - Quick-add button (+) for new profiles
+   - Visual divider between profiles and configs
+   - Proper spacing and padding
+
+3. **Functionality**:
+   - Click any profile icon to instantly switch profiles
+   - Active profile highlighted with accent color
+   - Integrates with existing profile management
+   - Maintains config list stability when switching
+
+### Visual Design
+- Circular badges (32x32) with 2-letter initials
+- Active profile: Accent color background, white text
+- Inactive profiles: Gray background, primary text
+- Hover effect shows profile name tooltip
+- Add button uses plus.circle.fill icon
+
+### User Experience
+- Quick visual identification of profiles
+- One-click profile switching
+- Clear active profile indication
+- Consistent with macOS design language
+
+### Files Modified
+- `Leader Key/Settings/GeneralPane.swift` (lines 69-99, 739-776)
+
+---
+
+## Enhancement: Vertical Profile Sidebar with Custom Icons
+
+### Implementation
+Redesigned profile display to use a vertical sidebar on the left edge with support for custom SF Symbol icons.
+
+### Changes Made
+
+1. **Updated LeaderKeyProfile struct** (Defaults.swift)
+   - Added `iconName: String?` property for SF Symbol names
+   - Backward compatible with existing profiles
+   - Default parameter in initializer
+
+2. **Vertical Profile Sidebar** (GeneralPane.swift lines 68-99)
+   - Moved profiles to vertical stack on far left (48pt width)
+   - Gray background for visual separation
+   - Profiles stack vertically with proper spacing
+   - Add button at bottom of profile list
+
+3. **Enhanced ProfileIconView** (lines 742-784)
+   - Support for custom SF Symbols
+   - Rounded rectangle design (36x36)
+   - Shows icon when available, initials as fallback
+   - Smooth scale animation for active state
+   - Better visual feedback
+
+4. **Icon Picker in ProfileManagementSheet** (lines 876-960, 1009-1058)
+   - Added 24 popular SF Symbol options
+   - Horizontal scrollable icon selector
+   - Visual preview of selected icon
+   - Categories: work, gaming, personal, activities
+   - Icons include: briefcase, gamecontroller, house, star, etc.
+
+5. **ProfileManager Updates** (UserConfig.swift)
+   - `createProfile` now accepts optional iconName
+   - New `updateProfile` method for name and icon changes
+   - Maintains backward compatibility
+
+### Visual Design
+- **Vertical layout**: 48pt wide sidebar on the left
+- **Icons**: 36x36 rounded rectangles
+- **Active state**: Accent color background, 1.05x scale
+- **Inactive**: Gray background (0.2 opacity)
+- **Icon size**: 18pt SF Symbols
+- **Smooth animations**: 0.1s ease-in-out
+
+### User Experience
+- Click profile icon to switch instantly
+- Visual icon makes profiles easily identifiable
+- Icon picker with 24 popular options
+- Fallback to initials when no icon selected
+- Consistent with macOS design patterns
+
+### Files Modified
+- `Leader Key/Defaults.swift` (lines 13-26)
+- `Leader Key/Settings/GeneralPane.swift` (lines 68-99, 742-784, 876-1058)  
+- `Leader Key/UserConfig.swift` (lines 1006-1064)
+
+---
+
+## Bug Fix: Edit Profile Button Shows Empty Form
+
+### Problem
+When clicking the edit button before selecting a profile in the dropdown, the edit popup appeared with empty fields even though there was an active profile.
+
+### Root Cause
+The edit button was using `DispatchQueue.main.async` to show the sheet, causing a timing issue where the ProfileManagementSheet's `onAppear` could run before `profileToEdit` was properly set.
+
+### Solution
+1. **Removed async dispatch** (line 131-135)
+   - Set both `profileToEdit` and `showingProfileSheet` synchronously
+   - Eliminates timing race condition
+
+2. **Added fallback logic** (lines 1006-1017)
+   - If editing but `profileToEdit` is nil, use active profile as fallback
+   - Ensures fields are always populated when editing
+
+### Result
+- Edit button now reliably shows the active profile's data
+- No more empty forms when editing profiles
+- Consistent behavior regardless of dropdown selection state
+
+---
+
+## UI Optimization: Tighten Sidebar Spacing
+
+### Problem
+The config list sidebar had excessive padding and spacing, wasting screen real estate.
+
+### Solution
+Reduced padding and spacing in the sidebar layout to create a more compact, efficient design.
+
+### Changes Made
+1. **Removed unnecessary bottom padding** (line 156)
+   - Removed `.padding(.bottom, 5)` after profile management buttons
+   
+2. **Reduced VStack spacing** (line 102)
+   - Changed from `spacing: 12` to `spacing: 8`
+   - Creates tighter, more compact layout
+
+### Result
+- More compact sidebar layout
+- Better use of vertical space
+- Cleaner visual hierarchy
+- Reduced wasted whitespace

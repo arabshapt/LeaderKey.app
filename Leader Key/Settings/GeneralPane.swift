@@ -64,9 +64,43 @@ struct GeneralPane: View {
       // Wrap the main layout in a Settings.Section, providing an empty title
       Settings.Section(title: "") {
         // Main Horizontal Layout
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: 0) {
+          // --- Profile Vertical Bar --- START ---
+          VStack(spacing: 12) {
+            ForEach(profileManager.profiles) { profile in
+              ProfileIconView(
+                profile: profile,
+                isActive: profile.id == profileManager.activeProfile?.id,
+                action: {
+                  profileManager.setActiveProfile(profile)
+                  config.switchToProfile(profile)
+                }
+              )
+            }
+            
+            // Add profile button
+            Button(action: {
+              profileToEdit = nil
+              showingProfileSheet = true
+            }) {
+              Image(systemName: "plus.circle.fill")
+                .font(.system(size: 28))
+                .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Add new profile")
+            
+            Spacer()
+          }
+          .frame(width: 48)
+          .padding(.vertical, 8)
+          .background(Color.black.opacity(0.05))
+          
+          Divider()
+          
           // --- Left Sidebar: Config List --- START ---
-          VStack(alignment: .leading) {
+          VStack(alignment: .leading, spacing: 8) {
+            
             // Profile selector with management buttons
             HStack(spacing: 4) {
               Picker("", selection: Binding(
@@ -97,10 +131,7 @@ struct GeneralPane: View {
               Button(action: {
                 if let activeProfile = profileManager.activeProfile {
                   profileToEdit = activeProfile
-                  // Small delay to ensure state is set before sheet appears
-                  DispatchQueue.main.async {
-                    showingProfileSheet = true
-                  }
+                  showingProfileSheet = true
                 }
               }) {
                 Image(systemName: "pencil")
@@ -123,7 +154,6 @@ struct GeneralPane: View {
               .disabled(profileManager.profiles.count <= 1)
               .help("Delete current profile")
             }
-            .padding(.bottom, 5)
 
             List(selection: $listSelection) {
               ForEach(sortedConfigKeys, id: \.self) { key in
@@ -705,6 +735,50 @@ private struct AddConfigSheet: View {
   }
 }
 
+// MARK: - ProfileIconView
+private struct ProfileIconView: View {
+  let profile: LeaderKeyProfile
+  let isActive: Bool
+  let action: () -> Void
+  
+  private var initials: String {
+    let words = profile.name.split(separator: " ")
+    if words.count >= 2 {
+      // Take first letter of first two words
+      return String(words[0].prefix(1) + words[1].prefix(1)).uppercased()
+    } else {
+      // Take first two letters of single word
+      return String(profile.name.prefix(2)).uppercased()
+    }
+  }
+  
+  var body: some View {
+    Button(action: action) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 8)
+          .fill(isActive ? Color.accentColor : Color.secondary.opacity(0.2))
+          .frame(width: 36, height: 36)
+        
+        if let iconName = profile.iconName {
+          // Use custom icon if available
+          Image(systemName: iconName)
+            .font(.system(size: 18, weight: .medium))
+            .foregroundColor(isActive ? .white : .primary)
+        } else {
+          // Fallback to initials
+          Text(initials)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(isActive ? .white : .primary)
+        }
+      }
+    }
+    .buttonStyle(.plain)
+    .help(profile.name)
+    .scaleEffect(isActive ? 1.05 : 1.0)
+    .animation(.easeInOut(duration: 0.1), value: isActive)
+  }
+}
+
 struct GeneralPane_Previews: PreviewProvider {
   static var previews: some View {
     // Preview needs adjustment if UserConfig init requires more
@@ -796,8 +870,37 @@ struct ProfileManagementSheet: View {
   
   @Environment(\.dismiss) private var dismiss
   @State private var profileName: String = ""
+  @State private var selectedIcon: String? = nil
   @State private var showingError = false
   @State private var errorMessage = ""
+  
+  // Popular SF Symbols for profiles
+  private let iconOptions = [
+    "person.circle.fill",
+    "briefcase.fill",
+    "gamecontroller.fill",
+    "house.fill",
+    "laptopcomputer",
+    "desktopcomputer",
+    "iphone",
+    "star.fill",
+    "heart.fill",
+    "bolt.fill",
+    "flame.fill",
+    "moon.fill",
+    "sun.max.fill",
+    "cloud.fill",
+    "book.fill",
+    "music.note",
+    "video.fill",
+    "mic.fill",
+    "headphones",
+    "airplane",
+    "car.fill",
+    "bicycle",
+    "figure.walk",
+    "figure.run"
+  ]
   
   var isEditing: Bool {
     profileToEdit != nil
@@ -817,6 +920,37 @@ struct ProfileManagementSheet: View {
           .textFieldStyle(.roundedBorder)
         
         Text("Choose a descriptive name for this profile (e.g., Work, Personal, Gaming)")
+          .font(.caption)
+          .foregroundColor(.secondary)
+      }
+      
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Profile Icon")
+          .font(.headline)
+        
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 12) {
+            ForEach(iconOptions, id: \.self) { iconName in
+              Button(action: {
+                selectedIcon = iconName
+              }) {
+                ZStack {
+                  RoundedRectangle(cornerRadius: 8)
+                    .fill(selectedIcon == iconName ? Color.accentColor : Color.secondary.opacity(0.2))
+                    .frame(width: 44, height: 44)
+                  
+                  Image(systemName: iconName)
+                    .font(.system(size: 20))
+                    .foregroundColor(selectedIcon == iconName ? .white : .primary)
+                }
+              }
+              .buttonStyle(.plain)
+            }
+          }
+          .padding(.vertical, 4)
+        }
+        
+        Text("Select an icon for this profile (optional)")
           .font(.caption)
           .foregroundColor(.secondary)
       }
@@ -871,6 +1005,13 @@ struct ProfileManagementSheet: View {
     .onAppear {
       if let profile = profileToEdit {
         profileName = profile.name
+        selectedIcon = profile.iconName
+      } else if isEditing {
+        // Fallback: if we're editing but profileToEdit is nil, use active profile
+        if let activeProfile = profileManager.activeProfile {
+          profileName = activeProfile.name
+          selectedIcon = activeProfile.iconName
+        }
       }
     }
     .alert("Error", isPresented: $showingError) {
@@ -905,10 +1046,10 @@ struct ProfileManagementSheet: View {
     
     if let profile = profileToEdit {
       // Edit existing profile
-      profileManager.renameProfile(profile, to: trimmedName)
+      profileManager.updateProfile(profile, name: trimmedName, iconName: selectedIcon)
     } else {
       // Create new profile
-      let newProfile = profileManager.createProfile(name: trimmedName)
+      let newProfile = profileManager.createProfile(name: trimmedName, iconName: selectedIcon)
       // Make it active if it's the only one
       if profileManager.profiles.count == 1 {
         profileManager.setActiveProfile(newProfile)

@@ -1003,8 +1003,8 @@ class ProfileManager: ObservableObject {
     Defaults[.leaderKeyProfiles] = profiles
   }
   
-  func createProfile(name: String) -> LeaderKeyProfile {
-    let profile = LeaderKeyProfile(name: name)
+  func createProfile(name: String, iconName: String? = nil) -> LeaderKeyProfile {
+    let profile = LeaderKeyProfile(name: name, iconName: iconName)
     
     // Create directory for the profile
     createProfileDirectory(for: profile)
@@ -1051,6 +1051,14 @@ class ProfileManager: ObservableObject {
   func renameProfile(_ profile: LeaderKeyProfile, to newName: String) {
     if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
       profiles[index].name = newName
+      saveProfiles()
+    }
+  }
+  
+  func updateProfile(_ profile: LeaderKeyProfile, name: String, iconName: String?) {
+    if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+      profiles[index].name = name
+      profiles[index].iconName = iconName
       saveProfiles()
     }
   }

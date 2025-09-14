@@ -15,12 +15,14 @@ struct LeaderKeyProfile: Codable, Identifiable, Defaults.Serializable, Equatable
   var name: String
   var isActive: Bool
   var shortcutName: String  // Unique identifier for KeyboardShortcuts.Name
+  var iconName: String?  // SF Symbol name for profile icon
   
-  init(id: UUID = UUID(), name: String, isActive: Bool = false) {
+  init(id: UUID = UUID(), name: String, isActive: Bool = false, iconName: String? = nil) {
     self.id = id
     self.name = name
     self.isActive = isActive
     self.shortcutName = "profile_\(id.uuidString)"
+    self.iconName = iconName
   }
   
   // Directory path for this profile's configurations
