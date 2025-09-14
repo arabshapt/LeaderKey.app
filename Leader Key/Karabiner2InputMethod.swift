@@ -80,9 +80,12 @@ final class Karabiner2InputMethod: InputMethod {
     // 1. Load fallback config (already loaded in userConfig)
     let fallbackConfig = userConfig
     
-    // 2. Discover all app configs in Application Support directory
-    let configDir = NSHomeDirectory() + "/Library/Application Support/Leader Key"
+    // 2. Discover all app configs in profile-specific directory
+    let configDir = userConfig.currentProfile?.directoryPath ?? (NSHomeDirectory() + "/Library/Application Support/Leader Key")
     var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
+    
+    // Get current profile for activation shortcuts
+    let currentProfile = userConfig.currentProfile
     
     do {
       let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
@@ -138,12 +141,14 @@ final class Karabiner2InputMethod: InputMethod {
     // 3. Generate unified EDN with hierarchical organization
     let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
       fallbackConfig: fallbackConfig,
-      appConfigs: appConfigs
+      appConfigs: appConfigs,
+      profile: currentProfile
     )
     
-    // 4. Save to single unified file
+    // 4. Save to profile-specific file
     let outputDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
-    let filePath = outputDir + "/leaderkey-unified.edn"
+    let profileId = currentProfile?.id.uuidString ?? "default"
+    let filePath = outputDir + "/leaderkey-\(profileId).edn"
 
     do {
       try FileManager.default.createDirectory(
