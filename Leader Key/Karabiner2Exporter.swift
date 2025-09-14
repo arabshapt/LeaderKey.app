@@ -31,12 +31,12 @@ final class Karabiner2Exporter {
   }
 
   // Different initial states for different activation types
-  private static let globalInitialStateId: Int32 = 1
+  // Note: Global activation is deprecated - use profile-based shortcuts
   private static let fallbackInitialStateId: Int32 = 2
   private static let inactiveStateId: Int32 = 0
-  
-  // Legacy constant for backward compatibility
-  private static let initialStateId: Int32 = globalInitialStateId
+
+  // Legacy constant for backward compatibility (previously globalInitialStateId)
+  private static let initialStateId: Int32 = 1
 
   static func generateGokuEDN(from config: UserConfig, bundleId: String? = nil) -> String {
     let (stateTree, _) = buildStateTree(from: config.root, appAlias: nil, bundleId: bundleId)
@@ -195,10 +195,12 @@ final class Karabiner2Exporter {
   }
   
   // Generate unified EDN with all app configs in a single file (legacy flat version)
+  // DEPRECATED: Use generateUnifiedGokuEDNHierarchical instead
   // Returns: (ednContent, stateMappings)
   static func generateUnifiedGokuEDN(
     fallbackConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    profile: LeaderKeyProfile? = nil
   ) -> (edn: String, stateMappings: [StateMapping]) {
     debugLog("[Karabiner2Exporter] generateUnifiedGokuEDN called with \(appConfigs.count) app configs")
     for (bundleId, _, customName) in appConfigs {
@@ -235,8 +237,8 @@ final class Karabiner2Exporter {
     
     // 3. Skip global manipulators - we only use fallback and app-specific configs now
     var allStateMappings: [StateMapping] = []
-    
-    // 4. Generate app-specific manipulators (Cmd+Shift+K activation)
+
+    // 4. Generate app-specific manipulators using profile shortcuts
     var appSections: [(alias: String, manipulators: [String])] = []
     for (bundleId, alias, config) in appAliases {
       let appInitialStateId = generateAppInitialStateId(appAlias: alias)
@@ -246,18 +248,18 @@ final class Karabiner2Exporter {
         from: appStateTree,
         appAlias: alias,
         bundleId: bundleId,
-        activationKey: "{:key :k :modi [:command :shift]}",  // Cmd+Shift+K for app-specific
+        activationKey: profileShortcutToGokuKey(profile: profile),  // Use profile's shortcut
         initialStateId: appInitialStateId
       )
       appSections.append((alias: alias, manipulators: manipulators))
     }
     
-    // 5. Generate fallback-only activation manipulator (Cmd+Option+K)
+    // 5. Generate fallback-only activation manipulator using profile shortcut
     // Using app-specific variables but with __FALLBACK__ bundleId
     let fallbackManipulator = generateUnifiedActivationManipulator(
       appAlias: nil,
       bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",  // Cmd+Option+K for fallback
+      activationKey: profileShortcutToGokuKey(profile: profile),  // Use profile's shortcut
       initialStateId: fallbackInitialStateId
     )
     
@@ -403,7 +405,7 @@ final class Karabiner2Exporter {
     return " :applications {\n\(appLines.joined(separator: "\n"))\n }"
   }
 
-  private static func buildStateTree(from group: Group, appAlias: String? = nil, bundleId: String? = nil, initialStateId: Int32 = globalInitialStateId) -> ([StateNode], [StateMapping]) {
+  private static func buildStateTree(from group: Group, appAlias: String? = nil, bundleId: String? = nil, initialStateId: Int32 = initialStateId) -> ([StateNode], [StateMapping]) {
     var nodes: [StateNode] = []
     var stateMappings: [StateMapping] = []
     var queue: [(item: ActionOrGroup, path: [String], originalPath: [String], parentStateId: Int32, parentGroupHasStickyMode: Bool)] = []
@@ -1211,7 +1213,7 @@ final class Karabiner2Exporter {
       activateCmd = FileManager.default.fileExists(atPath: cliPath)
         ? "\(cliPath) activate \(bundleId)" : "echo 'activate \(bundleId)' | nc -U /tmp/leaderkey.sock"
     } else {
-      // Global activation without bundleId
+      // Fallback activation without bundleId
       activateCmd = FileManager.default.fileExists(atPath: cliPath)
         ? "\(cliPath) activate" : "echo 'activate' | nc -U /tmp/leaderkey.sock"
     }
@@ -1233,7 +1235,7 @@ final class Karabiner2Exporter {
       // App-specific activation with simple app alias condition
       return "   [\(activationKey) [\(modeVars) [\"\(varNames.stateVar)\" \(initialStateId)] [:shell \"\(activateCmd)\"]] :\(alias)]"
     } else {
-      // Global or fallback activation with no app condition
+      // Fallback activation with no app condition
       return "   [\(activationKey) [\(modeVars) [\"\(varNames.stateVar)\" \(initialStateId)] [:shell \"\(activateCmd)\"]]]"
     }
   }
@@ -1535,7 +1537,7 @@ final class Karabiner2Exporter {
       // App-specific catch-all with combined conditions (excluding sticky mode)
       rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [:\(alias) [\"\(varNames.stateVar)\" \(fromState)] [\"\(varNames.stickyVar)\" 0]]]")
     } else {
-      // Global catch-all with just state condition (excluding sticky mode)
+      // Fallback catch-all with just state condition (excluding sticky mode)
       rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [[\"\(varNames.stateVar)\" \(fromState)] [\"\(varNames.stickyVar)\" 0]]]")
     }
     
@@ -1634,7 +1636,7 @@ final class Karabiner2Exporter {
     // 1. Create Activation section with all activation keys
     var activationRules: [String] = []
     
-    // Extract global activation (first item is always activation)
+    // Extract activation shortcuts (first item is always activation)
     if !globalManipulators.isEmpty {
       activationRules.append(globalManipulators[0])
     }
@@ -1660,7 +1662,7 @@ final class Karabiner2Exporter {
       rules.append(activationSection)
     }
     
-    // 2. Create Global section (without activation)
+    // 2. Create Main section (without activation)
     let globalRulesWithoutActivation = Array(globalManipulators.dropFirst())
     if !globalRulesWithoutActivation.isEmpty {
       var globalSection = "  {:des \"Leader Key 2.0 - Global\"\n"
