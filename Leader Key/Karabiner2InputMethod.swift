@@ -70,85 +70,94 @@ final class Karabiner2InputMethod: InputMethod {
   }
 
   func exportCurrentConfiguration() {
-    guard let appDelegate = NSApplication.shared.delegate as? AppDelegate,
-      let userConfig = appDelegate.controller?.userConfig
-    else {
-      debugLog("[Karabiner2InputMethod] Failed to get user config for export")
+    // Export all profiles instead of just the current one
+    exportAllProfiles()
+  }
+
+  func exportAllProfiles() {
+    debugLog("[Karabiner2InputMethod] Starting export of all profiles")
+
+    // Get all profiles from ProfileManager
+    let profileManager = ProfileManager.shared
+    let allProfiles = profileManager.profiles
+
+    guard !allProfiles.isEmpty else {
+      debugLog("[Karabiner2InputMethod] No profiles found to export")
       return
     }
 
-    // 1. Load fallback config (already loaded in userConfig)
-    let fallbackConfig = userConfig
-    
-    // 2. Discover all app configs in profile-specific directory
-    let configDir = userConfig.currentProfile?.directoryPath ?? (NSHomeDirectory() + "/Library/Application Support/Leader Key")
-    var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
-    
-    // Get current profile for activation shortcuts
-    let currentProfile = userConfig.currentProfile
-    
-    do {
-      let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
-      for file in files {
-        // Match app config files (app.{bundleId}.json) but exclude .meta.json files
-        if file.hasPrefix("app.") && file.hasSuffix(".json") && !file.hasSuffix(".meta.json") && file != "app-fallback-config.json" {
-          // Extract bundle ID from filename
-          let bundleId = String(file.dropFirst(4).dropLast(5)) // Remove "app." and ".json"
-          
-          // Skip certain system configs and any with .meta in the bundle ID
-          if bundleId == "default" || bundleId.contains("Leader-Key") || bundleId.contains("leaderkey") || bundleId.contains(".meta") {
-            debugLog("[Karabiner2InputMethod] Skipping config: bundleId=\(bundleId)")
-            continue
-          }
-          
-          debugLog("[Karabiner2InputMethod] Processing file: \(file) → bundleId: \(bundleId)")
-          
-          // Try to read custom name from meta file
-          var customName: String? = nil
-          let metaFilePath = configDir + "/app.\(bundleId).meta.json"
-          if FileManager.default.fileExists(atPath: metaFilePath) {
-            do {
-              let metaData = try Data(contentsOf: URL(fileURLWithPath: metaFilePath))
-              let metadata = try JSONDecoder().decode(Karabiner2Exporter.AppMetadata.self, from: metaData)
-              customName = metadata.customName
-              debugLog("[Karabiner2InputMethod] Found custom name for \(bundleId): \(customName ?? "nil")")
-            } catch {
-              debugLog("[Karabiner2InputMethod] Failed to read meta file for \(bundleId): \(error)")
+    // Structure to hold all profile configurations
+    var allProfileConfigs: [(profile: LeaderKeyProfile, fallbackConfig: UserConfig, appConfigs: [(bundleId: String, config: UserConfig, customName: String?)])] = []
+
+    // Process each profile
+    for (profileIndex, profile) in allProfiles.enumerated() {
+      debugLog("[Karabiner2InputMethod] Processing profile \(profileIndex): \(profile.name)")
+
+      // Load the profile's configuration
+      let userConfig = UserConfig()
+      userConfig.currentProfile = profile
+
+      // Load fallback config for this profile
+      let fallbackConfig = userConfig
+
+      // Discover all app configs in profile-specific directory
+      let configDir = profile.directoryPath
+      var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
+
+      do {
+        let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
+        for file in files {
+          // Match app config files (app.{bundleId}.json) but exclude .meta.json files
+          if file.hasPrefix("app.") && file.hasSuffix(".json") && !file.hasSuffix(".meta.json") && file != "app-fallback-config.json" {
+            // Extract bundle ID from filename
+            let bundleId = String(file.dropFirst(4).dropLast(5)) // Remove "app." and ".json"
+
+            // Skip certain system configs and any with .meta in the bundle ID
+            if bundleId == "default" || bundleId.contains("Leader-Key") || bundleId.contains("leaderkey") || bundleId.contains(".meta") {
+              continue
+            }
+
+            // Try to read custom name from meta file
+            var customName: String? = nil
+            let metaFilePath = configDir + "/app.\(bundleId).meta.json"
+            if FileManager.default.fileExists(atPath: metaFilePath) {
+              do {
+                let metaData = try Data(contentsOf: URL(fileURLWithPath: metaFilePath))
+                let metadata = try JSONDecoder().decode(Karabiner2Exporter.AppMetadata.self, from: metaData)
+                customName = metadata.customName
+              } catch {
+                debugLog("[Karabiner2InputMethod] Failed to read meta file for \(bundleId): \(error)")
+              }
+            }
+
+            // Load and merge the app config with fallback
+            let appConfigPath = configDir + "/" + file
+            if let appSpecificConfig = loadAndMergeAppConfig(
+              bundleId: bundleId,
+              configPath: appConfigPath,
+              fallbackConfig: fallbackConfig
+            ) {
+              appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: customName))
             }
           }
-          
-          // Load and merge the app config with fallback
-          let appConfigPath = configDir + "/" + file
-          if let appSpecificConfig = loadAndMergeAppConfig(
-            bundleId: bundleId, 
-            configPath: appConfigPath, 
-            fallbackConfig: fallbackConfig
-          ) {
-            debugLog("[Karabiner2InputMethod] Adding to appConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
-            appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: customName))
-          }
         }
+      } catch {
+        debugLog("[Karabiner2InputMethod] Failed to list config directory for profile \(profile.name): \(error)")
       }
-    } catch {
-      debugLog("[Karabiner2InputMethod] Failed to list config directory: \(error)")
+
+      allProfileConfigs.append((profile: profile, fallbackConfig: fallbackConfig, appConfigs: appConfigs))
     }
-    
-    debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs")
-    for (bundleId, _, customName) in appConfigs {
-      debugLog("[Karabiner2InputMethod] Final appConfig: bundleId=\(bundleId), customName=\(customName ?? "nil")")
-    }
-    
-    // 3. Generate unified EDN with hierarchical organization
-    let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
-      fallbackConfig: fallbackConfig,
-      appConfigs: appConfigs,
-      profile: currentProfile
+
+    debugLog("[Karabiner2InputMethod] Collected configs for \(allProfileConfigs.count) profiles")
+
+    // 3. Generate unified EDN for all profiles
+    let (ednContent, stateMappings) = Karabiner2Exporter.generateAllProfilesEDN(
+      allProfileConfigs: allProfileConfigs
     )
     
-    // 4. Save to profile-specific file
+    // 4. Save to all-profiles file
     let outputDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
-    let profileId = currentProfile?.id.uuidString ?? "default"
-    let filePath = outputDir + "/leaderkey-\(profileId).edn"
+    let filePath = outputDir + "/leaderkey-all-profiles.edn"
 
     do {
       try FileManager.default.createDirectory(

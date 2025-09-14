@@ -44,6 +44,147 @@ final class Karabiner2Exporter {
 
     return formatGokuEDN(manipulators: manipulators, bundleId: bundleId)
   }
+
+  // Generate unified EDN for all profiles at once
+  static func generateAllProfilesEDN(
+    allProfileConfigs: [(profile: LeaderKeyProfile, fallbackConfig: UserConfig, appConfigs: [(bundleId: String, config: UserConfig, customName: String?)])]
+  ) -> (edn: String, stateMappings: [StateMapping]) {
+    debugLog("[Karabiner2Exporter] generateAllProfilesEDN called with \(allProfileConfigs.count) profiles")
+
+    var allSections: [(name: String, groups: [ManipulatorGroup])] = []
+    var allStateMappings: [StateMapping] = []
+    var allActivationRules: [String] = []
+    var allApplications: [(bundleId: String, alias: String)] = []
+    var globalUsedAliases = Set<String>()
+
+    // Process each profile
+    for (profileIndex, profileConfig) in allProfileConfigs.enumerated() {
+      let profile = profileConfig.profile
+      let fallbackConfig = profileConfig.fallbackConfig
+      let appConfigs = profileConfig.appConfigs
+
+      debugLog("[Karabiner2Exporter] Processing profile \(profileIndex): \(profile.name)")
+
+      // Generate app aliases for this profile
+      var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
+
+      for (bundleId, config, customName) in appConfigs {
+        if bundleId.contains(".meta") {
+          continue
+        }
+
+        var alias = generateAppAlias(from: bundleId, customName: customName)
+
+        // Ensure global uniqueness across all profiles
+        var counter = 1
+        let baseAlias = alias
+        while globalUsedAliases.contains(alias) {
+          alias = "\(baseAlias)_\(counter)"
+          counter += 1
+        }
+        globalUsedAliases.insert(alias)
+
+        appAliases.append((bundleId: bundleId, alias: alias, config: config))
+        allApplications.append((bundleId: bundleId, alias: alias))
+      }
+
+      // Generate app-specific sections for this profile
+      for (bundleId, alias, config) in appAliases {
+        let appInitialStateId = generateAppInitialStateIdForProfile(appAlias: alias, profileIndex: profileIndex)
+        let (appStateTree, appMappings) = buildStateTree(
+          from: config.root,
+          appAlias: alias,
+          bundleId: bundleId,
+          initialStateId: appInitialStateId
+        )
+        allStateMappings.append(contentsOf: appMappings)
+
+        let (appActivation, appGroups) = generateManipulatorsForUnifiedHierarchical(
+          from: appStateTree,
+          appAlias: alias,
+          bundleId: bundleId,
+          activationKey: profileShortcutToGokuKey(profile: profile),
+          initialStateId: appInitialStateId,
+          profile: profile
+        )
+        allActivationRules.append(appActivation)
+
+        // Find custom name from original appConfigs
+        let customName = appConfigs.first(where: { $0.bundleId == bundleId })?.customName
+        let appName = customName ?? alias
+        allSections.append((name: "Leader Key - \(profile.name) - \(appName)", groups: appGroups))
+      }
+
+      // Generate fallback section for this profile
+      let fallbackRoot = fallbackConfig.getFallbackConfig()
+      let (profileRangeStart, _) = getProfileStateIdRange(profileIndex: profileIndex)
+      let fallbackInitialId = profileRangeStart + 2 // Unique fallback ID within profile's range
+
+      let (fallbackStateTree, fallbackMappings) = buildStateTree(
+        from: fallbackRoot,
+        appAlias: nil,
+        bundleId: "__FALLBACK__",
+        initialStateId: fallbackInitialId
+      )
+      allStateMappings.append(contentsOf: fallbackMappings)
+
+      let (fallbackActivation, fallbackGroups) = generateManipulatorsForUnifiedHierarchical(
+        from: fallbackStateTree,
+        appAlias: nil,
+        bundleId: "__FALLBACK__",
+        activationKey: profileShortcutToGokuKey(profile: profile),
+        initialStateId: fallbackInitialId,
+        profile: profile
+      )
+      allActivationRules.append(fallbackActivation)
+      allSections.append((name: "Leader Key - \(profile.name) - Fallback", groups: fallbackGroups))
+    }
+
+    // Create unified activation section with all profiles' activations
+    if !allActivationRules.isEmpty {
+      // Add escape and settings rules for all profiles
+      for profileConfig in allProfileConfigs {
+        let profile = profileConfig.profile
+        let varNames = getProfileVariableNames(profile: profile)
+
+        // Clear both global and profile-specific variables on escape/settings
+        let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
+        let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
+
+        allActivationRules.append(escapeRule)
+        allActivationRules.append(settingsRule)
+      }
+
+      let activationSection = (
+        name: "Leader Key - Activation Shortcuts",
+        groups: [ManipulatorGroup(condition: nil, rules: allActivationRules)]
+      )
+
+      // Insert activation section at the beginning
+      allSections.insert(activationSection, at: 0)
+    }
+
+    // Add modifier pass-through section
+    let modifierPassThroughSection = (
+      name: "Leader Key - Modifier Pass-Through",
+      groups: [ManipulatorGroup(
+        condition: nil,
+        rules: generateModifierPassThroughRules(profiles: allProfileConfigs.map { $0.profile })
+      )]
+    )
+    allSections.insert(modifierPassThroughSection, at: 1)
+
+    // Generate applications section
+    let applications = generateApplicationsSectionFromPairs(allApplications)
+
+    // Format the final EDN
+    let ednContent = formatHierarchicalEDN(
+      applications: applications,
+      sections: allSections
+    )
+
+    return (edn: ednContent, stateMappings: allStateMappings)
+  }
   
   // Generate unified EDN with hierarchical organization and :condi grouping
   // Returns: (ednContent, stateMappings)
@@ -147,10 +288,10 @@ final class Karabiner2Exporter {
     // Get profile-specific variable names
     let varNames = getProfileVariableNames(profile: profile)
     
-    // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode)
-    let escapeRule = "   [:escape [[\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
+    // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode and global active)
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :\(varNames.activeVar)]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"\(varNames.activeVar)\" 0] [\"\(varNames.appSpecificVar)\" 0] [\"\(varNames.stickyVar)\" 0] [\"\(varNames.stateVar)\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :\(varNames.activeVar)]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -383,13 +524,78 @@ final class Karabiner2Exporter {
   // Generate :applications section for Goku with pre-computed unique aliases
   private static func generateApplicationsSectionFromAliases(appAliases: [(bundleId: String, alias: String, config: UserConfig)]) -> String {
     guard !appAliases.isEmpty else { return "" }
-    
+
     var appLines: [String] = []
     for (bundleId, alias, _) in appAliases {
       appLines.append("   :\(alias) [\"\(bundleId)\"]")
     }
-    
+
     return " :applications {\n\(appLines.joined(separator: "\n"))\n }"
+  }
+
+  // Generate applications section from bundle ID and alias pairs
+  private static func generateApplicationsSectionFromPairs(_ pairs: [(bundleId: String, alias: String)]) -> String {
+    guard !pairs.isEmpty else { return "" }
+
+    var appLines: [String] = []
+    for (bundleId, alias) in pairs {
+      appLines.append("   :\(alias) [\"\(bundleId)\"]")
+    }
+
+    return " :applications {\n\(appLines.joined(separator: "\n"))\n }"
+  }
+
+  // Generate modifier pass-through rules for multiple profiles
+  private static func generateModifierPassThroughRules(profiles: [LeaderKeyProfile]) -> [String] {
+    var rules: [String] = []
+
+    // Use the global leaderkey_active variable for simpler conditions
+    // This applies to ANY active Leader Key profile
+    let modifiers = ["left_shift", "right_shift", "left_command", "right_command",
+                    "left_option", "right_option", "left_control", "right_control"]
+
+    for modifier in modifiers {
+      // Use global variable so modifiers pass through when ANY profile is active
+      let rule = "   [:##\(modifier) :\(modifier) :leaderkey_active]"
+      rules.append(rule)
+    }
+
+    return rules
+  }
+
+  // Format the final hierarchical EDN with sections
+  private static func formatHierarchicalEDN(applications: String, sections: [(name: String, groups: [ManipulatorGroup])]) -> String {
+    var ednContent = ""
+
+    // Add applications section if not empty
+    if !applications.isEmpty {
+      ednContent += applications + "\n\n"
+    }
+
+    // Add main rules
+    ednContent += " :main [\n"
+
+    // Convert sections to EDN format
+    var formattedSections: [String] = []
+    for section in sections {
+      var sectionContent = "  {:des \"\(section.name)\"\n"
+      sectionContent += "   :rules [\n"
+
+      // Convert ManipulatorGroup rules to strings
+      var allRules: [String] = []
+      for group in section.groups {
+        allRules.append(contentsOf: group.rules)
+      }
+
+      sectionContent += allRules.joined(separator: "\n")
+      sectionContent += "\n   ]}"
+      formattedSections.append(sectionContent)
+    }
+
+    ednContent += formattedSections.joined(separator: "\n\n")
+    ednContent += "\n ]"
+
+    return ednContent
   }
   
   // Legacy function kept for backward compatibility (not used in unified generation)
@@ -530,6 +736,24 @@ final class Karabiner2Exporter {
     let baseId = generateStateId(from: ["app_initial", appAlias])
     // Keep it in a reasonable range (1000-99999) to avoid conflicts
     return 1000 + (abs(baseId) % 99000)
+  }
+
+  // Generate profile-specific state ID range
+  private static func getProfileStateIdRange(profileIndex: Int) -> (start: Int32, end: Int32) {
+    // Each profile gets 100,000 state IDs for better distribution and no collision risk
+    // Profile 0: 100,000-199,999, Profile 1: 200,000-299,999, etc.
+    let start = Int32(100_000 + (profileIndex * 100_000))
+    let end = start + 99_999
+    return (start, end)
+  }
+
+  // Generate app initial state ID with profile-specific range
+  private static func generateAppInitialStateIdForProfile(appAlias: String, profileIndex: Int) -> Int32 {
+    let (rangeStart, rangeEnd) = getProfileStateIdRange(profileIndex: profileIndex)
+    let baseId = generateStateId(from: ["app_initial", appAlias])
+    // Keep within profile's range
+    let offset = abs(baseId) % Int32(rangeEnd - rangeStart)
+    return rangeStart + offset
   }
 
   private static func generateManipulators(from nodes: [StateNode], bundleId: String? = nil) -> [String] {
@@ -1221,14 +1445,14 @@ final class Karabiner2Exporter {
     // Get profile-specific variable names
     let varNames = getProfileVariableNames(profile: profile)
     
-    // Determine which mode variables to set
+    // Determine which mode variables to set (including global leaderkey_active)
     let modeVars: String
     if appAlias != nil || bundleId == "__FALLBACK__" {
-      // App-specific mode (including fallback)
-      modeVars = "[\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
+      // App-specific mode (including fallback) - set both global and profile-specific
+      modeVars = "[\"leaderkey_active\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
     } else {
       // This shouldn't happen anymore - we only have app-specific mode
-      modeVars = "[\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
+      modeVars = "[\"leaderkey_active\" 1] [\"\(varNames.activeVar)\" 1] [\"\(varNames.appSpecificVar)\" 1]"
     }
     
     if let alias = appAlias {
