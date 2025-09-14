@@ -999,6 +999,9 @@ class ProfileManager: ObservableObject {
   func loadProfiles() {
     profiles = Defaults[.leaderKeyProfiles]
     activeProfile = profiles.first { $0.isActive }
+
+    // Ensure metadata files exist for all profiles
+    ensureProfileMetadata()
   }
   
   func saveProfiles() {
@@ -1054,14 +1057,18 @@ class ProfileManager: ObservableObject {
     if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
       profiles[index].name = newName
       saveProfiles()
+      // Update metadata file
+      saveProfileMetadata(for: profiles[index])
     }
   }
-  
+
   func updateProfile(_ profile: LeaderKeyProfile, name: String, iconName: String?) {
     if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
       profiles[index].name = name
       profiles[index].iconName = iconName
       saveProfiles()
+      // Update metadata file
+      saveProfileMetadata(for: profiles[index])
     }
   }
   
@@ -1079,6 +1086,11 @@ class ProfileManager: ObservableObject {
 
     saveProfiles()
 
+    // Update metadata files to reflect active status changes
+    for p in profiles {
+      saveProfileMetadata(for: p)
+    }
+
     // Post notification for profile change
     NotificationCenter.default.post(
       name: .profileDidChange,
@@ -1091,7 +1103,7 @@ class ProfileManager: ObservableObject {
   
   private func createProfileDirectory(for profile: LeaderKeyProfile) {
     let path = profile.directoryPath
-    
+
     if !fileManager.fileExists(atPath: path) {
       do {
         try fileManager.createDirectory(
@@ -1099,9 +1111,12 @@ class ProfileManager: ObservableObject {
           withIntermediateDirectories: true,
           attributes: nil
         )
-        
+
         // Create default app-fallback-config.json for new profile
         createDefaultConfig(for: profile)
+
+        // Create profile metadata file for easier identification
+        saveProfileMetadata(for: profile)
       } catch {
         print("Failed to create profile directory: \(error)")
       }
@@ -1134,7 +1149,58 @@ class ProfileManager: ObservableObject {
       migrateExistingConfigs(to: defaultProfile)
     }
   }
-  
+
+  // MARK: - Profile Metadata
+
+  private func ensureProfileMetadata() {
+    for profile in profiles {
+      let metadataPath = (profile.directoryPath as NSString)
+        .appendingPathComponent(".profile-info")
+
+      // Create metadata file if it doesn't exist
+      if !fileManager.fileExists(atPath: metadataPath) {
+        saveProfileMetadata(for: profile)
+      }
+    }
+  }
+
+  private func saveProfileMetadata(for profile: LeaderKeyProfile) {
+    let metadataPath = (profile.directoryPath as NSString)
+      .appendingPathComponent(".profile-info")
+
+    let metadata: [String: Any] = [
+      "id": profile.id.uuidString,
+      "name": profile.name,
+      "iconName": profile.iconName ?? "",
+      "createdAt": ISO8601DateFormatter().string(from: Date()),
+      "isActive": profile.isActive
+    ]
+
+    do {
+      let jsonData = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted])
+      try jsonData.write(to: URL(fileURLWithPath: metadataPath))
+    } catch {
+      print("Failed to save profile metadata: \(error)")
+    }
+  }
+
+  private func readProfileMetadata(from path: String) -> [String: Any]? {
+    let metadataPath = (path as NSString).appendingPathComponent(".profile-info")
+
+    guard fileManager.fileExists(atPath: metadataPath) else {
+      return nil
+    }
+
+    do {
+      let data = try Data(contentsOf: URL(fileURLWithPath: metadataPath))
+      let metadata = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+      return metadata
+    } catch {
+      print("Failed to read profile metadata: \(error)")
+      return nil
+    }
+  }
+
   // MARK: - Migration
   
   func migrateExistingConfigs(to profile: LeaderKeyProfile) {
