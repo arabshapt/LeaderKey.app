@@ -982,10 +982,7 @@ extension ActionOrGroup {
 
 // MARK: - Profile Manager
 class ProfileManager: ObservableObject {
-  static let shared: ProfileManager = {
-    print("[ProfileManager] Creating singleton instance")
-    return ProfileManager()
-  }()
+  static let shared = ProfileManager()
   
   @Published var profiles: [LeaderKeyProfile] = []
   @Published var activeProfile: LeaderKeyProfile?
@@ -993,24 +990,15 @@ class ProfileManager: ObservableObject {
   private let fileManager = FileManager.default
   
   private init() {
-    print("[ProfileManager init] Singleton initialization starting")
     loadProfiles()
     ensureDefaultProfile()
-    print("[ProfileManager init] Initialization complete. ActiveProfile: \(activeProfile?.name ?? "nil")")
   }
   
   // MARK: - Profile Management
   
   func loadProfiles() {
     profiles = Defaults[.leaderKeyProfiles]
-    print("[ProfileManager loadProfiles] Loaded \(profiles.count) profiles from Defaults")
     activeProfile = profiles.first { $0.isActive }
-    print("[ProfileManager loadProfiles] ActiveProfile after load: \(activeProfile?.name ?? "nil") (isActive: \(activeProfile?.isActive ?? false))")
-    
-    // Debug: Print all profiles and their active status
-    for profile in profiles {
-      print("[ProfileManager loadProfiles]   - Profile '\(profile.name)' isActive: \(profile.isActive)")
-    }
   }
   
   func saveProfiles() {
@@ -1078,32 +1066,25 @@ class ProfileManager: ObservableObject {
   }
   
   func setActiveProfile(_ profile: LeaderKeyProfile) {
-    print("[ProfileManager setActiveProfile] Setting active profile to: \(profile.name)")
-    
     // Deactivate all profiles
     for i in profiles.indices {
       profiles[i].isActive = false
     }
-    
+
     // Activate the selected profile
     if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
       profiles[index].isActive = true
       activeProfile = profiles[index]
-      print("[ProfileManager setActiveProfile] Successfully set activeProfile to: \(activeProfile?.name ?? "nil")")
-    } else {
-      print("[ProfileManager setActiveProfile] ERROR: Could not find profile with id \(profile.id)")
     }
-    
+
     saveProfiles()
-    print("[ProfileManager setActiveProfile] Saved profiles to Defaults")
-    
+
     // Post notification for profile change
     NotificationCenter.default.post(
       name: .profileDidChange,
       object: nil,
       userInfo: ["profile": profile]
     )
-    print("[ProfileManager setActiveProfile] Posted profileDidChange notification")
   }
   
   // MARK: - Directory Management

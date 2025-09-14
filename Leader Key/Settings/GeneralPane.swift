@@ -94,7 +94,6 @@ struct GeneralPane: View {
             
             // Add profile button
             Button(action: {
-              print("[GeneralPane Add Button] Creating new profile")
               profileSheetMode = .create
             }) {
               Image(systemName: "plus.circle.fill")
@@ -134,7 +133,6 @@ struct GeneralPane: View {
               .frame(width: 120)
               
               Button(action: {
-                print("[GeneralPane Add Button 2] Creating new profile")
                 profileSheetMode = .create
               }) {
                 Image(systemName: "plus")
@@ -143,12 +141,8 @@ struct GeneralPane: View {
               .help("Add new profile")
               
               Button(action: {
-                print("[GeneralPane Edit Button] Clicked. activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
                 if let activeProfile = profileManager.activeProfile {
-                  print("[GeneralPane Edit Button] Setting profileSheetMode to edit: \(activeProfile.name)")
                   profileSheetMode = .edit(activeProfile)
-                } else {
-                  print("[GeneralPane Edit Button] ERROR: activeProfile is nil, cannot edit")
                 }
               }) {
                 Image(systemName: "pencil")
@@ -514,17 +508,11 @@ struct GeneralPane: View {
           profileManager: profileManager,
           profileToEdit: nil
         )
-        .onAppear {
-          print("[GeneralPane sheet] Showing ProfileManagementSheet in CREATE mode")
-        }
       case .edit(let profile):
         ProfileManagementSheet(
           profileManager: profileManager,
           profileToEdit: profile
         )
-        .onAppear {
-          print("[GeneralPane sheet] Showing ProfileManagementSheet in EDIT mode for profile: \(profile.name)")
-        }
       }
     }
     // Alert for profile deletion confirmation
@@ -545,31 +533,18 @@ struct GeneralPane: View {
       }
     }
     .onAppear {
-      print("[GeneralPane onAppear] View appeared. profileManager.activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
-      print("[GeneralPane onAppear] profileManager.profiles.count: \(profileManager.profiles.count)")
-      
       // Only switch to active profile's config on initial load
       // This prevents switching when LeaderKey is activated while settings are open
       if !hasInitialized {
         if let activeProfile = profileManager.activeProfile {
-          print("[GeneralPane onAppear] Switching to profile: \(activeProfile.name)")
           config.switchToProfile(activeProfile)
-        } else {
-          print("[GeneralPane onAppear] No active profile to switch to")
         }
         hasInitialized = true
       }
     }
-    .onReceive(NotificationCenter.default.publisher(for: .profileDidChange)) { notification in
-      print("[GeneralPane onReceive] Received profileDidChange notification")
-      if let profile = notification.userInfo?["profile"] as? LeaderKeyProfile {
-        print("[GeneralPane onReceive] Notification profile: \(profile.name)")
-      }
-      
+    .onReceive(NotificationCenter.default.publisher(for: .profileDidChange)) { _ in
       // Reload profiles when changed externally (e.g., via keyboard shortcut)
-      print("[GeneralPane onReceive] Reloading profiles...")
       profileManager.loadProfiles()
-      print("[GeneralPane onReceive] After reload - activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
     }
   }
 
@@ -948,9 +923,7 @@ struct ProfileManagementSheet: View {
   ]
   
   var isEditing: Bool {
-    let editing = profileToEdit != nil
-    print("[ProfileManagementSheet] isEditing computed: \(editing), profileToEdit: \(profileToEdit?.name ?? "nil")")
-    return editing
+    profileToEdit != nil
   }
   
   var body: some View {
@@ -1050,23 +1023,15 @@ struct ProfileManagementSheet: View {
     .padding(24)
     .frame(minWidth: 400, minHeight: 250)
     .onAppear {
-      print("[ProfileManagementSheet onAppear] profileToEdit: \(profileToEdit?.name ?? "nil")")
-      print("[ProfileManagementSheet onAppear] profileManager.activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
-      
       if let profile = profileToEdit {
-        print("[ProfileManagementSheet onAppear] Loading profile data: \(profile.name)")
         profileName = profile.name
         selectedIcon = profile.iconName
       } else if isEditing {
-        print("[ProfileManagementSheet onAppear] WARNING: isEditing is true but profileToEdit is nil")
         // Fallback: if we're editing but profileToEdit is nil, use active profile
         if let activeProfile = profileManager.activeProfile {
-          print("[ProfileManagementSheet onAppear] Using fallback activeProfile: \(activeProfile.name)")
           profileName = activeProfile.name
           selectedIcon = activeProfile.iconName
         }
-      } else {
-        print("[ProfileManagementSheet onAppear] Creating new profile mode")
       }
     }
     .alert("Error", isPresented: $showingError) {

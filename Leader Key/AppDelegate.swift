@@ -1123,13 +1123,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       if let profileId = profileShortcutMap[shortcutKey] {
         // Switch to the profile
         let profileManager = ProfileManager.shared
-        print("[AppDelegate] ProfileManager.shared instance: \(ObjectIdentifier(profileManager))")
-        print("[AppDelegate] Current activeProfile before switch: \(profileManager.activeProfile?.name ?? "nil")")
-        
         if let profile = profileManager.profiles.first(where: { $0.id == profileId }) {
           print("[AppDelegate] Switching to profile: \(profile.name)")
           profileManager.setActiveProfile(profile)
-          print("[AppDelegate] After setActiveProfile - activeProfile: \(profileManager.activeProfile?.name ?? "nil")")
           controller.userConfig.switchToProfile(profile)
           // Use normal app-specific merging within the profile
           actualType = .appSpecificWithFallback
