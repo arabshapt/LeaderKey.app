@@ -26,6 +26,8 @@ struct GeneralPane: View {
   @StateObject private var profileManager = ProfileManager()
   @State private var showingProfileSheet = false
   @State private var profileToEdit: LeaderKeyProfile?
+  @State private var showingDeleteConfirmation = false
+  @State private var profileToDelete: LeaderKeyProfile?
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -83,8 +85,8 @@ struct GeneralPane: View {
               .frame(width: 120)
               
               Button(action: {
+                profileToEdit = nil  // Clear any previous edit
                 showingProfileSheet = true
-                profileToEdit = nil
               }) {
                 Image(systemName: "plus")
               }
@@ -94,7 +96,10 @@ struct GeneralPane: View {
               Button(action: {
                 if let activeProfile = profileManager.activeProfile {
                   profileToEdit = activeProfile
-                  showingProfileSheet = true
+                  // Small delay to ensure state is set before sheet appears
+                  DispatchQueue.main.async {
+                    showingProfileSheet = true
+                  }
                 }
               }) {
                 Image(systemName: "pencil")
@@ -106,7 +111,8 @@ struct GeneralPane: View {
               Button(action: {
                 if let activeProfile = profileManager.activeProfile,
                    profileManager.profiles.count > 1 {
-                  _ = profileManager.deleteProfile(activeProfile)
+                  profileToDelete = activeProfile
+                  showingDeleteConfirmation = true
                 }
               }) {
                 Image(systemName: "trash")
@@ -458,10 +464,27 @@ struct GeneralPane: View {
         profileToEdit: profileToEdit
       )
     }
+    // Alert for profile deletion confirmation
+    .alert("Delete Profile", isPresented: $showingDeleteConfirmation) {
+      Button("Cancel", role: .cancel) { }
+      Button("Delete", role: .destructive) {
+        if let profile = profileToDelete {
+          _ = profileManager.deleteProfile(profile)
+          // After deletion, switch to the new active profile's config
+          if let newActiveProfile = profileManager.activeProfile {
+            config.switchToProfile(newActiveProfile)
+          }
+        }
+      }
+    } message: {
+      if let profile = profileToDelete {
+        Text("Are you sure you want to delete the profile '\(profile.name)'? This action cannot be undone.")
+      }
+    }
     .onAppear {
-      // Set initial profile if needed
+      // Switch to active profile's config when opening settings
       if let activeProfile = profileManager.activeProfile {
-        config.currentProfile = activeProfile
+        config.switchToProfile(activeProfile)
       }
     }
   }
