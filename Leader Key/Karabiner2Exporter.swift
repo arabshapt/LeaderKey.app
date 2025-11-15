@@ -1,4 +1,5 @@
 import Foundation
+import Defaults
 
 final class Karabiner2Exporter {
 
@@ -507,16 +508,56 @@ final class Karabiner2Exporter {
 
   private static func normalizeKeyForPath(_ key: String?) -> String {
     guard let key = key, !key.isEmpty else { return "" }
-    
+
     // Special handling for space key
     if key == " " {
       return "space"
     }
-    
+
     // Return the key as-is (preserves uppercase, modifiers, etc.)
     return key
   }
-  
+
+  /// Builds a shell command invocation respecting user's shell configuration settings
+  private static func buildShellCommand(_ command: String) -> String {
+    // Get shell preference and path
+    let shellPreference = Defaults[.commandShellPreference]
+    var shellPath = shellPreference.path
+
+    // Validate custom shell path if using custom shell
+    if shellPreference == .custom {
+      let customPath = Defaults[.customShellPath]
+      if !customPath.isEmpty && ShellPreference.isValidShellPath(customPath) {
+        shellPath = customPath
+      } else {
+        // Fall back to system shell
+        shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh"
+      }
+    }
+
+    // Check if we should load shell RC files
+    let loadRCFiles = Defaults[.loadShellRCFiles]
+
+    // Escape single quotes in the command for shell execution
+    let escapedCommand = command.replacingOccurrences(of: "'", with: "'\\''")
+
+    // Build the shell invocation
+    let shellCommand: String
+    if loadRCFiles {
+      // Use login shell (-l) to load RC files (.zshrc, .bashrc, etc.)
+      shellCommand = "\(shellPath) -l -c '\(escapedCommand)'"
+    } else {
+      // Don't load RC files, just execute
+      shellCommand = "\(shellPath) -c '\(escapedCommand)'"
+    }
+
+    // Escape for Goku's EDN format (entire command will be inside [:shell "..."])
+    // Must escape backslashes FIRST (from shell escaping), then double quotes
+    var ednSafe = shellCommand.replacingOccurrences(of: "\\", with: "\\\\")  // \ → \\
+    ednSafe = ednSafe.replacingOccurrences(of: "\"", with: "\\\"")          // " → \"
+    return ednSafe
+  }
+
   private static func generateStateId(from path: [String], appAlias: String? = nil) -> Int32 {
     guard !path.isEmpty else { return initialStateId }
 
@@ -967,6 +1008,32 @@ final class Karabiner2Exporter {
       // Build the action sequence: open app + deactivate in parallel for speed
       let appPath = action.value  // Full path like "/Applications/Safari.app"
       let actions = "[:shell \"open '\(appPath)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+
+      // Clear all variables since we're deactivating
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+
+      if let bundleId = bundleId {
+        return """
+             [\(karabinerKey)
+              [\(actions) \(stateVars)]
+              {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+          """
+      } else {
+        return """
+             [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+          """
+      }
+    }
+
+    // Check if this is a command action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .command {
+
+      // Build the action sequence: execute command + deactivate in parallel for speed
+      let command = action.value  // Shell command to execute
+      let shellCommand = buildShellCommand(command)  // Respect shell configuration settings
+      let actions = "[:shell \"\(shellCommand) & \(cliPath) deactivate 2>/dev/null || true\"]"
 
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
@@ -1451,6 +1518,38 @@ final class Karabiner2Exporter {
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
         // Global application action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+
+    // Check if this is a command action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .command {
+
+      // Build the action sequence based on sticky mode
+      let command = action.value  // Shell command to execute
+      let shellCommand = buildShellCommand(command)  // Respect shell configuration settings
+      var actions = ""
+      let stateVars: String
+
+      if hasStickyMode {
+        // In sticky mode: just execute command and stay in current state
+        actions = "[:shell \"\(shellCommand)\"]"
+        // Keep leader_state at current group, set sticky flag
+        stateVars = "[\"leaderkey_sticky\" 1]"
+      } else {
+        // Normal mode: execute command + deactivate in parallel for speed
+        actions = "[:shell \"\(shellCommand) & \(cliPath) deactivate 2>/dev/null || true\"]"
+        // Clear all variables since we're deactivating
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      }
+
+      if let alias = appAlias {
+        // App-specific command action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      } else {
+        // Global command action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
