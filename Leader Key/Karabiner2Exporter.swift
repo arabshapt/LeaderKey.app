@@ -958,7 +958,32 @@ final class Karabiner2Exporter {
           """
       }
     }
-    
+
+    // Check if this is an application action that can be opened directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .application {
+
+      // Build the action sequence: open app + deactivate in parallel for speed
+      let appPath = action.value  // Full path like "/Applications/Safari.app"
+      let actions = "[:shell \"open '\(appPath)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+
+      // Clear all variables since we're deactivating
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+
+      if let bundleId = bundleId {
+        return """
+             [\(karabinerKey)
+              [\(actions) \(stateVars)]
+              {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+          """
+      } else {
+        return """
+             [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+          """
+      }
+    }
+
     // Default behavior for non-shortcut actions or complex shortcuts
     // Use stateid command with optional sticky flag
     let commandSuffix = hasStickyMode ? " sticky" : ""
@@ -1398,7 +1423,38 @@ final class Karabiner2Exporter {
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
-    
+
+    // Check if this is an application action that can be opened directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .application {
+
+      // Build the action sequence based on sticky mode
+      let appPath = action.value  // Full path like "/Applications/Safari.app"
+      var actions = ""
+      let stateVars: String
+
+      if hasStickyMode {
+        // In sticky mode: just open app and stay in current state
+        actions = "[:shell \"open '\(appPath)'\"]"
+        // Keep leader_state at current group, set sticky flag
+        stateVars = "[\"leaderkey_sticky\" 1]"
+      } else {
+        // Normal mode: open app + deactivate in parallel for speed
+        actions = "[:shell \"open '\(appPath)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+        // Clear all variables since we're deactivating
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      }
+
+      if let alias = appAlias {
+        // App-specific application action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      } else {
+        // Global application action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+
     // Default behavior for non-shortcut actions or complex shortcuts
     let commandSuffix = hasStickyMode ? " sticky" : ""
     let sequenceCmd = FileManager.default.fileExists(atPath: cliPath)
@@ -2016,11 +2072,18 @@ final class Karabiner2Exporter {
     alternativeKey: String,
     additionalConditions: [String]
   ) -> String? {
-    // Replace the key - use simple string replacement as regex has issues with word boundaries
-    var alternativeRule = originalRule.replacingOccurrences(
-      of: ":\(originalKey)",
-      with: ":\(alternativeKey)"
-    )
+    // Only replace the key in the trigger (first element), not in the action part
+    // Rule format: [trigger [actions] conditions]
+    // We need to replace only the first occurrence which is the trigger key
+
+    // Find the first occurrence of :\(originalKey) - this should be the trigger
+    guard let firstKeyRange = originalRule.range(of: ":\(originalKey)") else {
+      return nil  // Original key not found
+    }
+
+    // Replace only this first occurrence
+    var alternativeRule = originalRule
+    alternativeRule.replaceSubrange(firstKeyRange, with: ":\(alternativeKey)")
     
     // Add additional conditions if provided
     if !additionalConditions.isEmpty {
