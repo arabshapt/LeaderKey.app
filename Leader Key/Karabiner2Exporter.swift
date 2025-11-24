@@ -819,6 +819,36 @@ final class Karabiner2Exporter {
     return (activation: activationRule, groups: groups)
   }
   
+  // Helper to determine if an action should be executed in background (open -g)
+  private static func shouldUseBackgroundExecution(for action: Action) -> Bool {
+    // If explicitly set, respect the setting
+    // Note: activates = true means foreground, activates = false means background
+    if let activates = action.activates {
+      return !activates
+    }
+    
+    // Default behavior if not explicitly set
+    switch action.type {
+    case .url:
+      // For URLs, default depends on scheme
+      // http/https -> Foreground (activates=true) -> Background=false
+      // custom schemes -> Background (activates=false) -> Background=true
+      if let url = URL(string: action.value), let scheme = url.scheme {
+        return !(scheme == "http" || scheme == "https")
+      }
+      return true // Default to background for invalid/no scheme
+      
+    case .application, .folder:
+      // For Apps and Folders, default is Foreground (activates=true) -> Background=false
+      return false
+      
+    default:
+      return false
+    }
+  }
+  
+
+  
   // Generate manipulators for unified EDN with cleaner app alias conditions (legacy flat version)
   private static func generateManipulatorsForUnified(
     from nodes: [StateNode],
@@ -991,6 +1021,33 @@ final class Karabiner2Exporter {
         return """
              [\(karabinerKey) 
               [\(actions) \(stateVars)] 
+              {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+          """
+      } else {
+        return """
+             [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+          """
+      }
+      }
+
+
+    // Check if this is a URL action that can be opened directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .url {
+
+      // Build the action sequence: open URL + deactivate in parallel for speed
+      let url = action.value
+      let backgroundFlag = shouldUseBackgroundExecution(for: action) ? "-g " : ""
+      let actions = "[:shell \"open \(backgroundFlag)'\(url)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+
+      // Clear all variables since we're deactivating
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+
+      if let bundleId = bundleId {
+        return """
+             [\(karabinerKey)
+              [\(actions) \(stateVars)]
               {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
           """
       } else {
@@ -1487,6 +1544,38 @@ final class Karabiner2Exporter {
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
         // Global shortcut action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+
+    // Check if this is a URL action that can be opened directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .url {
+
+      // Build the action sequence based on sticky mode
+      let url = action.value
+      var actions = ""
+      let stateVars: String
+      let backgroundFlag = shouldUseBackgroundExecution(for: action) ? "-g " : ""
+
+      if hasStickyMode {
+        // In sticky mode: just open URL and stay in current state
+        actions = "[:shell \"open \(backgroundFlag)'\(url)'\"]"
+        // Keep leader_state at current group, set sticky flag
+        stateVars = "[\"leaderkey_sticky\" 1]"
+      } else {
+        // Normal mode: open URL + deactivate in parallel for speed
+        actions = "[:shell \"open \(backgroundFlag)'\(url)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+        // Clear all variables since we're deactivating
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      }
+
+      if let alias = appAlias {
+        // App-specific URL action
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      } else {
+        // Global URL action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
