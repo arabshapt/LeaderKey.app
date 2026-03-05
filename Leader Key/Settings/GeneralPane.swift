@@ -11,7 +11,9 @@ struct GeneralPane: View {
   @Default(.configDir) var configDir
   @Default(.theme) var theme
   @Default(.showFallbackItems) var showFallbackItems
+  @Default(.useNativeOutlineConfigEditor) var useNativeOutlineConfigEditor
   @State private var expandedGroups = Set<[Int]>()
+  @StateObject private var nativeEditorSession = ConfigEditorSession()
   @State private var showingRenameAlert = false
   @State private var showingDeleteAlert = false
   @State private var newConfigNameInput = ""
@@ -198,11 +200,16 @@ struct GeneralPane: View {
             // The existing config editor section
             VStack(alignment: .leading, spacing: 8) {
               VStack {
-                ConfigEditorView(
-                  group: $config.currentlyEditingGroup, expandedGroups: $expandedGroups
-                )
-                .frame(minHeight: 500)  // Ensure it has enough height
-                .focusable(false)
+                if useNativeOutlineConfigEditor {
+                  NativeConfigEditorView(session: nativeEditorSession)
+                    .frame(minHeight: 500)
+                } else {
+                  ConfigEditorView(
+                    group: $config.currentlyEditingGroup, expandedGroups: $expandedGroups
+                  )
+                  .frame(minHeight: 500)  // Ensure it has enough height
+                  .focusable(false)
+                }
               }
               .padding(8)
               .overlay(
@@ -216,6 +223,9 @@ struct GeneralPane: View {
                 // Left-aligned buttons
                 HStack(spacing: 8) {
                   Button("Save Changes") {
+                    if useNativeOutlineConfigEditor {
+                      nativeEditorSession.commitToUserConfig()
+                    }
                     config.saveAndFinalize()
                   }
                   Button("Reload Current File") {
@@ -229,8 +239,12 @@ struct GeneralPane: View {
                 // Right-aligned buttons
                 HStack(spacing: 8) {
                   Button {
-                    withAnimation(.easeOut(duration: 0.1)) {
-                      expandAllGroups(in: config.currentlyEditingGroup, parentPath: [])
+                    if useNativeOutlineConfigEditor {
+                      nativeEditorSession.expandAll()
+                    } else {
+                      withAnimation(.easeOut(duration: 0.1)) {
+                        expandAllGroups(in: config.currentlyEditingGroup, parentPath: [])
+                      }
                     }
                   } label: {
                     Image(systemName: "chevron.down")
@@ -238,8 +252,12 @@ struct GeneralPane: View {
                   }
 
                   Button {
-                    withAnimation(.easeOut(duration: 0.1)) {
-                      expandedGroups.removeAll()
+                    if useNativeOutlineConfigEditor {
+                      nativeEditorSession.collapseAll()
+                    } else {
+                      withAnimation(.easeOut(duration: 0.1)) {
+                        expandedGroups.removeAll()
+                      }
                     }
                   } label: {
                     Image(systemName: "chevron.right")
@@ -260,8 +278,22 @@ struct GeneralPane: View {
           print("[GeneralPane .task(id: keyToLoad)] Loading config for key: \(key)")
           self.expandedGroups.removeAll()
           self.config.loadConfigForEditing(key: key)
+          refreshNativeSession()
 
           self.keyToLoad = nil
+        }
+        .onReceive(Events.shared.publisher) { event in
+          if event == .didReload {
+            refreshNativeSession()
+          }
+        }
+        .onChange(of: showFallbackItems) { newValue in
+          if useNativeOutlineConfigEditor {
+            nativeEditorSession.showFallbackItems = newValue
+          }
+        }
+        .onAppear {
+          refreshNativeSession()
         }
         .onReceive(
           NotificationCenter.default.publisher(for: Notification.Name("NavigateToSearchResult"))
@@ -275,11 +307,19 @@ struct GeneralPane: View {
 
           if isErrorNavigation {
             // For errors, expand only parent groups (existing behavior)
-            expandToPath(path)
+            if useNativeOutlineConfigEditor {
+              nativeEditorSession.reveal(path: path, collapseBeforeExpand: false)
+            } else {
+              expandToPath(path)
+            }
           } else {
             // For regular navigation from Leader Key, collapse all groups first then expand target
-            expandedGroups.removeAll()
-            expandFullPath(path)
+            if useNativeOutlineConfigEditor {
+              nativeEditorSession.reveal(path: path, collapseBeforeExpand: true)
+            } else {
+              expandedGroups.removeAll()
+              expandFullPath(path)
+            }
           }
 
           // Set highlighted path
@@ -413,6 +453,11 @@ struct GeneralPane: View {
   }
 
   private func expandToPath(_ path: [Int]) {
+    if useNativeOutlineConfigEditor {
+      nativeEditorSession.reveal(path: path, collapseBeforeExpand: false)
+      return
+    }
+
     // Expand all parent groups along the path to make the error item visible
     var currentPath: [Int] = []
     for index in path.dropLast() {
@@ -427,6 +472,11 @@ struct GeneralPane: View {
   }
 
   private func expandFullPath(_ path: [Int]) {
+    if useNativeOutlineConfigEditor {
+      nativeEditorSession.reveal(path: path, collapseBeforeExpand: false)
+      return
+    }
+
     // Expand all groups in the path, including the target group
     var currentPath: [Int] = []
     for index in path {
@@ -439,6 +489,11 @@ struct GeneralPane: View {
         print("[GeneralPane] expandFullPath: Expanded group at path \(currentPath)")
       }
     }
+  }
+
+  private func refreshNativeSession() {
+    guard useNativeOutlineConfigEditor else { return }
+    nativeEditorSession.bind(to: config)
   }
 }
 

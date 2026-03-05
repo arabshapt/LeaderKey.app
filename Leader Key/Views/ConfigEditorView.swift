@@ -190,64 +190,82 @@ struct AddButtons: View {
 }
 
 struct GroupContentView: View {
+  struct VisibleActionEntry: Identifiable {
+    let originalIndex: Int
+    let item: ActionOrGroup
+    var id: UUID { item.id }
+  }
+
   @Binding var group: Group
   @EnvironmentObject var userConfig: UserConfig
   var isRoot: Bool = false
   var parentPath: [Int] = []
   @Binding var expandedGroups: Set<[Int]>
   @Default(.showFallbackItems) var showFallbackItems
+  let validationErrorsByPath: [[Int]: ValidationError]
 
-  // Conditionally sort actions and show/hide fallback items
-  var visibleActions: [ActionOrGroup] {
-    let actionsToShow =
-      userConfig.isActivelyEditing ? group.actions : group.actions.sortedAlphabetically()
-    if showFallbackItems {
-      return actionsToShow
-    } else {
-      return actionsToShow.filter { item in
-        switch item {
+  // Build visible entries once per render pass to avoid O(n^2) index lookups.
+  var visibleActionEntries: [VisibleActionEntry] {
+    var entries = Array(group.actions.enumerated()).map { index, item in
+      VisibleActionEntry(originalIndex: index, item: item)
+    }
+
+    if !showFallbackItems {
+      entries.removeAll { entry in
+        switch entry.item {
         case .action(let action):
-          return !action.isFromFallback
+          return action.isFromFallback
         case .group(let subgroup):
-          return !subgroup.isFromFallback
+          return subgroup.isFromFallback
         }
       }
     }
+
+    if !userConfig.isActivelyEditing {
+      entries.sort { left, right in
+        let key1 = left.item.item.key?.lowercased() ?? "zzz"
+        let key2 = right.item.item.key?.lowercased() ?? "zzz"
+        if key1 == "zzz" && key2 != "zzz" { return false }
+        if key1 != "zzz" && key2 == "zzz" { return true }
+        return key1 < key2
+      }
+    }
+
+    return entries
   }
 
   var body: some View {
     LazyVStack(spacing: generalPadding) {
-      ForEach(Array(visibleActions.enumerated()), id: \.element.id) { _, item in
-        // Find the original index in the unfiltered array
-        if let originalIndex = group.actions.firstIndex(where: { $0.id == item.id }) {
-          let currentPath = parentPath + [originalIndex]
-          ActionOrGroupRow(
-            item: Binding(
-              get: {
-                guard originalIndex < group.actions.count else { return item }
-                return group.actions[originalIndex]
-              },
-              set: { newValue in
-                guard originalIndex < group.actions.count else { return }
-                group.actions[originalIndex] = newValue
-              }
-            ),
-            path: currentPath,
-            onDelete: {
-              group.actions.removeAll { $0.id == item.id }
+      ForEach(visibleActionEntries) { entry in
+        let currentPath = parentPath + [entry.originalIndex]
+        ActionOrGroupRow(
+          item: Binding(
+            get: {
+              guard entry.originalIndex < group.actions.count else { return entry.item }
+              return group.actions[entry.originalIndex]
             },
-            onDuplicate: {
-              let duplicatedItemWithNewID = makeTrueDuplicate(item: item)
-              if let sourceIndex = group.actions.firstIndex(where: { $0.id == item.id }),
-                sourceIndex >= 0 && sourceIndex < group.actions.count
-              {
-                let insertAtIndex = min(sourceIndex + 1, group.actions.count)
-                group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
-              }
-            },
-            expandedGroups: $expandedGroups
-          )
-        }
+            set: { newValue in
+              guard entry.originalIndex < group.actions.count else { return }
+              group.actions[entry.originalIndex] = newValue
+            }
+          ),
+          path: currentPath,
+          validationError: validationErrorsByPath[currentPath],
+          validationErrorsByPath: validationErrorsByPath,
+          onDelete: {
+            group.actions.removeAll { $0.id == entry.item.id }
+          },
+          onDuplicate: {
+            let duplicatedItemWithNewID = makeTrueDuplicate(item: entry.item)
+            if let sourceIndex = group.actions.firstIndex(where: { $0.id == entry.item.id }),
+              sourceIndex >= 0 && sourceIndex < group.actions.count
+            {
+              let insertAtIndex = min(sourceIndex + 1, group.actions.count)
+              group.actions.insert(duplicatedItemWithNewID, at: insertAtIndex)
+            }
+          },
+          expandedGroups: $expandedGroups
+        )
       }
 
       AddButtons(
@@ -281,10 +299,22 @@ struct ConfigEditorView: View {
   var isRoot: Bool = true
   @Binding var expandedGroups: Set<[Int]>
 
+  var validationErrorsByPath: [[Int]: ValidationError] {
+    var map: [[Int]: ValidationError] = [:]
+    for error in userConfig.validationErrors where map[error.path] == nil {
+      map[error.path] = error
+    }
+    return map
+  }
+
   var body: some View {
     ScrollView {
       GroupContentView(
-        group: $group, isRoot: isRoot, parentPath: [], expandedGroups: $expandedGroups
+        group: $group,
+        isRoot: isRoot,
+        parentPath: [],
+        expandedGroups: $expandedGroups,
+        validationErrorsByPath: validationErrorsByPath
       )
       .padding(
         EdgeInsets(
@@ -297,6 +327,8 @@ struct ConfigEditorView: View {
 struct ActionOrGroupRow: View {
   @Binding var item: ActionOrGroup
   var path: [Int]
+  let validationError: ValidationError?
+  let validationErrorsByPath: [[Int]: ValidationError]
   let onDelete: () -> Void
   let onDuplicate: () -> Void
   @EnvironmentObject var userConfig: UserConfig
@@ -315,6 +347,7 @@ struct ActionOrGroupRow: View {
             }
           ),
           path: path,
+          validationError: validationError,
           onDelete: onDelete,
           onDuplicate: onDuplicate
         )
@@ -327,6 +360,8 @@ struct ActionOrGroupRow: View {
             }
           ),
           path: path,
+          validationError: validationError,
+          validationErrorsByPath: validationErrorsByPath,
           expandedGroups: $expandedGroups,
           onDelete: onDelete,
           onDuplicate: onDuplicate
@@ -461,6 +496,7 @@ struct ActionRowState {
 struct ActionRow: View {
   @Binding var action: Action
   var path: [Int]
+  let validationError: ValidationError?
   let onDelete: () -> Void
   let onDuplicate: () -> Void
   @FocusState private var isKeyFocused: Bool
@@ -479,7 +515,7 @@ struct ActionRow: View {
         KeyButton(
           text: $state.keyInputValue,
           placeholder: "Key",
-          validationError: validationErrorForKey,
+          validationError: validationError,
           path: path,
           onKeyChanged: { keyButtonPath, capturedKey in
             state.keyInputValue = capturedKey
@@ -880,22 +916,13 @@ struct ActionRow: View {
       }
     )  // Close AnyView
   }
-
-  private var validationErrorForKey: ValidationError? {
-    guard !path.isEmpty else { return nil }
-
-    // Find validation errors for this item
-    let errors = userConfig.validationErrors.filter { error in
-      error.path == path
-    }
-
-    return errors.first
-  }
 }
 
 struct GroupRow: View {
   @Binding var group: Group
   var path: [Int]
+  let validationError: ValidationError?
+  let validationErrorsByPath: [[Int]: ValidationError]
   @Binding var expandedGroups: Set<[Int]>
   @FocusState private var isKeyFocused: Bool
   let onDelete: () -> Void
@@ -926,7 +953,7 @@ struct GroupRow: View {
         KeyButton(
           text: $keyInputValue,
           placeholder: "Group Key",
-          validationError: validationErrorForKey,
+          validationError: validationError,
           path: path,
           onKeyChanged: { keyButtonPath, capturedKey in
             keyInputValue = capturedKey
@@ -1054,8 +1081,13 @@ struct GroupRow: View {
             .padding(.leading, generalPadding)
             .padding(.trailing, generalPadding / 3)
 
-          GroupContentView(group: $group, parentPath: path, expandedGroups: $expandedGroups)
-            .padding(.leading, generalPadding)
+          GroupContentView(
+            group: $group,
+            parentPath: path,
+            expandedGroups: $expandedGroups,
+            validationErrorsByPath: validationErrorsByPath
+          )
+          .padding(.leading, generalPadding)
         }
       }
     }
@@ -1079,17 +1111,6 @@ struct GroupRow: View {
       }
     }
     .padding(.horizontal, 0)
-  }
-
-  private var validationErrorForKey: ValidationError? {
-    guard !path.isEmpty else { return nil }
-
-    // Find validation errors for this item
-    let errors = userConfig.validationErrors.filter { error in
-      error.path == path
-    }
-
-    return errors.first
   }
 }
 

@@ -77,8 +77,10 @@
 		42F4CDCF2D46E2B300D0DD76 /* Cheatsheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F4CDCE2D46E2B300D0DD76 /* Cheatsheet.swift */; };
 		42F4CDD12D48C52400D0DD76 /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F4CDD02D48C51F00D0DD76 /* Extensions.swift */; };
 		42FDC31A2D51687B004F5C5C /* AdvancedPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42FDC3192D51687B004F5C5C /* AdvancedPane.swift */; };
+		526B4503A36B284D4B6B1D80 /* KarabinerExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */; };
 		605385A32D523CAD00BEDB4B /* Pulsate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605385A22D523CAD00BEDB4B /* Pulsate.swift */; };
 		606C56EF2DAB875A00198B9F /* Cheater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606C56EE2DAB875A00198B9F /* Cheater.swift */; };
+		7FDB1FCD1908EF321F80682E /* NativeConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -92,6 +94,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerExporterTests.swift; sourceTree = "<group>"; };
 		115AA5BE2DA521C200C17E18 /* ActionIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionIcon.swift; sourceTree = "<group>"; };
 		130196C52D73B3DC0093148B /* Breadcrumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Breadcrumbs.swift; sourceTree = "<group>"; };
 		2609991D2E15B62D00CCC8DD /* SearchPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPane.swift; sourceTree = "<group>"; };
@@ -162,6 +165,7 @@
 		42FDC3192D51687B004F5C5C /* AdvancedPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AdvancedPane.swift; sourceTree = "<group>"; };
 		605385A22D523CAD00BEDB4B /* Pulsate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pulsate.swift; sourceTree = "<group>"; };
 		606C56EE2DAB875A00198B9F /* Cheater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheater.swift; sourceTree = "<group>"; };
+		DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeConfigEditorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -302,6 +306,7 @@
 			children = (
 				42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */,
 				427C17FC2BD311B500955B98 /* UserConfigTests.swift */,
+				0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */,
 			);
 			path = "Leader KeyTests";
 			sourceTree = "<group>";
@@ -326,6 +331,7 @@
 				427C18372BD3262100955B98 /* VisualEffectBackground.swift */,
 				42F4CDCC2D45B13600D0DD76 /* KeyButton.swift */,
 				115AA5BE2DA521C200C17E18 /* ActionIcon.swift */,
+				DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -561,6 +567,7 @@
 				42F4CDCD2D45B13600D0DD76 /* KeyButton.swift in Sources */,
 				606C56EF2DAB875A00198B9F /* Cheater.swift in Sources */,
 				427C181C2BD314B500955B98 /* Constants.swift in Sources */,
+				7FDB1FCD1908EF321F80682E /* NativeConfigEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -570,6 +577,7 @@
 			files = (
 				42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */,
 				427C17FD2BD311B500955B98 /* UserConfigTests.swift in Sources */,
+				526B4503A36B284D4B6B1D80 /* KarabinerExporterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -578,7 +586,7 @@
 /* Begin PBXTargetDependency section */
 		4236321E2D6799C600878D92 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			productRef = 4236321D2D6799C600878D92 /* Lint */;
+			productRef = 4236321D2D6799C600878D92 /* plugin:Lint */;
 		};
 		427C17FA2BD311B500955B98 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -925,7 +933,7 @@
 			package = 115AA5C02DA5463700C17E18 /* XCRemoteSwiftPackageReference "SymbolPicker" */;
 			productName = SymbolPicker;
 		};
-		4236321D2D6799C600878D92 /* Lint */ = {
+		4236321D2D6799C600878D92 /* plugin:Lint */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 4236321C2D6799B900878D92 /* XCRemoteSwiftPackageReference "SwiftFormatPlugins" */;
 			productName = "plugin:Lint";

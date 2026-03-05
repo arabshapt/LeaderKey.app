@@ -53,6 +53,13 @@ extension Defaults.Keys {
     "panelClickThrough", default: false, suite: defaultsSuite)
   static let showFallbackItems = Key<Bool>(
     "showFallbackItems", default: true, suite: defaultsSuite)
+  #if DEBUG
+    static let useNativeOutlineConfigEditor = Key<Bool>(
+      "useNativeOutlineConfigEditor", default: true, suite: defaultsSuite)
+  #else
+    static let useNativeOutlineConfigEditor = Key<Bool>(
+      "useNativeOutlineConfigEditor", default: false, suite: defaultsSuite)
+  #endif
 
   // User-defined names for config files - maps file paths to custom names
   static let configFileCustomNames = Key<[String: String]>(
