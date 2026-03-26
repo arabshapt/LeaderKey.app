@@ -9,7 +9,6 @@ struct AdvancedPane: View {
   private let contentWidth = SettingsConfig.contentWidth
 
   @EnvironmentObject private var config: UserConfig
-  @ObservedObject private var overlayDetector = OverlayDetector.shared
 
   @Default(.configDir) var configDir
   @Default(.modifierKeyConfiguration) var modifierKeyConfiguration
@@ -21,17 +20,21 @@ struct AdvancedPane: View {
   @Default(.resetOnCmdRelease) var resetOnCmdRelease
   @Default(.panelTopOffsetPercent) var panelTopOffsetPercent
   @Default(.panelClickThrough) var panelClickThrough
-  @Default(.overlayDetectionEnabled) var overlayDetectionEnabled
-  @Default(.overlayApps) var overlayApps
   @Default(.enableVerboseLogging) var enableVerboseLogging
   @Default(.commandShellPreference) var commandShellPreference
   @Default(.loadShellRCFiles) var loadShellRCFiles
   @Default(.customShellPath) var customShellPath
   @Default(.inputMethodPreference) var inputMethodPreference
+  @Default(.karBinaryPath) var karBinaryPath
+  @Default(.gokuBinaryPath) var gokuBinaryPath
+  @Default(.karabiner2Backend) var karabiner2Backend
 
-  @State private var hasAccessibilityPermissions = false
   @State private var isCustomShellValid = false
   @State private var showingAlternativeMappings = false
+  @State private var karValidationMessage: String?
+  @State private var karValidationSucceeded: Bool?
+  @State private var gokuValidationMessage: String?
+  @State private var gokuValidationSucceeded: Bool?
 
   var body: some View {
     ScrollView {
@@ -66,81 +69,115 @@ struct AdvancedPane: View {
         }
 
         Settings.Section(
-          title: "Input Method", bottomDivider: true
+          title: "Karabiner Integration", bottomDivider: true
         ) {
           VStack(alignment: .leading, spacing: 16) {
-            HStack {
-              Picker("", selection: $inputMethodPreference) {
-                ForEach(InputMethodPreference.allCases) { method in
-                  Text(method.displayName).tag(method)
-                }
-              }
-              .frame(width: 280)
-              .labelsHidden()
-            }
-
             VStack(alignment: .leading, spacing: 8) {
-              Text(inputMethodPreference.description)
+              Text("Karabiner Elements integration with state machine transport")
                 .font(.callout)
                 .foregroundColor(.secondary)
 
-              if inputMethodPreference == .karabiner {
-                Text("⚠️ Requires Karabiner Elements to be installed and running")
+              Text("⚠️ Requires Karabiner Elements to be installed")
                   .font(.callout)
                   .foregroundColor(.orange)
 
-                HStack(spacing: 12) {
-                  Button("Export Karabiner JSON") {
-                    let content = KarabinerExporter.exportConfiguration(
-                      userConfig: config, format: .karabinerJSON)
-                    _ = KarabinerExporter.saveToFile(content, format: .karabinerJSON)
+                HStack {
+                  Text("Backend:")
+                  Picker("", selection: $karabiner2Backend) {
+                    ForEach(Karabiner2Backend.allCases) { backend in
+                      Text(backend.displayName).tag(backend)
+                    }
                   }
-
-                  Button("Export Goku EDN") {
-                    let content = KarabinerExporter.exportConfiguration(
-                      userConfig: config, format: .gokuEDN)
-                    _ = KarabinerExporter.saveToFile(content, format: .gokuEDN)
-                  }
-
-                  Spacer()
+                  .frame(width: 220)
+                  .labelsHidden()
                 }
-                .padding(.top, 8)
 
-                Text(
-                  "Export your current Leader Key configuration for use with Karabiner Elements or Goku"
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
-              }
-              
-              if inputMethodPreference == .karabiner2 {
-                Text("⚠️ Requires Karabiner Elements and Goku to be installed")
-                  .font(.callout)
-                  .foregroundColor(.orange)
+                Text(karabiner2Backend.description)
+                  .font(.caption)
+                  .foregroundColor(.secondary)
+
+                if karabiner2Backend.requiresKar {
+                  HStack(alignment: .center, spacing: 10) {
+                    Text("kar binary:")
+                      .foregroundColor(.secondary)
+
+                    TextField("PATH lookup (kar)", text: $karBinaryPath)
+                      .textFieldStyle(.roundedBorder)
+                      .frame(width: 320)
+
+                    Button("Validate kar") {
+                      let result = KarCompilerService.shared.validateKarBinary()
+                      karValidationSucceeded = result.success
+                      karValidationMessage = result.message
+                    }
+
+                    Button("Use PATH") {
+                      karBinaryPath = ""
+                    }
+
+                    Spacer()
+                  }
+                  .padding(.top, 6)
+
+                  if let karValidationMessage {
+                    Text(karValidationMessage)
+                      .font(.caption)
+                      .foregroundColor(karValidationSucceeded == true ? .green : .orange)
+                  }
+                }
+
+                if karabiner2Backend.requiresGoku {
+                  HStack(alignment: .center, spacing: 10) {
+                    Text("goku binary:")
+                      .foregroundColor(.secondary)
+
+                    TextField("PATH lookup (goku)", text: $gokuBinaryPath)
+                      .textFieldStyle(.roundedBorder)
+                      .frame(width: 320)
+
+                    Button("Validate goku") {
+                      let result = GokuCompilerService.shared.validateGokuBinary()
+                      gokuValidationSucceeded = result.success
+                      gokuValidationMessage = result.message
+                    }
+
+                    Button("Use PATH") {
+                      gokuBinaryPath = ""
+                    }
+
+                    Spacer()
+                  }
+                  .padding(.top, 6)
+
+                  if let gokuValidationMessage {
+                    Text(gokuValidationMessage)
+                      .font(.caption)
+                      .foregroundColor(gokuValidationSucceeded == true ? .green : .orange)
+                  }
+                }
 
                 HStack(spacing: 12) {
-                  Button("Export Karabiner 2.0 EDN") {
+                  Button("Export Karabiner 2.0 EDN (Legacy)") {
                     let content = KarabinerExporter.exportConfiguration(
                       userConfig: config, format: .karabiner2EDN)
                     _ = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
                   }
-                  
-                  Button("Export & Inject") {
+
+                  Button("Export & Inject Legacy EDN") {
                     let content = KarabinerExporter.exportConfiguration(
                       userConfig: config, format: .karabiner2EDN)
                     let savedPath = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
-                    
-                    // Show success message
+
                     let alert = NSAlert()
-                    alert.messageText = "Export & Inject Complete"
-                    alert.informativeText = "Configuration exported to:\n\(savedPath?.path ?? "Unknown")\n\nInjection will occur automatically if markers exist in karabiner.edn"
+                    alert.messageText = "Legacy Export & Inject Complete"
+                    alert.informativeText = "Configuration exported to:\n\(savedPath?.path ?? "Unknown")\n\nLegacy marker-based injection applies to karabiner.edn."
                     alert.alertStyle = .informational
                     alert.addButton(withTitle: "OK")
                     alert.runModal()
                   }
-                  .help("Export EDN and inject into karabiner.edn if markers exist")
+                  .help("Legacy/manual EDN export and marker-based injection")
 
-                  Button("Open Goku Config Folder") {
+                  Button("Open Legacy EDN Folder") {
                     let configDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
                     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: configDir)
                   }
@@ -148,79 +185,79 @@ struct AdvancedPane: View {
                   Spacer()
                 }
                 .padding(.top, 8)
-                
+
                 HStack(spacing: 12) {
                   Button("Configure Alternative Keys") {
                     showingAlternativeMappings = true
                   }
                   .help("Set up alternative key mappings to trigger Leader Key actions without entering Leader Key mode")
-                  
+
                   Spacer()
                 }
 
                 Text(
-                  "Export your Leader Key configuration as a Karabiner 2.0 state machine. Place the exported EDN file in ~/.config/karabiner.edn.d/ and run 'goku' to compile."
+                  "Karabiner 2.0 automatic export now uses kar + send_user_command. The EDN buttons above are kept for legacy/manual workflows."
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
-                
-                // EDN Injection Info Section
+
+                // Legacy EDN injection info section
                 VStack(alignment: .leading, spacing: 8) {
                   HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "info.circle.fill")
                       .foregroundColor(.blue)
                       .font(.system(size: 14))
-                    
+
                     VStack(alignment: .leading, spacing: 6) {
-                      Text("Auto-injection into karabiner.edn")
+                      Text("Legacy EDN Injection Into karabiner.edn")
                         .font(.system(size: 12, weight: .semibold))
-                      
-                      Text("Leader Key can automatically inject its configuration into your main karabiner.edn file using special marker comments.")
+
+                      Text("Leader Key can inject legacy EDN output into your main karabiner.edn file using special marker comments.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                      
+
                       Text("Add these markers to your karabiner.edn:")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.top, 4)
-                      
+
                       VStack(alignment: .leading, spacing: 4) {
                         Text("In :applications section:")
                           .font(.system(size: 11, weight: .medium))
                           .foregroundColor(.secondary)
-                        
+
                         Text(";;; LEADERKEY_APPLICATIONS_START\n;;; LEADERKEY_APPLICATIONS_END")
                           .font(.system(size: 10, design: .monospaced))
                           .padding(6)
                           .background(Color.gray.opacity(0.1))
                           .cornerRadius(4)
-                        
+
                         Text("In :main section:")
                           .font(.system(size: 11, weight: .medium))
                           .foregroundColor(.secondary)
                           .padding(.top, 4)
-                        
+
                         Text(";;; LEADERKEY_MAIN_START\n;;; LEADERKEY_MAIN_END")
                           .font(.system(size: 10, design: .monospaced))
                           .padding(6)
                           .background(Color.gray.opacity(0.1))
                           .cornerRadius(4)
                       }
-                      
+
                       Text("• Content between markers is replaced on each export")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.top, 4)
-                      
+
                       Text("• 'Leader Key - Activation Shortcuts' section is preserved if it exists")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                      
+
                       Text("• Your custom rules outside markers remain untouched")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                      
+
                       HStack(spacing: 8) {
                         Button(action: {
                           let markers = """
@@ -235,7 +272,7 @@ struct AdvancedPane: View {
                             .font(.system(size: 11))
                         }
                         .buttonStyle(.bordered)
-                        
+
                         Button(action: {
                           let markers = """
                             ;;; LEADERKEY_MAIN_START
@@ -258,7 +295,6 @@ struct AdvancedPane: View {
                   .cornerRadius(8)
                 }
                 .padding(.top, 8)
-              }
             }
           }
         }
@@ -369,212 +405,7 @@ struct AdvancedPane: View {
           }
         }
 
-        Settings.Section(title: "Overlay Detection", bottomDivider: true) {
-          VStack(alignment: .leading, spacing: 12) {
-            Defaults.Toggle("Enable overlay detection", key: .overlayDetectionEnabled)
-              .help("Detect overlay windows (like Raycast/Alfred) for separate configs")
 
-            if overlayDetectionEnabled {
-              // Permission Status
-              VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                  Text("Accessibility Permissions:")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-
-                  Spacer()
-
-                  HStack {
-                    Image(
-                      systemName: hasAccessibilityPermissions
-                        ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-                    )
-                    .foregroundColor(hasAccessibilityPermissions ? .green : .orange)
-
-                    Text(hasAccessibilityPermissions ? "Granted" : "Required")
-                      .font(.caption)
-                      .foregroundColor(hasAccessibilityPermissions ? .green : .orange)
-                  }
-                }
-
-                if !hasAccessibilityPermissions {
-                  HStack {
-                    Button("Request Permissions") {
-                      _ = OverlayDetector.shared.requestAccessibilityPermissions()
-                      updatePermissionStatus()
-                    }
-
-                    Button("Open System Settings") {
-                      OverlayDetector.shared.openAccessibilitySettings()
-                    }
-                  }
-                  .font(.caption)
-
-                  Text(
-                    "Accessibility permissions are required to detect overlay windows. Please enable 'Leader Key' in System Settings > Privacy & Security > Accessibility."
-                  )
-                  .font(.caption)
-                  .foregroundColor(.secondary)
-                  .padding(.top, 2)
-                }
-              }
-              .padding(.bottom, 8)
-
-              // Overlay Apps Configuration
-              VStack(alignment: .leading, spacing: 8) {
-                Text("Overlay Apps (Bundle IDs):")
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-
-                ForEach(overlayApps.indices, id: \.self) { index in
-                  HStack {
-                    TextField(
-                      "Bundle ID (e.g., com.raycast.macos)",
-                      text: Binding(
-                        get: { overlayApps[index] },
-                        set: { newValue in
-                          overlayApps[index] = newValue
-                        }
-                      ))
-
-                    Button(action: {
-                      overlayApps.remove(at: index)
-                    }) {
-                      Image(systemName: "minus.circle.fill")
-                        .foregroundColor(.red)
-                    }
-                    .buttonStyle(BorderlessButtonStyle())
-                    .help("Remove this overlay app")
-                  }
-                }
-
-                Button(action: {
-                  overlayApps.append("")
-                }) {
-                  HStack {
-                    Image(systemName: "plus.circle.fill")
-                      .foregroundColor(.green)
-                    Text("Add overlay app")
-                  }
-                }
-                .buttonStyle(BorderlessButtonStyle())
-
-                Text(
-                  "Overlay configs use '.overlay' suffix (e.g., 'app.com.raycast.macos.overlay.json')"
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
-              }
-              .padding(.bottom, 8)
-
-              // Live Detection Display
-              VStack(alignment: .leading, spacing: 8) {
-                Text("Current Detection:")
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-
-                if !overlayDetector.currentDetection.isEmpty {
-                  VStack(alignment: .leading, spacing: 8) {
-                    // Detection status with visual indicator
-                    HStack(spacing: 8) {
-                      Image(systemName: detectionStatusIcon)
-                        .foregroundColor(detectionStatusColor)
-                        .font(.system(size: 12, weight: .medium))
-
-                      Text("Status: \(detectionStatusText)")
-                        .font(.caption)
-                        .fontWeight(.medium)
-
-                      Spacer()
-
-                      Text("Updated: \(timeFormatter.string(from: overlayDetector.lastUpdated))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    }
-
-                    // Detection details
-                    Text(overlayDetector.currentDetection)
-                      .font(.caption)
-                      .foregroundColor(.primary)
-                      .padding(8)
-                      .background(detectionBackgroundColor)
-                      .cornerRadius(8)
-                      .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                          .stroke(detectionStatusColor.opacity(0.3), lineWidth: 1)
-                      )
-                  }
-                } else {
-                  Text("Detection not running")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
-                }
-
-                // Continuous Testing Toggle
-                HStack {
-                  Text("Continuous Testing:")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-
-                  Spacer()
-
-                  Button(
-                    overlayDetector.isContinuousTestingEnabled
-                      ? "Stop Continuous Testing" : "Start Continuous Testing"
-                  ) {
-                    OverlayDetector.shared.toggleContinuousTesting()
-                  }
-                  .disabled(!hasAccessibilityPermissions)
-                }
-
-                if overlayDetector.isContinuousTestingEnabled {
-                  Text(
-                    "🔍 Continuous testing active - check Console.app for real-time detection logs (search for '[OverlayDetector]')"
-                  )
-                  .font(.caption)
-                  .foregroundColor(.blue)
-                  .padding(8)
-                  .background(Color.blue.opacity(0.1))
-                  .cornerRadius(4)
-                }
-              }
-            }
-          }
-          .onAppear {
-            updatePermissionStatus()
-            if overlayDetectionEnabled && hasAccessibilityPermissions {
-              OverlayDetector.shared.startRealtimeDetection()
-            }
-          }
-          .onDisappear {
-            OverlayDetector.shared.stopRealtimeDetection()
-          }
-          .onChange(of: overlayDetectionEnabled) { enabled in
-            if enabled {
-              updatePermissionStatus()
-              if hasAccessibilityPermissions {
-                OverlayDetector.shared.startRealtimeDetection()
-              }
-            } else {
-              OverlayDetector.shared.stopRealtimeDetection()
-              // Stop continuous testing if overlay detection is disabled
-              OverlayDetector.shared.stopContinuousTesting()
-            }
-          }
-          .onChange(of: hasAccessibilityPermissions) { hasPermissions in
-            if overlayDetectionEnabled {
-              if hasPermissions {
-                OverlayDetector.shared.startRealtimeDetection()
-              } else {
-                OverlayDetector.shared.stopRealtimeDetection()
-              }
-            }
-          }
-        }
 
         Settings.Section(title: "Command Execution", bottomDivider: true) {
           VStack(alignment: .leading, spacing: 12) {
@@ -705,63 +536,6 @@ struct AdvancedPane: View {
     }
   }
 
-  private func updatePermissionStatus() {
-    hasAccessibilityPermissions = OverlayDetector.shared.hasAccessibilityPermissions()
-  }
-
-  // MARK: - Visual Indicators
-
-  private var timeFormatter: DateFormatter {
-    let formatter = DateFormatter()
-    formatter.timeStyle = .medium
-    return formatter
-  }
-
-  private var detectionStatusIcon: String {
-    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
-      return "pause.circle.fill"
-    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
-      return "exclamationmark.triangle.fill"
-    } else if overlayDetector.currentDetection.contains("Overlay: true") {
-      return "checkmark.circle.fill"
-    } else if overlayDetector.currentDetection.contains("App: none") {
-      return "circle.fill"
-    } else {
-      return "app.fill"
-    }
-  }
-
-  private var detectionStatusColor: Color {
-    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
-      return .gray
-    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
-      return .orange
-    } else if overlayDetector.currentDetection.contains("Overlay: true") {
-      return .green
-    } else if overlayDetector.currentDetection.contains("App: none") {
-      return .gray
-    } else {
-      return .blue
-    }
-  }
-
-  private var detectionStatusText: String {
-    if overlayDetector.currentDetection.contains("Overlay detection is disabled") {
-      return "Disabled"
-    } else if overlayDetector.currentDetection.contains("Accessibility permissions required") {
-      return "No Permissions"
-    } else if overlayDetector.currentDetection.contains("Overlay: true") {
-      return "Overlay Detected"
-    } else if overlayDetector.currentDetection.contains("App: none") {
-      return "No App"
-    } else {
-      return "Normal App"
-    }
-  }
-
-  private var detectionBackgroundColor: Color {
-    detectionStatusColor.opacity(0.1)
-  }
 }
 
 struct AdvancedPane_Previews: PreviewProvider {

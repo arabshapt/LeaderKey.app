@@ -95,13 +95,11 @@ class Controller {
         configToLoad = userConfig.getMarkedFallbackConfig()  // This marks all items with isFromFallback
         configKeyForSettings = defaultAppConfigDisplayName  // Show as "Fallback App Config"
       } else {
-        // Normal app-specific detection
-        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-        let configKey = isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
-        configToLoad = userConfig.getConfig(for: configKey)  // Use the enhanced getter
+        // Use bundleId from Karabiner (single source of truth for app detection)
+        configToLoad = userConfig.getConfig(for: bundleId)
 
         // Determine the config key to use in settings
-        if let bundleId = detectedBundleId {
+        if let bundleId = bundleId {
           // Look for the display name that matches this bundle ID in discovered configs
           var foundConfigKey: String? = nil
           for (displayKey, _) in userConfig.discoveredConfigFiles {
@@ -204,33 +202,12 @@ class Controller {
     // Mark Leader Key as inactive immediately
     userState.isActive = false
 
-    // Reset Karabiner's leader_mode variable if using Karabiner input
-    if Defaults[.inputMethodPreference] == .karabiner {
-      let karabinerCLI =
-        "/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
-      let resetCommand = "\"\(karabinerCLI)\" --set-variables '{\"leader_mode\":0}'"
-
-      let task = Process()
-      task.launchPath = "/bin/sh"
-      task.arguments = ["-c", resetCommand]
-
-      do {
-        try task.run()
-        debugLog("[Controller] Reset Karabiner leader_mode variable to 0")
-      } catch {
-        debugLog("[Controller] Failed to reset Karabiner leader_mode: \(error)")
-      }
-    }
-
     // Release any held modifier keys before hiding
     releaseAllHeldModifiers()
 
     window.hide {
       afterClose?()
       self.clear()  // Clear UserState *after* external completion (e.g., AppDelegate reset) to avoid premature UI changes
-
-      // Invalidate overlay detection cache to ensure fresh detection on next activation
-      OverlayDetector.shared.invalidateDetectionCache()
 
       Events.send(.didDeactivate)
     }

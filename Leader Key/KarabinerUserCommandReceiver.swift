@@ -1,0 +1,154 @@
+import Darwin
+import Foundation
+
+final class KarabinerUserCommandReceiver {
+  private let receiverQueue = DispatchQueue(label: "com.leaderkey.usercommand.receiver")
+  private var socketHandle: Int32 = -1
+  private var readSource: DispatchSourceRead?
+
+  weak var delegate: UnixSocketServerDelegate?
+  private(set) var isRunning = false
+
+  var socketPath: String {
+    Self.defaultSocketPath()
+  }
+
+  func start() -> Bool {
+    guard !isRunning else { return true }
+
+    unlink(socketPath)
+
+    let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
+    guard fd >= 0 else {
+      debugLog("[KarabinerUserCommandReceiver] socket(dgram) failed: \(String(cString: strerror(errno)))")
+      return false
+    }
+
+    guard var addr = makeSockaddrUn(for: socketPath) else {
+      close(fd)
+      unlink(socketPath)
+      return false
+    }
+
+    var receiveBufferBytes = 128 * 1024
+    _ = setsockopt(
+      fd,
+      SOL_SOCKET,
+      SO_RCVBUF,
+      &receiveBufferBytes,
+      socklen_t(MemoryLayout.size(ofValue: receiveBufferBytes)))
+
+    let bindResult = withUnsafePointer(to: &addr) { addrPtr in
+      addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+        bind(fd, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+
+    guard bindResult == 0 else {
+      debugLog(
+        "[KarabinerUserCommandReceiver] bind(dgram) failed: \(String(cString: strerror(errno))) path=\(socketPath)")
+      close(fd)
+      unlink(socketPath)
+      return false
+    }
+
+    socketHandle = fd
+    let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: receiverQueue)
+    source.setEventHandler { [weak self] in
+      self?.receiveDatagram()
+    }
+    source.setCancelHandler { [weak self] in
+      guard let self else { return }
+      if self.socketHandle >= 0 {
+        close(self.socketHandle)
+        self.socketHandle = -1
+      }
+      unlink(self.socketPath)
+    }
+    readSource = source
+    source.resume()
+
+    isRunning = true
+    debugLog("[KarabinerUserCommandReceiver] Listening on \(socketPath)")
+    return true
+  }
+
+  func stop() {
+    guard isRunning else { return }
+
+    readSource?.cancel()
+    readSource = nil
+    if socketHandle >= 0 {
+      close(socketHandle)
+      socketHandle = -1
+    }
+    unlink(socketPath)
+    isRunning = false
+    debugLog("[KarabinerUserCommandReceiver] Stopped")
+  }
+
+  private func receiveDatagram() {
+    guard socketHandle >= 0 else { return }
+
+    var buffer = [UInt8](repeating: 0, count: 32 * 1024)
+    let bytesRead = recvfrom(socketHandle, &buffer, buffer.count, 0, nil, nil)
+    guard bytesRead > 0 else { return }
+
+    var endIndex = Int(bytesRead)
+    if endIndex > 0 && buffer[endIndex - 1] == 0x0A { endIndex -= 1 }
+    if endIndex > 0 && buffer[endIndex - 1] == 0x0D { endIndex -= 1 }
+    guard endIndex > 0 else { return }
+
+    let data = Data(buffer[0..<endIndex])
+    do {
+      let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+      handleIncomingPayload(json)
+    } catch {
+      debugLog("[KarabinerUserCommandReceiver] Failed to decode datagram JSON: \(error)")
+    }
+  }
+
+  private func handleIncomingPayload(_ payload: Any) {
+    guard let command = KarabinerCommandRouter.normalizeSendUserCommandPayload(payload) else {
+      debugLog("[KarabinerUserCommandReceiver] Ignoring unsupported payload: \(payload)")
+      return
+    }
+
+    let response = KarabinerCommandRouter.route(command: command, delegate: delegate)
+    if response != "OK" && !response.hasPrefix("{") {
+      debugLog("[KarabinerUserCommandReceiver] Command '\(command)' failed: \(response)")
+    }
+  }
+
+  private static func defaultSocketPath() -> String {
+    "/Library/Application Support/org.pqrs/tmp/user/\(geteuid())/user_command_receiver.sock"
+  }
+
+  private func makeSockaddrUn(for path: String) -> sockaddr_un? {
+    guard !path.isEmpty else {
+      debugLog("[KarabinerUserCommandReceiver] Invalid socket path: empty")
+      return nil
+    }
+
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+
+    let maxPathLength = MemoryLayout.size(ofValue: addr.sun_path)
+    let utf8Length = path.utf8CString.count
+    guard utf8Length <= maxPathLength else {
+      debugLog("[KarabinerUserCommandReceiver] Invalid socket path (too long): \(path)")
+      return nil
+    }
+
+    path.withCString { cString in
+      withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+        pathPtr.withMemoryRebound(to: CChar.self, capacity: maxPathLength) { charPtr in
+          strncpy(charPtr, cString, maxPathLength - 1)
+          charPtr[maxPathLength - 1] = 0
+        }
+      }
+    }
+
+    return addr
+  }
+}

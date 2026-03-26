@@ -514,7 +514,6 @@ private struct AddConfigSheet: View {
   @State private var manualBundleId = ""
   @State private var customDisplayName = ""
   @State private var selectedTemplate = "Empty"
-  @State private var isOverlayConfig = false
 
   private var effectiveBundleId: String {
     if showManualEntry {
@@ -604,20 +603,6 @@ private struct AddConfigSheet: View {
       TextField("Optional sidebar name", text: $customDisplayName)
         .textFieldStyle(.roundedBorder)
 
-      Divider()
-
-      // Overlay configuration toggle
-      VStack(alignment: .leading, spacing: 8) {
-        Toggle("Overlay Configuration", isOn: $isOverlayConfig)
-          .font(.headline)
-
-        Text(
-          "Overlay configurations are used when apps like Raycast or Alfred show overlay windows. They have a '.overlay' suffix in the filename."
-        )
-        .font(.caption)
-        .foregroundColor(.secondary)
-      }
-
       HStack {
         Spacer()
         Button("Cancel") { dismiss() }
@@ -636,8 +621,7 @@ private struct AddConfigSheet: View {
     _ = config.createConfigForApp(
       bundleId: effectiveBundleId,
       templateKey: templateKey,
-      customName: customDisplayName.isEmpty ? nil : customDisplayName,
-      isOverlay: isOverlayConfig
+      customName: customDisplayName.isEmpty ? nil : customDisplayName
     )
     // Dismiss regardless; success/failure alerts handled in helper
     dismiss()

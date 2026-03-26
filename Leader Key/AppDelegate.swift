@@ -15,78 +15,7 @@ let updateLocationIdentifier = "UpdateCheck"
 // Define the same unique tag here
 private let leaderKeySyntheticEventTag: Int64 = 0xDEAD_BEEF
 
-// MARK: - Event Tap Callback
-
-// Global statistics instance (since callback can't access instance properties efficiently)
-private var globalCallbackStats = CallbackStatistics()
-
-// This needs to be a top-level function or static method to be used as a C callback.
-// Made internal so it can be used by CGEventTapInputMethod
-internal func eventTapCallback(
-  proxy: CGEventTapProxy,
-  type: CGEventType,
-  event: CGEvent,
-  userInfo: UnsafeMutableRawPointer?
-) -> Unmanaged<CGEvent>? {
-  // Start timing immediately
-  let startTime = MachTime.now()
-
-  // Quick exit for no user info
-  guard let userInfo = userInfo else {
-    return Unmanaged.passRetained(event)
-  }
-
-  // Cast the reference to AppDelegate first (needed for dual tap manager)
-  let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
-
-  // INSTANT DETECTION - Handle tap disabled events immediately
-  if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-    print(
-      "[EventTap] ⚠️ Tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "user input") - triggering instant failover"
-    )
-    appDelegate.dualTapManager.handleInstantFailover()
-    return nil  // Don't pass disabled events through
-  }
-
-  // Check for synthetic event FIRST (early exit optimization)
-  if event.getIntegerValueField(.eventSourceUserData) == leaderKeySyntheticEventTag {
-    return Unmanaged.passRetained(event)
-  }
-
-  // Handle non-keyDown events through the old path
-  if event.type != .keyDown {
-    let result = appDelegate.handleCGEvent(event)
-
-    // Record timing
-    let endTime = MachTime.now()
-    let duration = MachTime.toMilliseconds(endTime - startTime)
-    globalCallbackStats.record(duration: duration)
-
-    return result
-  }
-
-  // OPTIMIZED PATH FOR KEYDOWN: Quick consumption check without NSEvent creation
-  let shouldConsume = appDelegate.quickShouldConsumeEvent(event)
-
-  // Queue ALL keyDown events for processing to maintain sequence integrity
-  // We must process everything to properly track state changes
-  appDelegate.enqueueEventForProcessing(event)
-
-  // Record timing
-  let endTime = MachTime.now()
-  let duration = MachTime.toMilliseconds(endTime - startTime)
-  globalCallbackStats.record(duration: duration)
-
-  // Log if very slow (only in debug)
-  #if DEBUG
-    if duration > 1.0 {  // Lowered threshold to 1ms for better monitoring
-      print("[PERF WARNING] Callback took \(String(format: "%.2f", duration))ms")
-    }
-  #endif
-
-  // Return nil to consume the event, or pass it through
-  return shouldConsume ? nil : Unmanaged.passRetained(event)
-}
+// MARK: - Legacy Event Tap Callback (removed — Karabiner 2.0 is the only input method)
 
 // MARK: - Key Code Constants (Example)
 
@@ -234,29 +163,6 @@ private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ va
 
 // MARK: - Settings Panes
 
-// Define the view for the Shortcuts pane
-private struct KeyboardShortcutsView: View {
-  private let contentWidth = SettingsConfig.contentWidth
-
-  var body: some View {
-    Settings.Container(contentWidth: contentWidth) {
-      Settings.Section(title: "Global Activation Shortcuts") {
-        Form {
-          KeyboardShortcuts.Recorder("Activate (Global)", name: .activateDefaultOnly)
-          KeyboardShortcuts.Recorder("Activate (App-Specific)", name: .activateAppSpecific)
-          KeyboardShortcuts.Recorder("Force Reset (Emergency)", name: .forceReset)
-        }
-        Text(
-          "Global always loads the default config.\nApp-Specific tries to load the config for the frontmost app.\nForce Reset (Cmd+Shift+Ctrl+K) immediately clears all state if LeaderKey gets stuck."
-        )
-        .font(.caption)
-        .foregroundColor(.secondary)
-        .padding(.top, 4)
-      }
-    }
-  }
-}
-
 private struct OpacityPane: View {
   @Default(.normalModeOpacity) var normalModeOpacity
   @Default(.stickyModeOpacity) var stickyModeOpacity
@@ -298,9 +204,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   private var stateMappingsLastLoaded: Date?
   private var cancellables = Set<AnyCancellable>()
 
-  // --- Dual Event Tap Manager for Redundancy ---
-  let dualTapManager = DualEventTapManager()
-
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
 
@@ -324,12 +227,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         toolbarIcon: NSImage(
           systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
         contentView: { SearchPane().environmentObject(self.config) }
-      ),
-      Settings.Pane(
-        identifier: .shortcuts, title: "Shortcuts",
-        toolbarIcon: NSImage(
-          systemSymbolName: "keyboard", accessibilityDescription: "Keyboard Shortcuts")!,
-        contentView: { KeyboardShortcutsView() }
       ),
       Settings.Pane(
         identifier: .advanced, title: "Advanced",
@@ -478,7 +375,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
     stopEventTapMonitoring()  // Defined in Event Tap Handling extension
     config.saveCurrentlyEditingConfig()  // Save any unsaved changes from the settings pane
     stateRecoveryTimer?.invalidate()  // Stop state recovery timer
-    eventTapHealthTimer?.invalidate()  // Stop event tap health timer
+    inputMethodHealthTimer?.invalidate()  // Stop input method health timer
     permissionPollingTimer?.invalidate()  // Stop permission polling timer
     print("[AppDelegate] applicationWillTerminate completed.")
   }
@@ -486,7 +383,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   // MARK: - State Recovery
 
   private var stateRecoveryTimer: Timer?
-  private var eventTapHealthTimer: Timer?
+  private var inputMethodHealthTimer: Timer?
   private var lastPermissionCheck: Bool? = nil
   private var permissionPollingTimer: Timer?
   private var permissionPollingStartTime: Date?
@@ -498,10 +395,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       self?.checkAndRecoverWindowState()
     }
 
-    // Check event tap health every 0.5 seconds for faster recovery from tap disabling
-    eventTapHealthTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
+    // Check input method health every 0.5 seconds
+    inputMethodHealthTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
       [weak self] _ in
-      self?.checkEventTapHealth()
+      if let currentMethod = self?.currentInputMethod {
+        _ = currentMethod.checkHealth()
+      }
     }
   }
 
@@ -515,75 +414,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
         print("[AppDelegate] State Recovery: Window visible but no active sequence. Hiding window.")
         hide()
       }
-    }
-  }
-
-  private func checkEventTapHealth() {
-    // Skip tap health checks if using Karabiner input methods
-    let inputMethod = Defaults[.inputMethodPreference]
-    if inputMethod == .karabiner || inputMethod == .karabiner2 {
-      // For Karabiner modes, check input method health instead
-      if let currentMethod = currentInputMethod {
-        _ = currentMethod.checkHealth()
-      }
-      return
-    }
-
-    if isMonitoring {
-      // Use dual tap manager for health checking and failover
-      if !dualTapManager.checkAndFailover() {
-        // Both taps are unhealthy - log stats and trigger full restart
-        print("[AppDelegate] Event Tap Health Check: Both taps unhealthy! Stats:")
-        print(getCallbackPerformanceStats())
-        print(dualTapManager.getStatistics())
-
-        // Try single tap fallback first
-        if let tap = eventTap {
-          if !CGEvent.tapIsEnabled(tap: tap) {
-            print("[AppDelegate] Event Tap Health Check: Single tap also disabled! Re-enabling...")
-            CGEvent.tapEnable(tap: tap, enable: true)
-
-            if !CGEvent.tapIsEnabled(tap: tap) {
-              print("[AppDelegate] Event Tap Health Check: Re-enable failed. Restarting...")
-              restartEventTap()
-            }
-          }
-        } else {
-          print("[AppDelegate] Event Tap Health Check: No taps available! Restarting...")
-          restartEventTap()
-        }
-      }
-    } else {
-      // Not monitoring - check if permissions have been granted
-      let hasPermissions = checkAccessibilityPermissions()
-
-      // Detect permission change from false to true
-      if lastPermissionCheck == false && hasPermissions {
-        print(
-          "[AppDelegate] Event Tap Health Check: Accessibility permissions newly granted! Starting event tap..."
-        )
-        startEventTapMonitoring()
-      }
-
-      // Update last permission state
-      lastPermissionCheck = hasPermissions
-    }
-  }
-
-  private func restartEventTap() {
-    print("[AppDelegate] Restarting event tap...")
-
-    // First stop the existing tap
-    stopEventTapMonitoring()
-
-    // Hide any stuck window
-    if controller?.window.isVisible == true {
-      hide()
-    }
-
-    // Restart after a brief delay to ensure cleanup
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-      self?.startEventTapMonitoring()
     }
   }
 
@@ -1065,10 +895,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
           case .defaultOnly:
             newRoot = self.config.root
           case .appSpecificWithFallback:
-            // Use the same overlay detection logic as initial activation
-            let (bundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-            let configKey = isOverlay && bundleId != nil ? "\(bundleId!).overlay" : bundleId
-            newRoot = self.config.getConfig(for: configKey)
+            newRoot = self.config.getConfig(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
           case .fallbackOnly:
             newRoot = self.config.getFallbackConfig()
           }
@@ -1156,20 +983,13 @@ extension AppDelegate {
     }
     statusItem.handleShowPerformanceStats = {
       print("[StatusItem] Show Performance Stats clicked.")
-      let stats = self.getCallbackPerformanceStats()
-
-      // Show stats in an alert dialog
+      let stats = "Karabiner input method active"
       DispatchQueue.main.async {
         let alert = NSAlert()
-        alert.messageText = "Event Tap Callback Performance"
+        alert.messageText = "Input Method Status"
         alert.informativeText = stats
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Reset Stats")
-
-        if alert.runModal() == .alertSecondButtonReturn {
-          self.resetCallbackPerformanceStats()
-          print("[StatusItem] Performance stats reset")
-        }
+        alert.runModal()
       }
     }
     // Observe changes to the preference for showing the menu bar icon
@@ -1488,243 +1308,38 @@ extension AppDelegate {
 
   // --- Event Tap Logic Methods ---
 
-  // Cache activation shortcuts for O(1) lookup performance
-  private func cacheActivationShortcuts() {
-    cachedActivationKeyCodes.removeAll()
-    cachedActivationShortcuts.removeAll()
-    cachedActivationModifiers.removeAll()
-
-    // Helper to convert NSEvent.ModifierFlags to CGEventFlags
-    func toCGEventFlags(_ modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
-      var cgFlags: CGEventFlags = []
-      if modifiers.contains(.command) { cgFlags.insert(.maskCommand) }
-      if modifiers.contains(.shift) { cgFlags.insert(.maskShift) }
-      if modifiers.contains(.option) { cgFlags.insert(.maskAlternate) }
-      if modifiers.contains(.control) { cgFlags.insert(.maskControl) }
-      return cgFlags
-    }
-
-    // Cache force reset shortcut
-    if let shortcut = KeyboardShortcuts.getShortcut(for: .forceReset) {
-      let keyCode = UInt16(shortcut.carbonKeyCode)
-      cachedActivationKeyCodes.insert(keyCode)
-      cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-      var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.defaultOnly))  // Use defaultOnly as placeholder for force reset
-      cachedActivationShortcuts[keyCode] = shortcuts
-    }
-
-    // Cache app-specific shortcut
-    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateAppSpecific) {
-      let keyCode = UInt16(shortcut.carbonKeyCode)
-      cachedActivationKeyCodes.insert(keyCode)
-      cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-      var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.appSpecificWithFallback))
-      cachedActivationShortcuts[keyCode] = shortcuts
-    }
-
-    // Cache default-only shortcut
-    if let shortcut = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly) {
-      let keyCode = UInt16(shortcut.carbonKeyCode)
-      cachedActivationKeyCodes.insert(keyCode)
-      cachedActivationModifiers[keyCode] = toCGEventFlags(shortcut.modifiers)
-      var shortcuts = cachedActivationShortcuts[keyCode] ?? []
-      shortcuts.append((shortcut, Controller.ActivationType.defaultOnly))
-      cachedActivationShortcuts[keyCode] = shortcuts
-    }
-
-    print("[AppDelegate] Cached \(cachedActivationKeyCodes.count) activation keycodes")
-  }
-
   func startEventTapMonitoring() {
-    // Ensure we don't start multiple taps
     guard !isMonitoring else {
       print("[AppDelegate] startEventTapMonitoring: Already monitoring. Aborting.")
       return
     }
-    print("[AppDelegate] startEventTapMonitoring: Attempting to start...")
+    print("[AppDelegate] startEventTapMonitoring: Starting Karabiner input method...")
 
-    // Cache activation shortcuts for fast lookup
-    cacheActivationShortcuts()
+    currentInputMethod = Karabiner2InputMethod()
 
-    // Initialize the appropriate input method based on preference
-    let inputMethodType = Defaults[.inputMethodPreference]
-
-    switch inputMethodType {
-    case .karabiner:
-      currentInputMethod = KarabinerInputMethod()
-      print("[AppDelegate] Using Karabiner input method")
-    case .karabiner2:
-      currentInputMethod = Karabiner2InputMethod()
-      print("[AppDelegate] Using Karabiner 2.0 (State Machine) input method")
-    case .cgEventTap:
-      currentInputMethod = CGEventTapInputMethod(appDelegate: self, dualTapManager: dualTapManager)
-      print("[AppDelegate] Using CGEventTap input method")
-    }
-
-    // Start the input method
     if let method = currentInputMethod, method.start(with: self) {
-      print("[AppDelegate] Input method started successfully: \(inputMethodType.displayName)")
-      
-      // Load state mappings for Karabiner 2.0 mode
-      if inputMethodType == .karabiner2 {
-        loadStateMappings()
-      }
-      
-      // Only set isMonitoring for CGEventTap input method
-      if inputMethodType == .cgEventTap {
-        self.isMonitoring = true
-        startCPUMonitoring()
-      }
-      
+      print("[AppDelegate] Karabiner input method started successfully")
+      loadStateMappings()
+      self.isMonitoring = true
       self.didShowPermissionsAlertRecently = false
-      return
+    } else {
+      print("[AppDelegate] Failed to start Karabiner input method")
     }
-
-    // If preferred method failed, try fallback to CGEventTap
-    if inputMethodType == .karabiner || inputMethodType == .karabiner2 {
-      print("[AppDelegate] \(inputMethodType.displayName) method failed, falling back to CGEventTap")
-      currentInputMethod = CGEventTapInputMethod(appDelegate: self, dualTapManager: dualTapManager)
-
-      if let method = currentInputMethod, method.start(with: self) {
-        print("[AppDelegate] Fallback to CGEventTap successful")
-        self.isMonitoring = true
-        self.didShowPermissionsAlertRecently = false
-        startCPUMonitoring()
-        return
-      }
-    }
-
-    // Fallback to single tap if dual taps failed
-    print("[AppDelegate] Dual taps failed, falling back to single tap")
-
-    // Create the event tap. This requires Accessibility permissions.
-    // Build an event mask listening for key down, key up, and modifier-flag changes.
-    let eventMask: CGEventMask =
-      (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-      | (1 << CGEventType.flagsChanged.rawValue)
-    // (Above mask: key down, key up, and flags-changed)
-    guard
-      let tap = CGEvent.tapCreate(
-        tap: .cgSessionEventTap,  // Listen to all processes in the current session
-        place: .headInsertEventTap,  // Insert tap before other taps
-        options: .defaultTap,  // Default behavior
-        eventsOfInterest: eventMask,  // Mask for key down events
-        callback: eventTapCallback,  // C function callback defined globally
-        userInfo: Unmanaged.passUnretained(self).toOpaque()  // Pass reference to self
-      )
-    else {
-      // Failure usually means Accessibility permissions are missing or denied.
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] startEventTapMonitoring: Failed to create event tap. Permissions likely missing."
-        )
-      #endif
-      // Check permissions status *after* failure, only prompt if we haven't recently.
-      if !checkAccessibilityPermissions() && !didShowPermissionsAlertRecently {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] startEventTapMonitoring: Accessibility permissions check failed AND alert not shown recently. Showing alert."
-          )
-        #endif
-        showPermissionsAlert()
-        self.didShowPermissionsAlertRecently = true  // Flag to avoid spamming alerts
-        // Reset the flag after a short delay to allow re-prompting later if needed
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-          #if DEBUG
-            debugLog("[AppDelegate] Resetting didShowPermissionsAlertRecently flag.")
-          #endif
-          self.didShowPermissionsAlertRecently = false
-        }
-      } else {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] startEventTapMonitoring: Accessibility check passed OR alert shown recently. Not showing permissions alert now."
-          )
-        #endif
-      }
-      return  // Stop, as tap creation failed
-    }
-
-    // Tap creation successful, proceed with setup
-    #if DEBUG
-      debugLog("[AppDelegate] startEventTapMonitoring: Event tap created successfully.")
-    #endif
-    self.eventTap = tap
-    // Create a run loop source from the tap and add it to the current run loop
-    let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-    self.runLoopSource = source
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-    // Enable the tap
-    CGEvent.tapEnable(tap: tap, enable: true)
-    self.isMonitoring = true  // Set monitoring state
-    self.didShowPermissionsAlertRecently = false  // Reset alert flag as monitoring is now active
-
-    // Start event tap health monitoring
-
-    // Start CPU monitoring for adaptive behavior
-    startCPUMonitoring()
-
-    #if DEBUG
-      debugLog("[AppDelegate] startEventTapMonitoring: Event tap enabled and monitoring started.")
-    #endif
   }
 
   func stopEventTapMonitoring() {
-    guard isMonitoring else {
-      #if DEBUG
-        debugLog("[AppDelegate] stopEventTapMonitoring: Not currently monitoring. Aborting.")
-      #endif
-      return
-    }
-    #if DEBUG
-      debugLog("[AppDelegate] stopEventTapMonitoring: Stopping event tap...")
-    #endif
+    guard isMonitoring else { return }
+    debugLog("[AppDelegate] stopEventTapMonitoring: Stopping...")
 
-    // Stop health monitoring and CPU monitoring
-    stopCPUMonitoring()
-
-    // Stop the current input method
     currentInputMethod?.stop()
     currentInputMethod = nil
+    resetSequenceState()
+    self.isMonitoring = false
 
-    resetSequenceState()  // Ensure sequence state is cleared
-    // Remove run loop source and invalidate the tap
-    if let source = runLoopSource {
-      #if DEBUG
-        debugLog("[AppDelegate] stopEventTapMonitoring: Removing run loop source.")
-      #endif
-      CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
-      self.runLoopSource = nil
-    }
-    if let tap = eventTap {
-      #if DEBUG
-        debugLog("[AppDelegate] stopEventTapMonitoring: Disabling and releasing tap.")
-      #endif
-      CGEvent.tapEnable(tap: tap, enable: false)  // Disable first
-      self.eventTap = nil  // Release reference
-    }
-    self.isMonitoring = false  // Update state
-    #if DEBUG
-      debugLog("[AppDelegate] stopEventTapMonitoring: Monitoring stopped.")
-    #endif
+    debugLog("[AppDelegate] stopEventTapMonitoring: Stopped.")
   }
 
-  // --- Performance Monitoring Methods ---
-
-  func getCallbackPerformanceStats() -> String {
-    return globalCallbackStats.summary
-  }
-
-  func resetCallbackPerformanceStats() {
-    globalCallbackStats.reset()
-    print("[AppDelegate] Callback performance stats reset")
-  }
-
-  func printCallbackPerformanceStats() {
-    print("\n" + globalCallbackStats.summary + "\n")
-  }
+  // Performance monitoring methods removed — only needed for CGEventTap
 
   // --- Optimized Event Processing ---
 
@@ -2018,78 +1633,7 @@ extension AppDelegate {
     print("[AppDelegate] forceResetState: Nuclear reset completed.")
   }
 
-  // --- CPU Load Monitoring Methods ---
-
-  private func startCPUMonitoring() {
-    stopCPUMonitoring()  // Stop any existing timer
-
-    // Check CPU load every 10 seconds
-    self.cpuMonitorTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) {
-      [weak self] _ in
-      self?.checkCPULoad()
-    }
-
-    print("[AppDelegate] CPU monitoring started.")
-  }
-
-  private func stopCPUMonitoring() {
-    cpuMonitorTimer?.invalidate()
-    cpuMonitorTimer = nil
-    isHighCpuMode = false
-    print("[AppDelegate] CPU monitoring stopped.")
-  }
-
-  private func checkCPULoad() {
-    // Keep a lightweight check; avoid expensive sampling. Threshold logic retained for safety.
-    let cpuUsage = getCurrentCPUUsage()
-    let highCpuThreshold: Double = 85.0  // slightly higher to avoid flapping
-
-    let wasHighCpuMode = isHighCpuMode
-    isHighCpuMode = cpuUsage > highCpuThreshold
-
-    if isHighCpuMode != wasHighCpuMode {
-      if isHighCpuMode {
-        print("[AppDelegate] High CPU mode activated (CPU: \(Int(cpuUsage))%). Adapting behavior.")
-        enterHighCpuMode()
-      } else {
-        print(
-          "[AppDelegate] High CPU mode deactivated (CPU: \(Int(cpuUsage))%). Returning to normal mode."
-        )
-        exitHighCpuMode()
-      }
-    }
-  }
-
-  private func getCurrentCPUUsage() -> Double {
-    var info = mach_task_basic_info()
-    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-
-    let result = withUnsafeMutablePointer(to: &info) {
-      $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-      }
-    }
-
-    if result == KERN_SUCCESS {
-      // Get CPU usage percentage (simplified)
-      let cpuTime = Double(info.user_time.seconds + info.system_time.seconds)
-      let totalTime = Double(ProcessInfo.processInfo.systemUptime)
-      return (cpuTime / totalTime) * 100.0
-    }
-
-    return 0.0  // Return 0 if we can't get CPU info
-  }
-
-  private func enterHighCpuMode() {
-    // Increase timeout values for high CPU scenarios
-    // This is adaptive behavior to be more resilient during high load
-    print("[AppDelegate] Entering high CPU mode - increased timeout tolerance.")
-  }
-
-  private func exitHighCpuMode() {
-    // Return to normal timeout values
-    print("[AppDelegate] Exiting high CPU mode - normal timeout tolerance.")
-  }
+  // CPU monitoring removed — only needed for CGEventTap input method
 
   // This is the entry point called by the C callback `eventTapCallback`
   // NOTE: This is now bypassed for keyDown events which are handled asynchronously
@@ -2314,15 +1858,6 @@ extension AppDelegate {
       // Check each shortcut with this keycode
       for (shortcut, activationType) in shortcuts {
         if matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-          // Special handling for force reset
-          if shortcut == KeyboardShortcuts.getShortcut(for: .forceReset) {
-            #if DEBUG
-              debugLog("[AppDelegate] processKeyEvent: Force reset shortcut triggered.")
-            #endif
-            forceResetState()
-            return true
-          }
-
           // Handle activation
           #if DEBUG
             debugLog("[AppDelegate] processKeyEvent: Matched \(activationType) shortcut.")
@@ -2590,11 +2125,8 @@ extension AppDelegate {
       if let overrideBundleId = bundleId, overrideBundleId == "__FALLBACK__" {
         cacheId = "fallback"
       } else {
-        // Get the actual bundle ID that was detected
-        let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectFrontmostAppWithOverlay()
-        let configKey =
-          isOverlay && detectedBundleId != nil ? "\(detectedBundleId!).overlay" : detectedBundleId
-        cacheId = configKey ?? "global"
+        // Use bundleId from Karabiner (single source of truth)
+        cacheId = bundleId ?? "global"
       }
     case .fallbackOnly:
       cacheId = "fallback"
@@ -2712,12 +2244,6 @@ extension AppDelegate {
 
     // Check cache first
     if let cached = keyStringCache[cacheKey] {
-      #if DEBUG
-        // Only log cache hits in debug builds to reduce overhead
-        if globalCallbackStats.totalCallbacks % 100 == 0 {  // Log every 100th cache hit
-          print("[AppDelegate] keyStringForEvent CACHE HIT: keyCode \(keyCode) -> '\(cached)'")
-        }
-      #endif
       return cached.isEmpty ? nil : cached
     }
 
@@ -2984,12 +2510,7 @@ extension AppDelegate {
               // For __FALLBACK__, use merged config (same as no app-specific config)
               newRoot = self.config.getConfig(for: nil)
             } else {
-              // Use the same overlay detection logic as initial activation
-              let (detectedBundleId, isOverlay) = OverlayDetector.shared.detectAndCacheOverlayState()
-              let configKey =
-                isOverlay && detectedBundleId != nil
-                ? "\(detectedBundleId!).overlay" : detectedBundleId
-              newRoot = self.config.getConfig(for: configKey)
+              newRoot = self.config.getConfig(for: bundleId)
             }
           case .fallbackOnly:
             newRoot = self.config.getFallbackConfig()
@@ -3245,10 +2766,14 @@ extension AppDelegate {
           let karabiner2Method = currentInputMethod as? Karabiner2InputMethod else {
       return
     }
-    
+
     debugLog("[AppDelegate] Refreshing state mappings after config change")
-    karabiner2Method.exportCurrentConfiguration()
-    loadStateMappings()
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      karabiner2Method.exportCurrentConfiguration()
+      DispatchQueue.main.async {
+        self?.loadStateMappings()
+      }
+    }
   }
   
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
@@ -3310,62 +2835,80 @@ extension AppDelegate {
     if stateMappingsLastLoaded == nil {
       loadStateMappings()
     }
-    
+
     guard let mapping = stateMappings[stateId] else {
       debugLog("[AppDelegate] No mapping found for state ID: \(stateId)")
       return
     }
-    
-    debugLog("[AppDelegate] Found mapping for state ID \(stateId): type=\(mapping.actionType), label=\(mapping.actionLabel ?? "unknown")")
-    
+
+    debugLog("[AppDelegate] Found mapping for state ID \(stateId): type=\(mapping.actionType), label=\(mapping.actionLabel ?? "unknown"), bundleId=\(mapping.bundleId ?? "nil")")
+
+    // Determine activation type from mapping's bundleId
+    let activationType: Controller.ActivationType = mapping.bundleId != nil ? .appSpecificWithFallback : .defaultOnly
+
+    // Helper: ensure window is visible with the correct config, then run continuation
+    let ensureWindowVisible: (@escaping () -> Void) -> Void = { [weak self] continuation in
+      guard let self = self else { return }
+      if self.controller.window.isVisible {
+        continuation()
+      } else {
+        debugLog("[AppDelegate] Window not visible, showing with bundleId: \(mapping.bundleId ?? "nil")")
+        self.controller.show(type: activationType, bundleId: mapping.bundleId) {
+          self.startSequence(activationType: activationType, bundleId: mapping.bundleId)
+          continuation()
+        }
+      }
+    }
+
     // Check if this is a group state or an action state
     if mapping.actionType == "group" {
-      // This is a group state - simulate the key presses to navigate to it
+      // This is a group state - show window if needed, then navigate
       debugLog("[AppDelegate] State ID \(stateId) is a group, simulating key navigation for path: \(mapping.path)")
-      
-      // Ensure window is visible before navigating
-      guard controller.window.isVisible else {
-        debugLog("[AppDelegate] Window not visible, cannot navigate to group")
-        return
+
+      ensureWindowVisible { [weak self] in
+        guard let self = self else { return }
+
+        guard let rootGroup = self.controller.userState.activeRoot else {
+          debugLog("[AppDelegate] No active root group")
+          return
+        }
+
+        // Clear current navigation to start fresh from root
+        self.controller.userState.clear()
+        self.controller.userState.activeRoot = rootGroup
+        self.controller.userState.isActive = true
+        self.currentSequenceGroup = rootGroup
+
+        // Simulate pressing each key in the path to navigate to the target group
+        for key in mapping.path {
+          debugLog("[AppDelegate] Simulating key press: '\(key)'")
+          self.controller.handleKey(key)
+        }
       }
-      
-      // Ensure we have an active root to navigate from
-      guard let rootGroup = controller.userState.activeRoot else {
-        debugLog("[AppDelegate] No active root group")
-        return
-      }
-      
-      // Clear current navigation to start fresh from root
-      controller.userState.clear()
-      controller.userState.activeRoot = rootGroup
-      controller.userState.isActive = true  // Keep active state - we're still in Leader Key mode!
-      currentSequenceGroup = rootGroup
-      
-      // Simulate pressing each key in the path to navigate to the target group
-      for key in mapping.path {
-        debugLog("[AppDelegate] Simulating key press: '\(key)'")
-        controller.handleKey(key)
-      }
-      
+
     } else if mapping.actionType == "action" {
       // This is an action state - execute it
       debugLog("[AppDelegate] State ID \(stateId) is an action, executing")
-      
+
       // Use cached action which has all properties including macro steps
       if let cachedAction = actionCache[stateId] {
         if sticky {
-          // In sticky mode, execute action without hiding the popup
-          debugLog("[AppDelegate] Executing action in sticky mode - keeping popup open")
-          // Set sticky mode flag and opacity
-          isKarabinerStickyMode = true
-          DispatchQueue.main.async {
+          // In sticky mode, show window if needed, then execute action
+          ensureWindowVisible { [weak self] in
+            guard let self = self else { return }
+            debugLog("[AppDelegate] Executing action in sticky mode - keeping popup open")
+            self.isKarabinerStickyMode = true
             self.controller.window.alphaValue = Defaults[.stickyModeOpacity]
-          }
-          controller.runAction(cachedAction)
-        } else {
-          // Normal mode - hide popup after executing action
-          controller.hide {
             self.controller.runAction(cachedAction)
+          }
+        } else {
+          // Normal mode - execute action, hide if window is visible
+          if controller.window.isVisible {
+            controller.hide {
+              self.controller.runAction(cachedAction)
+            }
+          } else {
+            controller.runAction(cachedAction)
           }
         }
         debugLog("[AppDelegate] Executed cached action for state ID \(stateId): \(cachedAction.value) with \(cachedAction.macroSteps?.count ?? 0) macro steps, sticky: \(sticky)")

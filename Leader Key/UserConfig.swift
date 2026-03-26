@@ -116,16 +116,9 @@ class UserConfig: ObservableObject {
       let url = URL(fileURLWithPath: filePath)
       let filename = url.lastPathComponent
 
-      // Extract bundle ID from filename (app.bundleId.json or app.bundleId.overlay.json)
+      // Extract bundle ID from filename (app.bundleId.json)
       if filename.hasPrefix(appConfigPrefix) && filename.hasSuffix(".json") {
-        var bundleId = String(filename.dropFirst(appConfigPrefix.count))
-
-        // Handle overlay configs
-        if bundleId.hasSuffix(".overlay.json") {
-          bundleId = String(bundleId.dropLast(".overlay.json".count))
-        } else {
-          bundleId = String(bundleId.dropLast(".json".count))
-        }
+        let bundleId = String(filename.dropFirst(appConfigPrefix.count).dropLast(".json".count))
 
         return bundleId.isEmpty ? nil : bundleId
       }

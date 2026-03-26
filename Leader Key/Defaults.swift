@@ -65,15 +65,6 @@ extension Defaults.Keys {
   static let configFileCustomNames = Key<[String: String]>(
     "configFileCustomNames", default: [:], suite: defaultsSuite)
 
-  // Overlay detection settings
-  /// Enable detection of overlay windows (like Raycast, Alfred) for separate configs
-  static let overlayDetectionEnabled = Key<Bool>(
-    "overlayDetectionEnabled", default: false, suite: defaultsSuite)
-  /// List of bundle IDs for apps that should be checked for overlay windows
-  static let overlayApps = Key<[String]>(
-    "overlayApps", default: ["com.raycast.macos", "com.runningwithcrayons.Alfred"],
-    suite: defaultsSuite)
-
   // Command execution settings
   /// Shell preference for running command actions
   static let commandShellPreference = Key<ShellPreference>(
@@ -84,7 +75,14 @@ extension Defaults.Keys {
   static let customShellPath = Key<String>("customShellPath", default: "", suite: defaultsSuite)
   /// Input method for keyboard events
   static let inputMethodPreference = Key<InputMethodPreference>(
-    "inputMethodPreference", default: .cgEventTap, suite: defaultsSuite)
+    "inputMethodPreference", default: .karabiner2, suite: defaultsSuite)
+  /// Optional override path for kar binary (if empty, uses kar from PATH)
+  static let karBinaryPath = Key<String>("karBinaryPath", default: "", suite: defaultsSuite)
+  /// Optional override path for goku binary (if empty, uses goku from PATH)
+  static let gokuBinaryPath = Key<String>("gokuBinaryPath", default: "", suite: defaultsSuite)
+  /// Karabiner 2.0 export backend: kar, goku, or both
+  static let karabiner2Backend = Key<Karabiner2Backend>(
+    "karabiner2Backend", default: .goku, suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -168,18 +166,12 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
 }
 
 enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identifiable {
-  case cgEventTap = "cgeventtap"
-  case karabiner = "karabiner"
   case karabiner2 = "karabiner2"
 
   var id: Self { self }
 
   var displayName: String {
     switch self {
-    case .cgEventTap:
-      return "CGEventTap (Default)"
-    case .karabiner:
-      return "Karabiner Elements"
     case .karabiner2:
       return "Karabiner 2.0 (State Machine)"
     }
@@ -187,13 +179,47 @@ enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identif
 
   var description: String {
     switch self {
-    case .cgEventTap:
-      return "Direct keyboard interception using macOS event taps"
-    case .karabiner:
-      return "Integration through Karabiner Elements with Unix socket"
     case .karabiner2:
-      return "Advanced Karabiner integration with state machine and Goku EDN export"
+      return "Karabiner integration with state machine and send_user_command transport"
     }
+  }
+}
+
+enum Karabiner2Backend: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case kar
+  case goku
+  case both
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .kar:
+      return "kar (JSON patching)"
+    case .goku:
+      return "Goku (EDN injection)"
+    case .both:
+      return "Both (kar + Goku)"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .kar:
+      return "Uses kar to compile TypeScript config and patch karabiner.json directly"
+    case .goku:
+      return "Generates Goku EDN and injects into karabiner.edn"
+    case .both:
+      return "Runs both kar and Goku pipelines for maximum compatibility"
+    }
+  }
+
+  var requiresKar: Bool {
+    self == .kar || self == .both
+  }
+
+  var requiresGoku: Bool {
+    self == .goku || self == .both
   }
 }
 

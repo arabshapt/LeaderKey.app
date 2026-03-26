@@ -1,9 +1,11 @@
 import AppKit
+import Defaults
 import Foundation
 
 final class Karabiner2InputMethod: InputMethod {
   private weak var delegate: InputMethodDelegate?
   private let socketServer = UnixSocketServer.shared
+  private let userCommandReceiver = KarabinerUserCommandReceiver()
   private var lastHealthCheck = Date()
   private var currentState: Int32 = 0
 
@@ -14,16 +16,20 @@ final class Karabiner2InputMethod: InputMethod {
   var healthStatus: InputMethodHealthStatus {
     let karabinerRunning = isKarabinerRunning()
     let socketActive = isActive
+    let userCommandActive = userCommandReceiver.isRunning
 
-    let isHealthy = karabinerRunning && socketActive
+    let isHealthy = karabinerRunning && socketActive && userCommandActive
     let message: String
 
     if !karabinerRunning {
       message = "Karabiner Elements is not running (required for Karabiner 2.0 mode)"
     } else if !socketActive {
       message = "Unix socket server is not active"
+    } else if !userCommandActive {
+      message = "Karabiner user command receiver is not active"
     } else {
-      message = "Karabiner 2.0 state machine integration is active"
+      let backendLabel = Defaults[.karabiner2Backend].displayName
+      message = "Karabiner 2.0 state machine integration is active (socket + send_user_command + \(backendLabel))"
     }
 
     return InputMethodHealthStatus(
@@ -37,20 +43,28 @@ final class Karabiner2InputMethod: InputMethod {
     self.delegate = delegate
 
     socketServer.delegate = self
+    userCommandReceiver.delegate = self
 
-    let success = socketServer.start()
+    let socketSuccess = socketServer.start()
+    let receiverSuccess = userCommandReceiver.start()
 
-    if success {
+    if socketSuccess {
       debugLog("[Karabiner2InputMethod] Started successfully")
-      exportCurrentConfiguration()
+      if !receiverSuccess {
+        debugLog("[Karabiner2InputMethod] User command receiver did not start - falling back to legacy socket transport")
+      }
+      DispatchQueue.global(qos: .utility).async { [weak self] in
+        self?.exportCurrentConfiguration()
+      }
     } else {
       debugLog("[Karabiner2InputMethod] Failed to start")
     }
 
-    return success
+    return socketSuccess
   }
 
   func stop() {
+    userCommandReceiver.stop()
     socketServer.stop()
     currentState = 0
     debugLog("[Karabiner2InputMethod] Stopped")
@@ -58,12 +72,15 @@ final class Karabiner2InputMethod: InputMethod {
 
   func checkHealth() -> Bool {
     lastHealthCheck = Date()
-    return isKarabinerRunning() && isActive
+    return isKarabinerRunning() && isActive && userCommandReceiver.isRunning
   }
 
   func getStatistics() -> String {
     return """
       \(socketServer.getStatistics())
+      User Command Receiver: \(userCommandReceiver.isRunning ? "Running" : "Stopped")
+      User Command Socket: \(userCommandReceiver.socketPath)
+      Backend: \(Defaults[.karabiner2Backend].displayName)
       Current State: \(currentState)
       Mode: Karabiner 2.0 (State Machine)
       """
@@ -134,6 +151,14 @@ final class Karabiner2InputMethod: InputMethod {
     for (bundleId, _, customName) in appConfigs {
       debugLog("[Karabiner2InputMethod] Final appConfig: bundleId=\(bundleId), customName=\(customName ?? "nil")")
     }
+
+    let backend = Defaults[.karabiner2Backend]
+
+    if backend.requiresKar {
+      exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs)
+    }
+
+    guard backend.requiresGoku else { return }
     
     // 3. Generate unified EDN with hierarchical organization
     let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
@@ -152,15 +177,7 @@ final class Karabiner2InputMethod: InputMethod {
       try ednContent.write(toFile: filePath, atomically: true, encoding: .utf8)
 
       debugLog("[Karabiner2InputMethod] Exported unified configuration to \(filePath)")
-      
-      // Save state mappings as JSON
-      let mappingFilePath = outputDir + "/leaderkey-state-mappings.json"
-      let encoder = JSONEncoder()
-      encoder.outputFormatting = .prettyPrinted
-      let mappingData = try encoder.encode(stateMappings)
-      try mappingData.write(to: URL(fileURLWithPath: mappingFilePath))
-      
-      debugLog("[Karabiner2InputMethod] Exported \(stateMappings.count) state mappings to \(mappingFilePath)")
+      try saveStateMappings(stateMappings, outputDir: outputDir)
       
       // Inject into main karabiner.edn if markers exist
       // Check if activation shortcuts already exist in target file
@@ -213,28 +230,50 @@ final class Karabiner2InputMethod: InputMethod {
         }
       }
 
-      let task = Process()
-      task.launchPath = "/bin/sh"
-      task.arguments = [
-        "-c",
-        "which goku && goku --dry-run || echo 'Goku not found - please install with: brew install yqrashawn/goku/goku'",
-      ]
-
-      let pipe = Pipe()
-      task.standardOutput = pipe
-      task.standardError = pipe
-
-      task.launch()
-      task.waitUntilExit()
-
-      if let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
-      {
-        debugLog("[Karabiner2InputMethod] Goku validation output: \(output)")
+      if FileManager.default.fileExists(atPath: configPath) {
+        let gokuResult = GokuCompilerService.shared.compileAndApply(configPath: configPath)
+        debugLog("[Karabiner2InputMethod] \(gokuResult.message)")
+      } else {
+        debugLog("[Karabiner2InputMethod] goku skipped: karabiner.edn not found")
       }
-
     } catch {
       debugLog("[Karabiner2InputMethod] Failed to export configuration: \(error)")
     }
+  }
+
+  private func exportUsingKar(
+    globalConfig: UserConfig,
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+  ) {
+    do {
+      let (configTS, stateMappings) = Karabiner2Exporter.generateKarConfig(
+        globalConfig: globalConfig,
+        appConfigs: appConfigs
+      )
+
+      let outputDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
+      try FileManager.default.createDirectory(
+        atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
+      try saveStateMappings(stateMappings, outputDir: outputDir)
+
+      let result = KarCompilerService.shared.compileAndApply(configTS: configTS)
+      if result.success {
+        debugLog("[Karabiner2InputMethod] \(result.message)")
+      } else {
+        debugLog("[Karabiner2InputMethod] \(result.message)")
+      }
+    } catch {
+      debugLog("[Karabiner2InputMethod] Failed to export via kar: \(error)")
+    }
+  }
+
+  private func saveStateMappings(_ stateMappings: [Karabiner2Exporter.StateMapping], outputDir: String) throws {
+    let mappingFilePath = outputDir + "/leaderkey-state-mappings.json"
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .prettyPrinted
+    let mappingData = try encoder.encode(stateMappings)
+    try mappingData.write(to: URL(fileURLWithPath: mappingFilePath))
+    debugLog("[Karabiner2InputMethod] Exported \(stateMappings.count) state mappings to \(mappingFilePath)")
   }
   
   // Helper to load an app config and merge with fallback
