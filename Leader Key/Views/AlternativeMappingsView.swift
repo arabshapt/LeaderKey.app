@@ -1,3 +1,4 @@
+import Defaults
 import SwiftUI
 
 struct AlternativeMappingsView: View {
@@ -460,7 +461,7 @@ struct StateIdPickerView: View {
   }
   
   private func loadStateMappings() {
-    let mappingsPath = NSHomeDirectory() + "/.config/karabiner.edn.d/leaderkey-state-mappings.json"
+    let mappingsPath = (Defaults[.configDir] as NSString).appendingPathComponent("export/leaderkey-state-mappings.json")
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: mappingsPath)),
           let mappings = try? JSONDecoder().decode([Karabiner2Exporter.StateMapping].self, from: data) else {
       return

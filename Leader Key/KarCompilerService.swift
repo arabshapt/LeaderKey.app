@@ -10,7 +10,9 @@ final class KarCompilerService {
   static let shared = KarCompilerService()
 
   static let managedRuleDescriptionPrefix = "LeaderKeyManaged/"
-  static let generatedConfigPath = NSHomeDirectory() + "/.config/leaderkey/kar/leaderkey.generated.config.ts"
+  static var generatedConfigPath: String {
+    (Defaults[.configDir] as NSString).appendingPathComponent("export/leaderkey-generated.config.ts")
+  }
 
   private init() {}
 
@@ -39,7 +41,7 @@ final class KarCompilerService {
     let karBinary = resolvedKarBinaryPath()
     let process = Process()
     process.launchPath = karBinary
-    process.arguments = ["--version"]
+    process.arguments = ["--help"]
     process.environment = enrichedEnvironment()
 
     let stdout = Pipe()

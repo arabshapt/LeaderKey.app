@@ -157,36 +157,6 @@ struct AdvancedPane: View {
                 }
 
                 HStack(spacing: 12) {
-                  Button("Export Karabiner 2.0 EDN (Legacy)") {
-                    let content = KarabinerExporter.exportConfiguration(
-                      userConfig: config, format: .karabiner2EDN)
-                    _ = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
-                  }
-
-                  Button("Export & Inject Legacy EDN") {
-                    let content = KarabinerExporter.exportConfiguration(
-                      userConfig: config, format: .karabiner2EDN)
-                    let savedPath = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
-
-                    let alert = NSAlert()
-                    alert.messageText = "Legacy Export & Inject Complete"
-                    alert.informativeText = "Configuration exported to:\n\(savedPath?.path ?? "Unknown")\n\nLegacy marker-based injection applies to karabiner.edn."
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: "OK")
-                    alert.runModal()
-                  }
-                  .help("Legacy/manual EDN export and marker-based injection")
-
-                  Button("Open Legacy EDN Folder") {
-                    let configDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: configDir)
-                  }
-
-                  Spacer()
-                }
-                .padding(.top, 8)
-
-                HStack(spacing: 12) {
                   Button("Configure Alternative Keys") {
                     showingAlternativeMappings = true
                   }
@@ -194,69 +164,61 @@ struct AdvancedPane: View {
 
                   Spacer()
                 }
+                .padding(.top, 8)
 
-                Text(
-                  "Karabiner 2.0 automatic export now uses kar + send_user_command. The EDN buttons above are kept for legacy/manual workflows."
-                )
-                .font(.caption)
-                .foregroundColor(.secondary)
+                DisclosureGroup("Legacy Goku EDN Export") {
+                  VStack(alignment: .leading, spacing: 8) {
+                    Text(
+                      "Automatic export now uses the selected backend above. These buttons are for legacy/manual EDN workflows."
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-                // Legacy EDN injection info section
-                VStack(alignment: .leading, spacing: 8) {
-                  HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "info.circle.fill")
-                      .foregroundColor(.blue)
-                      .font(.system(size: 14))
-
-                    VStack(alignment: .leading, spacing: 6) {
-                      Text("Legacy EDN Injection Into karabiner.edn")
-                        .font(.system(size: 12, weight: .semibold))
-
-                      Text("Leader Key can inject legacy EDN output into your main karabiner.edn file using special marker comments.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                      Text("Add these markers to your karabiner.edn:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
-
-                      VStack(alignment: .leading, spacing: 4) {
-                        Text("In :applications section:")
-                          .font(.system(size: 11, weight: .medium))
-                          .foregroundColor(.secondary)
-
-                        Text(";;; LEADERKEY_APPLICATIONS_START\n;;; LEADERKEY_APPLICATIONS_END")
-                          .font(.system(size: 10, design: .monospaced))
-                          .padding(6)
-                          .background(Color.gray.opacity(0.1))
-                          .cornerRadius(4)
-
-                        Text("In :main section:")
-                          .font(.system(size: 11, weight: .medium))
-                          .foregroundColor(.secondary)
-                          .padding(.top, 4)
-
-                        Text(";;; LEADERKEY_MAIN_START\n;;; LEADERKEY_MAIN_END")
-                          .font(.system(size: 10, design: .monospaced))
-                          .padding(6)
-                          .background(Color.gray.opacity(0.1))
-                          .cornerRadius(4)
+                    HStack(spacing: 12) {
+                      Button("Export EDN") {
+                        let content = KarabinerExporter.exportConfiguration(
+                          userConfig: config, format: .karabiner2EDN)
+                        _ = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
                       }
 
-                      Text("• Content between markers is replaced on each export")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
+                      Button("Export & Inject EDN") {
+                        let content = KarabinerExporter.exportConfiguration(
+                          userConfig: config, format: .karabiner2EDN)
+                        let savedPath = KarabinerExporter.saveToFile(content, format: .karabiner2EDN)
 
-                      Text("• 'Leader Key - Activation Shortcuts' section is preserved if it exists")
+                        let alert = NSAlert()
+                        alert.messageText = "Legacy Export & Inject Complete"
+                        alert.informativeText = "Configuration exported to:\n\(savedPath?.path ?? "Unknown")\n\nLegacy marker-based injection applies to karabiner.edn."
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                      }
+
+                      Button("Open Export Folder") {
+                        let exportDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: exportDir)
+                      }
+
+                      Spacer()
+                    }
+
+                    // Marker injection instructions
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text("Add these markers to your karabiner.edn for injection:")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                      Text("• Your custom rules outside markers remain untouched")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                      Text(";;; LEADERKEY_APPLICATIONS_START / END")
+                        .font(.system(size: 10, design: .monospaced))
+                        .padding(4)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(4)
+
+                      Text(";;; LEADERKEY_MAIN_START / END")
+                        .font(.system(size: 10, design: .monospaced))
+                        .padding(4)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(4)
 
                       HStack(spacing: 8) {
                         Button(action: {
@@ -287,14 +249,11 @@ struct AdvancedPane: View {
                         }
                         .buttonStyle(.bordered)
                       }
-                      .padding(.top, 6)
+                      .padding(.top, 4)
                     }
                   }
-                  .padding(12)
-                  .background(Color.blue.opacity(0.05))
-                  .cornerRadius(8)
+                  .padding(.top, 4)
                 }
-                .padding(.top, 8)
             }
           }
         }

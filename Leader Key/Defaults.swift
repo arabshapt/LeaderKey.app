@@ -195,9 +195,9 @@ enum Karabiner2Backend: String, Defaults.Serializable, CaseIterable, Identifiabl
   var displayName: String {
     switch self {
     case .kar:
-      return "kar (JSON patching)"
+      return "kar (TypeScript)"
     case .goku:
-      return "Goku (EDN injection)"
+      return "Goku (EDN)"
     case .both:
       return "Both (kar + Goku)"
     }
@@ -206,11 +206,11 @@ enum Karabiner2Backend: String, Defaults.Serializable, CaseIterable, Identifiabl
   var description: String {
     switch self {
     case .kar:
-      return "Uses kar to compile TypeScript config and patch karabiner.json directly"
+      return "Generates TypeScript config, compiled by kar to karabiner.json"
     case .goku:
-      return "Generates Goku EDN and injects into karabiner.edn"
+      return "Generates EDN config, injected into karabiner.edn and compiled by Goku"
     case .both:
-      return "Runs both kar and Goku pipelines for maximum compatibility"
+      return "Runs both kar and Goku pipelines"
     }
   }
 

@@ -167,7 +167,7 @@ final class Karabiner2InputMethod: InputMethod {
     )
     
     // 4. Save to single unified file
-    let outputDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
+    let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
     let filePath = outputDir + "/leaderkey-unified.edn"
 
     do {
@@ -251,7 +251,7 @@ final class Karabiner2InputMethod: InputMethod {
         appConfigs: appConfigs
       )
 
-      let outputDir = NSHomeDirectory() + "/.config/karabiner.edn.d"
+      let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
       try FileManager.default.createDirectory(
         atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
       try saveStateMappings(stateMappings, outputDir: outputDir)

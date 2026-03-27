@@ -2722,7 +2722,7 @@ extension AppDelegate {
   // MARK: - State ID Action Execution
   
   private func loadStateMappings() {
-    let mappingFilePath = NSHomeDirectory() + "/.config/karabiner.edn.d/leaderkey-state-mappings.json"
+    let mappingFilePath = (Defaults[.configDir] as NSString).appendingPathComponent("export/leaderkey-state-mappings.json")
     
     guard FileManager.default.fileExists(atPath: mappingFilePath) else {
       debugLog("[AppDelegate] State mappings file not found at: \(mappingFilePath)")

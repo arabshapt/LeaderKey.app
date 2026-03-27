@@ -2,14 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(xcodebuild:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
+      "Bash(swift:*)",
+      "Bash(python3:*)",
+      "Bash(/usr/local/bin/leaderkey-cli:*)",
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(defaults read:*)",
+      "Bash(goku:*)",
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(chmod:*)",
-      "Bash(swift:*)",
-      "Bash(/usr/local/bin/leaderkey-cli:*)",
-      "Bash(echo \"Exit code: $?\")"
+      "WebFetch(domain:karabiner-elements.pqrs.org)"
     ],
     "deny": []
   }
