@@ -12,7 +12,8 @@
       "Bash(goku:*)",
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:karabiner-elements.pqrs.org)"
+      "WebFetch(domain:karabiner-elements.pqrs.org)",
+      "Bash(chmod +x /Users/arabshaptukaev/personalProjects/LeaderKeyapp/scripts/optimize_seqd.ts)"
     ],
     "deny": []
   }

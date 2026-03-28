@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -109,6 +110,13 @@ final class KarabinerUserCommandReceiver {
   }
 
   private func handleIncomingPayload(_ payload: Any) {
+    // Handle v1 structured payloads — forward to seqd or handle locally
+    if let dict = payload as? [String: Any],
+       let type = dict["type"] as? String {
+      handleV1Payload(type: type, dict: dict)
+      return
+    }
+
     guard let command = KarabinerCommandRouter.normalizeSendUserCommandPayload(payload) else {
       debugLog("[KarabinerUserCommandReceiver] Ignoring unsupported payload: \(payload)")
       return
@@ -117,6 +125,86 @@ final class KarabinerUserCommandReceiver {
     let response = KarabinerCommandRouter.route(command: command, delegate: delegate)
     if response != "OK" && !response.hasPrefix("{") {
       debugLog("[KarabinerUserCommandReceiver] Command '\(command)' failed: \(response)")
+    }
+  }
+
+  private static let seqdSocket = "/tmp/seqd.sock"
+
+  private func handleV1Payload(type: String, dict: [String: Any]) {
+    switch type {
+    case "open_app":
+      guard let app = dict["app"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open_app missing 'app'")
+        return
+      }
+      sendToSeqd("OPEN_APP \(app)")
+
+    case "open_app_toggle":
+      guard let app = dict["app"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open_app_toggle missing 'app'")
+        return
+      }
+      sendToSeqd("OPEN_APP_TOGGLE \(app)")
+
+    case "open":
+      guard let target = dict["target"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open missing 'target'")
+        return
+      }
+      guard let url = URL(string: target) else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open: invalid URL '\(target)'")
+        return
+      }
+      DispatchQueue.main.async {
+        NSWorkspace.shared.open(url)
+      }
+
+    case "open_with_app":
+      guard let app = dict["app"] as? String, let target = dict["target"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open_with_app missing 'app' or 'target'")
+        return
+      }
+      sendToSeqd("OPEN_WITH_APP \(app):\(target)")
+
+    default:
+      debugLog("[KarabinerUserCommandReceiver] Unknown v1 type: \(type)")
+    }
+  }
+
+  private func sendToSeqd(_ command: String) {
+    let path = Self.seqdSocket
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else {
+      debugLog("[KarabinerUserCommandReceiver] Failed to create socket for seqd")
+      return
+    }
+    defer { close(fd) }
+
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = path.utf8CString
+    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+      let raw = UnsafeMutableRawPointer(ptr)
+      pathBytes.withUnsafeBufferPointer { buf in
+        raw.copyMemory(from: buf.baseAddress!, byteCount: min(buf.count, 104))
+      }
+    }
+
+    let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
+    let connectResult = withUnsafePointer(to: &addr) { ptr in
+      ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+        Darwin.connect(fd, sockaddrPtr, addrLen)
+      }
+    }
+
+    guard connectResult == 0 else {
+      debugLog("[KarabinerUserCommandReceiver] Failed to connect to seqd at \(path)")
+      return
+    }
+
+    let message = command + "\n"
+    message.utf8CString.withUnsafeBufferPointer { buf in
+      _ = write(fd, buf.baseAddress!, message.utf8.count)
     }
   }
 

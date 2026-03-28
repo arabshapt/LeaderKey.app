@@ -24,7 +24,8 @@ Karabiner Elements (captures keys, detects frontmost app)
 ### Key Design Decisions
 - **Karabiner is single source of truth for app detection** — bundleId always comes from Karabiner's `activate {bundleId}` command. Never use `NSWorkspace.shared.frontmostApplication` for config loading — it can't detect overlay apps like Raycast
 - **stateid is self-contained** — `executeActionByStateId()` uses `mapping.bundleId` to show the window with the correct config if not already visible
-- **Two export backends** — Goku (EDN format, uses `:shell`) and kar (JSON, uses `send_user_command`). Both are supported via `Karabiner2Exporter`
+- **Two export backends** — Goku (EDN format) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`
+- **v1 payload protocol** — `KarabinerUserCommandReceiver` handles structured `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd. String payloads route to `KarabinerCommandRouter` as before
 - **Config merging** — app-specific configs are merged with fallback config via `mergeConfigWithFallback()`
 
 ### Config Files (in `~/Library/Application Support/Leader Key/`)
@@ -52,6 +53,60 @@ Karabiner Elements (captures keys, detects frontmost app)
 - **Testing**: Descriptive test names, XCTAssert* methods. Tests in `Leader KeyTests/`
 - **Access Control**: Use appropriate access modifiers (private, fileprivate, internal)
 - Follow Swift idioms and default formatting (4-space indentation, spaces around operators)
+
+## Manual Testing (v1 payload protocol)
+
+Launch Leader Key from terminal to see stdout logs:
+```bash
+killall "Leader Key" 2>/dev/null
+"/path/to/DerivedData/Leader_Key-.../Build/Products/Debug/Leader Key.app/Contents/MacOS/Leader Key"
+```
+
+Send test payloads to the Karabiner user-command receiver (in a second terminal):
+```bash
+# open_app → seqd
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"open_app\",\"app\":\"/System/Applications/Calculator.app\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# open_app_toggle → seqd
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"open_app_toggle\",\"app\":\"/Applications/Safari.app\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# open URL → NSWorkspace
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"open\",\"target\":\"https://google.com\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# open Raycast deep link → NSWorkspace
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"open\",\"target\":\"raycast://extensions/raycast/system/open-camera\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# Leader Key string command (existing protocol)
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'\"activate com.apple.Safari\"', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# Direct seqd test (bypasses Karabiner)
+printf 'OPEN_APP /System/Applications/Calculator.app\n' | nc -U /tmp/seqd.sock
+```
 
 ## Common Gotchas
 - **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)

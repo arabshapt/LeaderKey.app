@@ -160,9 +160,9 @@ final class Karabiner2Exporter {
     
     // 8. Create activation section at the beginning with escape and settings rules
     // Add single escape rule that works when any Leader Key mode is active (also resets sticky mode)
-    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"]] :leaderkey_active]"
+    let escapeRule = "   [:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] \(gokuSendUserCommand("deactivate"))] :leaderkey_active]"
     // Add cmd+comma rule to deactivate Leader Key and open settings from any active layer
-    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] [:shell \"/usr/local/bin/leaderkey-cli deactivate\"] [:shell \"/usr/local/bin/leaderkey-cli settings\"]] :leaderkey_active]"
+    let settingsRule = "   [{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] \(gokuSendUserCommand("deactivate")) \(gokuSendUserCommand("settings"))] :leaderkey_active]"
     
     var activationRules = allActivations
     activationRules.append(escapeRule)
@@ -730,13 +730,11 @@ final class Karabiner2Exporter {
     if case .action(let action) = node.item {
       switch action.type {
       case .url:
-        let backgroundFlag = shouldUseBackgroundExecution(for: action) ? "-g " : ""
-        let shellCommand = "open \(backgroundFlag)'\(action.value)'"
         if hasStickyMode {
           return [
             "from": karFrom(keyCode: keyCode, modifiers: modifiers),
             "to": [
-              karShell(shellCommand),
+              karOpen(action.value),
               karSetVariable(name: "leaderkey_sticky", value: 1)
             ]
           ]
@@ -745,7 +743,7 @@ final class Karabiner2Exporter {
         return [
           "from": karFrom(keyCode: keyCode, modifiers: modifiers),
           "to": [
-            karShell(shellCommand),
+            karOpen(action.value),
             karSendUserCommand("deactivate"),
             karSetVariable(name: "leaderkey_active", value: 0),
             karSetVariable(name: "leaderkey_global", value: 0),
@@ -755,12 +753,11 @@ final class Karabiner2Exporter {
         ]
 
       case .application:
-        let shellCommand = "open '\(action.value)'"
         if hasStickyMode {
           return [
             "from": karFrom(keyCode: keyCode, modifiers: modifiers),
             "to": [
-              karShell(shellCommand),
+              karOpenApp(action.value),
               karSetVariable(name: "leaderkey_sticky", value: 1)
             ]
           ]
@@ -769,7 +766,7 @@ final class Karabiner2Exporter {
         return [
           "from": karFrom(keyCode: keyCode, modifiers: modifiers),
           "to": [
-            karShell(shellCommand),
+            karOpenApp(action.value),
             karSendUserCommand("deactivate"),
             karSetVariable(name: "leaderkey_active", value: 0),
             karSetVariable(name: "leaderkey_global", value: 0),
@@ -871,6 +868,31 @@ final class Karabiner2Exporter {
 
   private static func karSendUserCommand(_ command: String) -> [String: Any] {
     ["send_user_command": ["payload": command]]
+  }
+
+  /// Generate Goku EDN for send_user_command (e.g. {:send_user_command "deactivate"})
+  private static func gokuSendUserCommand(_ command: String) -> String {
+    "{:send_user_command \"\(command)\"}"
+  }
+
+  /// Generate Goku EDN for send_user_command with v1 open_app payload
+  private static func gokuOpenApp(_ appPath: String) -> String {
+    "{:send_user_command {:payload {:v 1 :type \"open_app\" :app \"\(appPath)\"}}}"
+  }
+
+  /// Generate Goku EDN for send_user_command with v1 open payload (URLs, etc.)
+  private static func gokuOpen(_ target: String) -> String {
+    "{:send_user_command {:payload {:v 1 :type \"open\" :target \"\(target)\"}}}"
+  }
+
+  /// Generate kar JSON for send_user_command with v1 open_app payload
+  private static func karOpenApp(_ appPath: String) -> [String: Any] {
+    ["send_user_command": ["payload": ["v": 1, "type": "open_app", "app": appPath]]]
+  }
+
+  /// Generate kar JSON for send_user_command with v1 open payload (URLs, etc.)
+  private static func karOpen(_ target: String) -> [String: Any] {
+    ["send_user_command": ["payload": ["v": 1, "type": "open", "target": target]]]
   }
 
   private static func karSetVariable(name: String, value: Any) -> [String: Any] {
@@ -1774,42 +1796,34 @@ final class Karabiner2Exporter {
   }
 
   private static func generateActivationManipulator(bundleId: String? = nil) -> String {
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    let activateCmd =
-      FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) activate" : "echo 'activate' | nc -U /tmp/leaderkey.sock"
+    let activateCmd = bundleId != nil ? "activate \(bundleId!)" : "activate"
 
     if let bundleId = bundleId {
       // Add condition for specific app
       return """
-           [{:key :k :modi :command} 
-            [[\"leader_state\" \(initialStateId)] [:shell "\(activateCmd)"]]
+           [{:key :k :modi :command}
+            [[\"leader_state\" \(initialStateId)] \(gokuSendUserCommand(activateCmd))]
             {:conditions [:frontmost_application_is ["\(bundleId)"]]}]
         """
     } else {
       // No condition - works everywhere
       return """
-           [{:key :k :modi :command} [[\"leader_state\" \(initialStateId)] [:shell "\(activateCmd)"]]]
+           [{:key :k :modi :command} [[\"leader_state\" \(initialStateId)] \(gokuSendUserCommand(activateCmd))]]
         """
     }
   }
 
   private static func generateEscapeHandler(forState stateId: Int32, bundleId: String? = nil) -> String {
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    let deactivateCmd =
-      FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
-
     // When escape is pressed, always reset sticky mode along with other states
     if let bundleId = bundleId {
       return """
-           [:escape 
-            [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] [:shell "\(deactivateCmd)"]] 
+           [:escape
+            [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] \(gokuSendUserCommand("deactivate"))]
             {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(stateId)]]}]
         """
     } else {
       return """
-           [:escape [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] [:shell "\(deactivateCmd)"]] [\"leader_state\" \(stateId)]]
+           [:escape [[\"leader_state\" \(inactiveStateId)] [\"leaderkey_sticky\" 0] \(gokuSendUserCommand("deactivate"))] [\"leader_state\" \(stateId)]]
         """
     }
   }
@@ -1835,30 +1849,29 @@ final class Karabiner2Exporter {
     -> String
   {
     let karabinerKey = convertToKarabinerKey(key)
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    
+
     // Check if this is a shortcut action that can be exported directly
     if let node = node,
        case .action(let action) = node.item,
        action.type == .shortcut,
        canExportShortcutToKarabiner(action.value) {
-      
+
       // Convert shortcut to Karabiner format
       let shortcutKeys = convertShortcutToKarabinerFormat(action.value)
-      
+
       // Build the action sequence: deactivate + execute shortcuts
-      var actions = "[:shell \"\(cliPath) deactivate\"]"
+      var actions = gokuSendUserCommand("deactivate")
       for shortcutKey in shortcutKeys {
         actions += " \(shortcutKey)"
       }
-      
+
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
-      
+
       if let bundleId = bundleId {
         return """
-             [\(karabinerKey) 
-              [\(actions) \(stateVars)] 
+             [\(karabinerKey)
+              [\(actions) \(stateVars)]
               {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
           """
       } else {
@@ -1866,18 +1879,15 @@ final class Karabiner2Exporter {
              [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
           """
       }
-      }
-
+    }
 
     // Check if this is a URL action that can be opened directly
     if let node = node,
        case .action(let action) = node.item,
        action.type == .url {
 
-      // Build the action sequence: open URL + deactivate in parallel for speed
       let url = action.value
-      let backgroundFlag = shouldUseBackgroundExecution(for: action) ? "-g " : ""
-      let actions = "[:shell \"open \(backgroundFlag)'\(url)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+      let actions = "\(gokuOpen(url)) \(gokuSendUserCommand("deactivate"))"
 
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
@@ -1900,9 +1910,8 @@ final class Karabiner2Exporter {
        case .action(let action) = node.item,
        action.type == .application {
 
-      // Build the action sequence: open app + deactivate in parallel for speed
       let appPath = action.value  // Full path like "/Applications/Safari.app"
-      let actions = "[:shell \"open '\(appPath)' & \(cliPath) deactivate 2>/dev/null || true\"]"
+      let actions = "\(gokuOpenApp(appPath)) \(gokuSendUserCommand("deactivate"))"
 
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
@@ -1925,10 +1934,9 @@ final class Karabiner2Exporter {
        case .action(let action) = node.item,
        action.type == .command {
 
-      // Build the action sequence: execute command + deactivate in parallel for speed
       let command = action.value  // Shell command to execute
       let shellCommand = buildShellCommand(command)  // Respect shell configuration settings
-      let actions = "[:shell \"\(shellCommand) & \(cliPath) deactivate 2>/dev/null || true\"]"
+      let actions = "[:shell \"\(shellCommand)\"] \(gokuSendUserCommand("deactivate"))"
 
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
@@ -1949,10 +1957,7 @@ final class Karabiner2Exporter {
     // Default behavior for non-shortcut actions or complex shortcuts
     // Use stateid command with optional sticky flag
     let commandSuffix = hasStickyMode ? " sticky" : ""
-    let sequenceCmd =
-      FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) stateid \(toState)\(commandSuffix)"
-      : "echo 'stateid \(toState)\(commandSuffix)' | nc -U /tmp/leaderkey.sock"
+    let stateidCmd = "stateid \(toState)\(commandSuffix)"
 
     // If parent group has sticky mode, keep leader_state at fromState and set sticky flag
     // Otherwise, reset everything
@@ -1964,16 +1969,16 @@ final class Karabiner2Exporter {
       // Normal reset - clear everything
       stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
     }
-    
+
     if let bundleId = bundleId {
       return """
-           [\(karabinerKey) 
-            [[:shell "\(sequenceCmd)"] \(stateVars)] 
+           [\(karabinerKey)
+            [\(gokuSendUserCommand(stateidCmd)) \(stateVars)]
             {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
         """
     } else {
       return """
-           [\(karabinerKey) [[:shell "\(sequenceCmd)"] \(stateVars)] [\"leader_state\" \(fromState)]]
+           [\(karabinerKey) [\(gokuSendUserCommand(stateidCmd)) \(stateVars)] [\"leader_state\" \(fromState)]]
         """
     }
   }
@@ -2100,20 +2105,9 @@ final class Karabiner2Exporter {
 
   // Unified manipulator generators with cleaner app alias conditions
   private static func generateUnifiedActivationManipulator(appAlias: String?, bundleId: String?, activationKey: String, initialStateId: Int32) -> String {
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    
     // Include bundleId in activation command for app-specific activations
-    let activateCmd: String
-    if let bundleId = bundleId {
-      // App-specific activation with bundleId
-      activateCmd = FileManager.default.fileExists(atPath: cliPath)
-        ? "\(cliPath) activate \(bundleId)" : "echo 'activate \(bundleId)' | nc -U /tmp/leaderkey.sock"
-    } else {
-      // Global activation without bundleId
-      activateCmd = FileManager.default.fileExists(atPath: cliPath)
-        ? "\(cliPath) activate" : "echo 'activate' | nc -U /tmp/leaderkey.sock"
-    }
-    
+    let activateCmd = bundleId != nil ? "activate \(bundleId!)" : "activate"
+
     // Determine which mode variables to set
     let modeVars: String
     if appAlias != nil || bundleId == "__FALLBACK__" {
@@ -2123,53 +2117,37 @@ final class Karabiner2Exporter {
       // Global mode
       modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_appspecific\" 0]"
     }
-    
+
     if let alias = appAlias {
-      // App-specific activation with simple app alias condition
-      return "   [\(activationKey) [\(modeVars) [\"leader_state\" \(initialStateId)] [:shell \"\(activateCmd)\"]] :\(alias)]"
+      return "   [\(activationKey) [\(modeVars) [\"leader_state\" \(initialStateId)] \(gokuSendUserCommand(activateCmd))] :\(alias)]"
     } else {
-      // Global or fallback activation with no app condition
-      return "   [\(activationKey) [\(modeVars) [\"leader_state\" \(initialStateId)] [:shell \"\(activateCmd)\"]]]"
+      return "   [\(activationKey) [\(modeVars) [\"leader_state\" \(initialStateId)] \(gokuSendUserCommand(activateCmd))]]"
     }
   }
   
   private static func generateUnifiedEscapeHandler(forState stateId: Int32, appAlias: String?) -> String {
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    let deactivateCmd = FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) deactivate" : "echo 'deactivate' | nc -U /tmp/leaderkey.sock"
-    
     // Clear all mode variables on escape, including sticky mode
     let clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" \(inactiveStateId)]"
-    
+
     if let alias = appAlias {
-      // App-specific escape with combined conditions
-      return "   [:escape [\(clearVars) [:shell \"\(deactivateCmd)\"]] [:\(alias) [\"leader_state\" \(stateId)]]]"
+      return "   [:escape [\(clearVars) \(gokuSendUserCommand("deactivate"))] [:\(alias) [\"leader_state\" \(stateId)]]]"
     } else {
-      // Global escape with just state condition
-      return "   [:escape [\(clearVars) [:shell \"\(deactivateCmd)\"]] [\"leader_state\" \(stateId)]]"
+      return "   [:escape [\(clearVars) \(gokuSendUserCommand("deactivate"))] [\"leader_state\" \(stateId)]]"
     }
   }
   
   private static func generateUnifiedStateTransition(key: String, fromState: Int32, toState: Int32, hasStickyMode: Bool, appAlias: String?) -> String {
     let karabinerKey = convertToKarabinerKey(key)
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    
-    // Send state change notification to update UI
-    let stateCmd = FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) stateid \(toState)"
-      : "echo 'stateid \(toState)' | nc -U /tmp/leaderkey.sock"
-    
+
     // Build action array
-    var actions = "[\"leader_state\" \(toState)] [:shell \"\(stateCmd)\"]"
+    var actions = "[\"leader_state\" \(toState)] \(gokuSendUserCommand("stateid \(toState)"))"
     if hasStickyMode {
       actions += " [\"leaderkey_sticky\" 1]"
     }
-    
+
     if let alias = appAlias {
-      // App-specific transition with combined conditions
       return "   [\(karabinerKey) [\(actions)] [:\(alias) [\"leader_state\" \(fromState)]]]"
     } else {
-      // Global transition with just state condition
       return "   [\(karabinerKey) [\(actions)] [\"leader_state\" \(fromState)]]"
     }
   }
@@ -2345,43 +2323,34 @@ final class Karabiner2Exporter {
   
   private static func generateUnifiedTerminalAction(key: String, fromState: Int32, toState: Int32, actionPath: String, hasStickyMode: Bool, appAlias: String?, node: StateNode? = nil) -> String {
     let karabinerKey = convertToKarabinerKey(key)
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    
+
     // Check if this is a shortcut action that can be exported directly
     if let node = node,
        case .action(let action) = node.item,
        action.type == .shortcut,
        canExportShortcutToKarabiner(action.value) {
-      
-      // Convert shortcut to Karabiner format
+
       let shortcutKeys = convertShortcutToKarabinerFormat(action.value)
-      
-      // Build the action sequence based on sticky mode
+
       var actions = ""
       let stateVars: String
-      
+
       if hasStickyMode {
-        // In sticky mode: just execute shortcuts and stay in current state
         for shortcutKey in shortcutKeys {
           actions += actions.isEmpty ? "\(shortcutKey)" : " \(shortcutKey)"
         }
-        // Keep leader_state at current group, set sticky flag
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
-        // Normal mode: deactivate + execute shortcuts
-        actions = "[:shell \"\(cliPath) deactivate\"]"
+        actions = gokuSendUserCommand("deactivate")
         for shortcutKey in shortcutKeys {
           actions += " \(shortcutKey)"
         }
-        // Clear all variables since we're deactivating
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
-      
+
       if let alias = appAlias {
-        // App-specific shortcut action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
-        // Global shortcut action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
@@ -2391,29 +2360,21 @@ final class Karabiner2Exporter {
        case .action(let action) = node.item,
        action.type == .url {
 
-      // Build the action sequence based on sticky mode
       let url = action.value
-      var actions = ""
+      var actions: String
       let stateVars: String
-      let backgroundFlag = shouldUseBackgroundExecution(for: action) ? "-g " : ""
 
       if hasStickyMode {
-        // In sticky mode: just open URL and stay in current state
-        actions = "[:shell \"open \(backgroundFlag)'\(url)'\"]"
-        // Keep leader_state at current group, set sticky flag
+        actions = gokuOpen(url)
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
-        // Normal mode: open URL + deactivate in parallel for speed
-        actions = "[:shell \"open \(backgroundFlag)'\(url)' & \(cliPath) deactivate 2>/dev/null || true\"]"
-        // Clear all variables since we're deactivating
+        actions = "\(gokuOpen(url)) \(gokuSendUserCommand("deactivate"))"
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
 
       if let alias = appAlias {
-        // App-specific URL action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
-        // Global URL action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
@@ -2423,28 +2384,21 @@ final class Karabiner2Exporter {
        case .action(let action) = node.item,
        action.type == .application {
 
-      // Build the action sequence based on sticky mode
-      let appPath = action.value  // Full path like "/Applications/Safari.app"
-      var actions = ""
+      let appPath = action.value
+      var actions: String
       let stateVars: String
 
       if hasStickyMode {
-        // In sticky mode: just open app and stay in current state
-        actions = "[:shell \"open '\(appPath)'\"]"
-        // Keep leader_state at current group, set sticky flag
+        actions = gokuOpenApp(appPath)
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
-        // Normal mode: open app + deactivate in parallel for speed
-        actions = "[:shell \"open '\(appPath)' & \(cliPath) deactivate 2>/dev/null || true\"]"
-        // Clear all variables since we're deactivating
+        actions = "\(gokuOpenApp(appPath)) \(gokuSendUserCommand("deactivate"))"
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
 
       if let alias = appAlias {
-        // App-specific application action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
-        // Global application action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
@@ -2454,77 +2408,53 @@ final class Karabiner2Exporter {
        case .action(let action) = node.item,
        action.type == .command {
 
-      // Build the action sequence based on sticky mode
-      let command = action.value  // Shell command to execute
-      let shellCommand = buildShellCommand(command)  // Respect shell configuration settings
-      var actions = ""
+      let command = action.value
+      let shellCommand = buildShellCommand(command)
+      var actions: String
       let stateVars: String
 
       if hasStickyMode {
-        // In sticky mode: just execute command and stay in current state
         actions = "[:shell \"\(shellCommand)\"]"
-        // Keep leader_state at current group, set sticky flag
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
-        // Normal mode: execute command + deactivate in parallel for speed
-        actions = "[:shell \"\(shellCommand) & \(cliPath) deactivate 2>/dev/null || true\"]"
-        // Clear all variables since we're deactivating
+        actions = "[:shell \"\(shellCommand)\"] \(gokuSendUserCommand("deactivate"))"
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
 
       if let alias = appAlias {
-        // App-specific command action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
-        // Global command action
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
       }
     }
 
     // Default behavior for non-shortcut actions or complex shortcuts
     let commandSuffix = hasStickyMode ? " sticky" : ""
-    let sequenceCmd = FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) stateid \(toState)\(commandSuffix)"
-      : "echo 'stateid \(toState)\(commandSuffix)' | nc -U /tmp/leaderkey.sock"
-    
-    // If parent group has sticky mode, keep leader_state at fromState and set sticky flag
-    // Otherwise, reset everything
+    let stateidCmd = "stateid \(toState)\(commandSuffix)"
+
     let clearVars: String
     if hasStickyMode {
-      // Keep leader_state at current group (fromState), set sticky flag
       clearVars = "[\"leaderkey_sticky\" 1]"
     } else {
-      // Normal reset - clear everything
       clearVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
     }
-    
+
     if let alias = appAlias {
-      // App-specific terminal action with combined conditions
-      return "   [\(karabinerKey) [[:shell \"\(sequenceCmd)\"] \(clearVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      return "   [\(karabinerKey) [\(gokuSendUserCommand(stateidCmd)) \(clearVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
     } else {
-      // Global terminal action with just state condition
-      return "   [\(karabinerKey) [[:shell \"\(sequenceCmd)\"] \(clearVars)] [\"leader_state\" \(fromState)]]"
+      return "   [\(karabinerKey) [\(gokuSendUserCommand(stateidCmd)) \(clearVars)] [\"leader_state\" \(fromState)]]"
     }
   }
   
   private static func generateCatchAllRules(fromState: Int32, appAlias: String?, definedKeys: Set<String>) -> [String] {
-    // Use Goku's {:any :key_code} syntax to match any key with any modifiers
-    // This replaces 50+ individual rules with a single catch-all rule
     var rules: [String] = []
-    
-    // Include shake command to provide visual feedback for undefined keys
-    let cliPath = "/usr/local/bin/leaderkey-cli"
-    let shakeCmd = FileManager.default.fileExists(atPath: cliPath)
-      ? "\(cliPath) shake" : "echo 'shake' | nc -U /tmp/leaderkey.sock"
-    
+
     if let alias = appAlias {
-      // App-specific catch-all with combined conditions (excluding sticky mode)
-      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [:\(alias) [\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
+      rules.append("   [{:any :key_code :modi :any} [\(gokuSendUserCommand("shake")) :vk_none] [:\(alias) [\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
     } else {
-      // Global catch-all with just state condition (excluding sticky mode)
-      rules.append("   [{:any :key_code :modi :any} [[:shell \"\(shakeCmd)\"] :vk_none] [[\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
+      rules.append("   [{:any :key_code :modi :any} [\(gokuSendUserCommand("shake")) :vk_none] [[\"leader_state\" \(fromState)] [\"leaderkey_sticky\" 0]]]")
     }
-    
+
     return rules
   }
   
