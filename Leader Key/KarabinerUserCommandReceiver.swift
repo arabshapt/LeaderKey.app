@@ -155,8 +155,15 @@ final class KarabinerUserCommandReceiver {
         debugLog("[KarabinerUserCommandReceiver] v1 open: invalid URL '\(target)'")
         return
       }
+      let background = dict["background"] as? Bool ?? false
       DispatchQueue.main.async {
-        NSWorkspace.shared.open(url)
+        if background {
+          let config = NSWorkspace.OpenConfiguration()
+          config.activates = false
+          NSWorkspace.shared.open(url, configuration: config)
+        } else {
+          NSWorkspace.shared.open(url)
+        }
       }
 
     case "open_with_app":

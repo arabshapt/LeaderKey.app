@@ -730,11 +730,12 @@ final class Karabiner2Exporter {
     if case .action(let action) = node.item {
       switch action.type {
       case .url:
+        let background = shouldUseBackgroundExecution(for: action)
         if hasStickyMode {
           return [
             "from": karFrom(keyCode: keyCode, modifiers: modifiers),
             "to": [
-              karOpen(action.value),
+              karOpen(action.value, background: background),
               karSetVariable(name: "leaderkey_sticky", value: 1)
             ]
           ]
@@ -743,7 +744,7 @@ final class Karabiner2Exporter {
         return [
           "from": karFrom(keyCode: keyCode, modifiers: modifiers),
           "to": [
-            karOpen(action.value),
+            karOpen(action.value, background: background),
             karSendUserCommand("deactivate"),
             karSetVariable(name: "leaderkey_active", value: 0),
             karSetVariable(name: "leaderkey_global", value: 0),
@@ -881,8 +882,8 @@ final class Karabiner2Exporter {
   }
 
   /// Generate Goku EDN for send_user_command with v1 open payload (URLs, etc.)
-  private static func gokuOpen(_ target: String) -> String {
-    "{:send_user_command {:payload {:v 1 :type \"open\" :target \"\(target)\"}}}"
+  private static func gokuOpen(_ target: String, background: Bool = false) -> String {
+    "{:send_user_command {:payload {:v 1 :type \"open\" :background \(background) :target \"\(target)\"}}}"
   }
 
   /// Generate kar JSON for send_user_command with v1 open_app payload
@@ -891,8 +892,8 @@ final class Karabiner2Exporter {
   }
 
   /// Generate kar JSON for send_user_command with v1 open payload (URLs, etc.)
-  private static func karOpen(_ target: String) -> [String: Any] {
-    ["send_user_command": ["payload": ["v": 1, "type": "open", "target": target]]]
+  private static func karOpen(_ target: String, background: Bool = false) -> [String: Any] {
+    ["send_user_command": ["payload": ["v": 1, "type": "open", "background": background, "target": target]]]
   }
 
   private static func karSetVariable(name: String, value: Any) -> [String: Any] {
@@ -1887,7 +1888,8 @@ final class Karabiner2Exporter {
        action.type == .url {
 
       let url = action.value
-      let actions = "\(gokuOpen(url)) \(gokuSendUserCommand("deactivate"))"
+      let background = shouldUseBackgroundExecution(for: action)
+      let actions = "\(gokuOpen(url, background: background)) \(gokuSendUserCommand("deactivate"))"
 
       // Clear all variables since we're deactivating
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
@@ -2361,14 +2363,15 @@ final class Karabiner2Exporter {
        action.type == .url {
 
       let url = action.value
+      let background = shouldUseBackgroundExecution(for: action)
       var actions: String
       let stateVars: String
 
       if hasStickyMode {
-        actions = gokuOpen(url)
+        actions = gokuOpen(url, background: background)
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
-        actions = "\(gokuOpen(url)) \(gokuSendUserCommand("deactivate"))"
+        actions = "\(gokuOpen(url, background: background)) \(gokuSendUserCommand("deactivate"))"
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
 
