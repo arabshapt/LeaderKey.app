@@ -167,12 +167,34 @@ final class KarabinerUserCommandReceiver {
       }
       openWithApp(appPath: app, target: target)
 
+    case "menu":
+      guard let app = dict["app"] as? String, let path = dict["path"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 menu missing 'app' or 'path'")
+        return
+      }
+      selectMenuItem(app: app, path: path)
+
     default:
       debugLog("[KarabinerUserCommandReceiver] Unknown v1 type: \(type)")
     }
   }
 
   // MARK: - Native app management
+
+  /// Cache: app string → (appURL, bundleId). Avoids repeated FileManager + Bundle lookups.
+  private static var appCache: [String: (url: URL, bundleId: String)] = [:]
+
+  private static func resolveApp(_ app: String) -> (url: URL, bundleId: String)? {
+    if let cached = appCache[app] { return cached }
+
+    guard let url = resolveAppURL(app) else { return nil }
+    guard let bundle = Bundle(url: url),
+          let bundleId = bundle.bundleIdentifier else { return nil }
+
+    let entry = (url: url, bundleId: bundleId)
+    appCache[app] = entry
+    return entry
+  }
 
   private static func resolveAppURL(_ app: String) -> URL? {
     // Full path (e.g. /Applications/Safari.app)
@@ -192,36 +214,54 @@ final class KarabinerUserCommandReceiver {
     return nil
   }
 
+  /// Find a running app using cached bundle ID for instant lookup
+  private static func findRunningApp(_ app: String) -> NSRunningApplication? {
+    if let resolved = resolveApp(app) {
+      return NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first
+    }
+    // Fallback: try app name match
+    let name = (app as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
+    return NSWorkspace.shared.runningApplications.first { $0.localizedName == name }
+  }
+
   private func openApp(_ app: String) {
-    guard let appURL = Self.resolveAppURL(app) else {
+    guard let resolved = Self.resolveApp(app) else {
       debugLog("[KarabinerUserCommandReceiver] v1 open_app: cannot resolve '\(app)'")
       return
     }
     DispatchQueue.main.async {
+      // Fast path: activate directly if already running (cached bundle ID lookup)
+      if let running = NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first {
+        running.activate()
+        return
+      }
+      // Slow path: launch via LaunchServices
       let config = NSWorkspace.OpenConfiguration()
-      NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+      NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
     }
   }
 
   private func openAppToggle(_ app: String) {
-    guard let appURL = Self.resolveAppURL(app) else {
+    guard let resolved = Self.resolveApp(app) else {
       debugLog("[KarabinerUserCommandReceiver] v1 open_app_toggle: cannot resolve '\(app)'")
       return
     }
     DispatchQueue.main.async {
-      // If app is frontmost, hide it; otherwise open/activate it
-      if let frontApp = NSWorkspace.shared.frontmostApplication,
-         frontApp.bundleURL == appURL {
-        frontApp.hide()
+      if let running = NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first {
+        if running.isActive {
+          running.hide()
+        } else {
+          running.activate()
+        }
       } else {
         let config = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+        NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
       }
     }
   }
 
   private func openWithApp(appPath: String, target: String) {
-    guard let appURL = Self.resolveAppURL(appPath) else {
+    guard let resolved = Self.resolveApp(appPath) else {
       debugLog("[KarabinerUserCommandReceiver] v1 open_with_app: cannot resolve app '\(appPath)'")
       return
     }
@@ -237,8 +277,137 @@ final class KarabinerUserCommandReceiver {
     }
     DispatchQueue.main.async {
       let config = NSWorkspace.OpenConfiguration()
-      NSWorkspace.shared.open([targetURL], withApplicationAt: appURL, configuration: config)
+      NSWorkspace.shared.open([targetURL], withApplicationAt: resolved.url, configuration: config)
     }
+  }
+
+  // MARK: - Menu item selection (AX API)
+
+  /// Public entry point for direct calls (e.g. from Controller)
+  static func selectMenuItemDirectly(app appName: String, path: String) {
+    selectMenuItemImpl(app: appName, path: path)
+  }
+
+  private func selectMenuItem(app appName: String, path: String) {
+    Self.selectMenuItemImpl(app: appName, path: path)
+  }
+
+  private static func selectMenuItemImpl(app appName: String, path: String) {
+    // Find running app PID — use cache for bundle ID lookup
+    let pid: pid_t
+    if let running = Self.findRunningApp(appName) {
+      pid = running.processIdentifier
+    } else {
+      // Fallback: match by localized name
+      guard let running = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == appName }) else {
+        debugLog("[menu] app not running: \(appName)")
+        return
+      }
+      pid = running.processIdentifier
+    }
+
+    // Parse menu path: supports ">" and "/" delimiters
+    let parts = Self.splitMenuPath(path)
+    guard !parts.isEmpty else {
+      debugLog("[menu] empty path")
+      return
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let appElement = AXUIElementCreateApplication(pid)
+
+      var menuBarRef: CFTypeRef?
+      let err = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarRef)
+      guard err == .success, let menuBar = menuBarRef else {
+        debugLog("[menu] no menu bar for \(appName) (AXError \(err.rawValue))")
+        return
+      }
+
+      // First component: descendant search (depth 6) to handle inconsistent menu structures
+      guard let first = Self.axFindDescendant(menuBar as! AXUIElement, title: parts[0], depth: 6) else {
+        let tops = Self.axChildTitles(menuBar as! AXUIElement)
+        debugLog("[menu] part not found: '\(parts[0])' in [\(tops.joined(separator: ", "))]")
+        return
+      }
+
+      // Remaining components: descendant search at each level
+      var current: AXUIElement = first
+      for i in 1..<parts.count {
+        guard let next = Self.axFindDescendant(current, title: parts[i], depth: 6) else {
+          debugLog("[menu] part not found: '\(parts[i])'")
+          return
+        }
+        current = next
+      }
+
+      let pressErr = AXUIElementPerformAction(current, kAXPressAction as CFString)
+      if pressErr != .success {
+        debugLog("[menu] press failed (AXError \(pressErr.rawValue))")
+      } else {
+        debugLog("[menu] ok: \(appName) > \(path)")
+      }
+    }
+  }
+
+  /// Split menu path by ">" or "/" delimiter, trimming whitespace
+  private static func splitMenuPath(_ path: String) -> [String] {
+    let delimiter: Character
+    if path.contains(">") {
+      delimiter = ">"
+    } else if path.contains("/") {
+      delimiter = "/"
+    } else {
+      return [path.trimmingCharacters(in: .whitespaces)]
+    }
+    return path.split(separator: delimiter)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty }
+  }
+
+  /// Get title of an AX element (tries kAXTitleAttribute then kAXDescriptionAttribute)
+  private static func axGetTitle(_ element: AXUIElement) -> String? {
+    for attr in [kAXTitleAttribute, kAXDescriptionAttribute] as [String] {
+      var ref: CFTypeRef?
+      if AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
+         let str = ref as? String, !str.isEmpty {
+        return str
+      }
+    }
+    return nil
+  }
+
+  /// Find a child element by title (direct children only)
+  private static func axFindChild(_ parent: AXUIElement, title: String) -> AXUIElement? {
+    var childrenRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+          let children = childrenRef as? [AXUIElement] else { return nil }
+    for child in children {
+      if let t = axGetTitle(child), t == title { return child }
+    }
+    return nil
+  }
+
+  /// Find a descendant element by title (bounded depth search, like seq)
+  private static func axFindDescendant(_ parent: AXUIElement, title: String, depth: Int) -> AXUIElement? {
+    guard depth > 0 else { return nil }
+    // Check direct children first
+    if let direct = axFindChild(parent, title: title) { return direct }
+    // Recurse into children
+    var childrenRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+          let children = childrenRef as? [AXUIElement] else { return nil }
+    for child in children {
+      if let found = axFindDescendant(child, title: title, depth: depth - 1) { return found }
+    }
+    return nil
+  }
+
+  /// Get titles of direct children (for debug logging on failure)
+  private static func axChildTitles(_ parent: AXUIElement) -> [String] {
+    var childrenRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+          let children = childrenRef as? [AXUIElement] else { return [] }
+    return children.compactMap { axGetTitle($0) }
   }
 
   private static func defaultSocketPath() -> String {

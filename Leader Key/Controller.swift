@@ -461,6 +461,17 @@ class Controller {
       }
     case .macro:
       runMacro(action)
+    case .menu:
+      // Value format: "App > Menu > Item"
+      let parts = action.value.components(separatedBy: " > ")
+      guard parts.count >= 2 else {
+        debugLog("[Controller] runAction: invalid menu value '\(action.value)' — expected 'App > Menu > Item'")
+        break
+      }
+      let appName = parts[0].trimmingCharacters(in: .whitespaces)
+      let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
+      // Send as v1 payload to the receiver for AX-based menu clicking
+      KarabinerUserCommandReceiver.selectMenuItemDirectly(app: appName, path: menuPath)
     default:
       debugLog("\(action.type) unknown")
     }

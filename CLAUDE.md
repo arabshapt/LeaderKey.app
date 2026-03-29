@@ -96,6 +96,14 @@ sock.sendto(b'{\"v\":1,\"type\":\"open\",\"target\":\"raycast://extensions/rayca
 sock.close()
 "
 
+# menu item click → AX API
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"menu\",\"app\":\"Finder\",\"path\":\"File > New Finder Window\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
 # Leader Key string command (existing protocol)
 python3 -c "
 import socket

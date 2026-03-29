@@ -729,6 +729,7 @@ enum Type: String, Codable {
   case text
   case toggleStickyMode
   case macro
+  case menu
 }
 
 struct MacroStep: Codable, Equatable, Identifiable {
@@ -803,6 +804,10 @@ struct Action: Item, Codable, Equatable, Identifiable {
     case .macro:
       let stepCount = macroSteps?.count ?? 0
       return "Macro: \(stepCount) steps"
+    case .menu:
+      // Value format: "App > Menu > Item" — show just the menu path
+      let parts = value.components(separatedBy: " > ")
+      return parts.count > 1 ? parts.dropFirst().joined(separator: " > ") : value
     default:
       return value
     }

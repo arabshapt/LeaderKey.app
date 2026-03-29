@@ -70,6 +70,11 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
         Image(systemName: "play.rectangle.on.rectangle")
           .foregroundStyle(.secondary)
           .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
+    case .menu:
+      return AnyView(
+        Image(systemName: "filemenu.and.selection")
+          .foregroundStyle(.secondary)
+          .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
     default:
       return AnyView(
         Image(systemName: "questionmark")

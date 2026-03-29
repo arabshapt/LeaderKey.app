@@ -13,7 +13,13 @@
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:karabiner-elements.pqrs.org)",
-      "Bash(chmod +x /Users/arabshaptukaev/personalProjects/LeaderKeyapp/scripts/optimize_seqd.ts)"
+      "Bash(chmod +x /Users/arabshaptukaev/personalProjects/LeaderKeyapp/scripts/optimize_seqd.ts)",
+      "Bash(find /Users/arabshaptukaev/personalProjects/LeaderKeyapp -type f \\\\\\(-name *.py -o -name *.sh -o -name *.js \\\\\\))",
+      "Bash(grep -r \"menu\\\\|click\" /Users/arabshaptukaev/personalProjects/LeaderKeyapp --include=*.swift --include=*.py --include=*.sh)",
+      "Bash(find /Users/arabshaptukaev/personalProjects/LeaderKeyapp -name *cli* -o -name *command*)",
+      "Bash(find /Users/arabshaptukaev/personalProjects/LeaderKeyapp -type f \\\\\\(-name *.md -o -name *.txt -o -name *.edn -o -name *.json \\\\\\))",
+      "Bash(grep -r \"menu click\\\\|click menu\\\\|menu\\\\|click\" /Users/arabshaptukaev/personalProjects/LeaderKeyapp --include=*.md)",
+      "Bash(find /Users/arabshaptukaev/personalProjects/LeaderKeyapp -name *.edn -o -name *.yml -o -name *.yaml)"
     ],
     "deny": []
   }

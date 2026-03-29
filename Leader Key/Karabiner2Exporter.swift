@@ -776,6 +776,33 @@ final class Karabiner2Exporter {
           ]
         ]
 
+      case .menu:
+        let parts = action.value.components(separatedBy: " > ")
+        if parts.count >= 2 {
+          let appName = parts[0].trimmingCharacters(in: .whitespaces)
+          let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
+          if hasStickyMode {
+            return [
+              "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+              "to": [
+                karMenu(app: appName, path: menuPath),
+                karSetVariable(name: "leaderkey_sticky", value: 1)
+              ]
+            ]
+          }
+          return [
+            "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+            "to": [
+              karMenu(app: appName, path: menuPath),
+              karSendUserCommand("deactivate"),
+              karSetVariable(name: "leaderkey_active", value: 0),
+              karSetVariable(name: "leaderkey_global", value: 0),
+              karSetVariable(name: "leaderkey_appspecific", value: 0),
+              karSetVariable(name: "leader_state", value: inactiveStateId)
+            ]
+          ]
+        }
+
       case .command:
         let shellInvocation = buildShellInvocation(action.value)
         let shellCommand = hasStickyMode ? shellInvocation : "\(shellInvocation) &"
@@ -894,6 +921,16 @@ final class Karabiner2Exporter {
   /// Generate kar JSON for send_user_command with v1 open payload (URLs, etc.)
   private static func karOpen(_ target: String, background: Bool = false) -> [String: Any] {
     ["send_user_command": ["payload": ["v": 1, "type": "open", "background": background, "target": target]]]
+  }
+
+  /// Generate Goku EDN for send_user_command with v1 menu payload
+  private static func gokuMenu(app: String, path: String) -> String {
+    "{:send_user_command {:payload {:v 1 :type \"menu\" :app \"\(app)\" :path \"\(path)\"}}}"
+  }
+
+  /// Generate kar JSON for send_user_command with v1 menu payload
+  private static func karMenu(app: String, path: String) -> [String: Any] {
+    ["send_user_command": ["payload": ["v": 1, "type": "menu", "app": app, "path": path]]]
   }
 
   private static func karSetVariable(name: String, value: Any) -> [String: Any] {
@@ -1956,6 +1993,32 @@ final class Karabiner2Exporter {
       }
     }
 
+    // Check if this is a menu action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .menu {
+
+      let parts = action.value.components(separatedBy: " > ")
+      if parts.count >= 2 {
+        let appName = parts[0].trimmingCharacters(in: .whitespaces)
+        let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
+        let actions = "\(gokuMenu(app: appName, path: menuPath)) \(gokuSendUserCommand("deactivate"))"
+        let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+
+        if let bundleId = bundleId {
+          return """
+               [\(karabinerKey)
+                [\(actions) \(stateVars)]
+                {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+            """
+        } else {
+          return """
+               [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+            """
+        }
+      }
+    }
+
     // Default behavior for non-shortcut actions or complex shortcuts
     // Use stateid command with optional sticky flag
     let commandSuffix = hasStickyMode ? " sticky" : ""
@@ -2430,6 +2493,34 @@ final class Karabiner2Exporter {
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
       } else {
         return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+
+    // Check if this is a menu action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .menu {
+
+      let parts = action.value.components(separatedBy: " > ")
+      if parts.count >= 2 {
+        let appName = parts[0].trimmingCharacters(in: .whitespaces)
+        let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
+        var actions: String
+        let stateVars: String
+
+        if hasStickyMode {
+          actions = gokuMenu(app: appName, path: menuPath)
+          stateVars = "[\"leaderkey_sticky\" 1]"
+        } else {
+          actions = "\(gokuMenu(app: appName, path: menuPath)) \(gokuSendUserCommand("deactivate"))"
+          stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+        }
+
+        if let alias = appAlias {
+          return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+        } else {
+          return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+        }
       }
     }
 
