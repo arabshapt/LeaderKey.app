@@ -2114,10 +2114,10 @@ final class Karabiner2Exporter {
     let modeVars: String
     if appAlias != nil || bundleId == "__FALLBACK__" {
       // App-specific mode (including fallback)
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1] [\"leaderkey_global\" 0]"
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_appspecific\" 1] [\"leaderkey_global\" 0] [\"leaderkey_sticky\" 0]"
     } else {
       // Global mode
-      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_appspecific\" 0]"
+      modeVars = "[\"leaderkey_active\" 1] [\"leaderkey_global\" 1] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0]"
     }
 
     if let alias = appAlias {
@@ -2338,10 +2338,12 @@ final class Karabiner2Exporter {
       let stateVars: String
 
       if hasStickyMode {
+        // State vars before key events so Karabiner sets variables first
+        actions = "[\"leaderkey_sticky\" 1]"
         for shortcutKey in shortcutKeys {
-          actions += actions.isEmpty ? "\(shortcutKey)" : " \(shortcutKey)"
+          actions += " \(shortcutKey)"
         }
-        stateVars = "[\"leaderkey_sticky\" 1]"
+        stateVars = "" // already included in actions
       } else {
         actions = gokuSendUserCommand("deactivate")
         for shortcutKey in shortcutKeys {
