@@ -128,8 +128,6 @@ final class KarabinerUserCommandReceiver {
     }
   }
 
-  private static let seqdSocket = "/tmp/seqd.sock"
-
   private func handleV1Payload(type: String, dict: [String: Any]) {
     switch type {
     case "open_app":
@@ -137,14 +135,14 @@ final class KarabinerUserCommandReceiver {
         debugLog("[KarabinerUserCommandReceiver] v1 open_app missing 'app'")
         return
       }
-      sendToSeqd("OPEN_APP \(app)")
+      openApp(app)
 
     case "open_app_toggle":
       guard let app = dict["app"] as? String else {
         debugLog("[KarabinerUserCommandReceiver] v1 open_app_toggle missing 'app'")
         return
       }
-      sendToSeqd("OPEN_APP_TOGGLE \(app)")
+      openAppToggle(app)
 
     case "open":
       guard let target = dict["target"] as? String else {
@@ -157,13 +155,9 @@ final class KarabinerUserCommandReceiver {
       }
       let background = dict["background"] as? Bool ?? false
       DispatchQueue.main.async {
-        if background {
-          let config = NSWorkspace.OpenConfiguration()
-          config.activates = false
-          NSWorkspace.shared.open(url, configuration: config)
-        } else {
-          NSWorkspace.shared.open(url)
-        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = !background
+        NSWorkspace.shared.open(url, configuration: config)
       }
 
     case "open_with_app":
@@ -171,47 +165,79 @@ final class KarabinerUserCommandReceiver {
         debugLog("[KarabinerUserCommandReceiver] v1 open_with_app missing 'app' or 'target'")
         return
       }
-      sendToSeqd("OPEN_WITH_APP \(app):\(target)")
+      openWithApp(appPath: app, target: target)
 
     default:
       debugLog("[KarabinerUserCommandReceiver] Unknown v1 type: \(type)")
     }
   }
 
-  private func sendToSeqd(_ command: String) {
-    let path = Self.seqdSocket
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else {
-      debugLog("[KarabinerUserCommandReceiver] Failed to create socket for seqd")
-      return
-    }
-    defer { close(fd) }
+  // MARK: - Native app management
 
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = path.utf8CString
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-      let raw = UnsafeMutableRawPointer(ptr)
-      pathBytes.withUnsafeBufferPointer { buf in
-        raw.copyMemory(from: buf.baseAddress!, byteCount: min(buf.count, 104))
+  private static func resolveAppURL(_ app: String) -> URL? {
+    // Full path (e.g. /Applications/Safari.app)
+    if app.contains("/") {
+      let url = URL(fileURLWithPath: app)
+      if FileManager.default.fileExists(atPath: app) { return url }
+      return nil
+    }
+    // App name — search standard locations
+    for dir in ["/Applications", "/System/Applications", "/System/Applications/Utilities",
+                NSString("~/Applications").expandingTildeInPath] {
+      let path = "\(dir)/\(app).app"
+      if FileManager.default.fileExists(atPath: path) {
+        return URL(fileURLWithPath: path)
       }
     }
+    return nil
+  }
 
-    let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let connectResult = withUnsafePointer(to: &addr) { ptr in
-      ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-        Darwin.connect(fd, sockaddrPtr, addrLen)
-      }
-    }
-
-    guard connectResult == 0 else {
-      debugLog("[KarabinerUserCommandReceiver] Failed to connect to seqd at \(path)")
+  private func openApp(_ app: String) {
+    guard let appURL = Self.resolveAppURL(app) else {
+      debugLog("[KarabinerUserCommandReceiver] v1 open_app: cannot resolve '\(app)'")
       return
     }
+    DispatchQueue.main.async {
+      let config = NSWorkspace.OpenConfiguration()
+      NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+    }
+  }
 
-    let message = command + "\n"
-    message.utf8CString.withUnsafeBufferPointer { buf in
-      _ = write(fd, buf.baseAddress!, message.utf8.count)
+  private func openAppToggle(_ app: String) {
+    guard let appURL = Self.resolveAppURL(app) else {
+      debugLog("[KarabinerUserCommandReceiver] v1 open_app_toggle: cannot resolve '\(app)'")
+      return
+    }
+    DispatchQueue.main.async {
+      // If app is frontmost, hide it; otherwise open/activate it
+      if let frontApp = NSWorkspace.shared.frontmostApplication,
+         frontApp.bundleURL == appURL {
+        frontApp.hide()
+      } else {
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+      }
+    }
+  }
+
+  private func openWithApp(appPath: String, target: String) {
+    guard let appURL = Self.resolveAppURL(appPath) else {
+      debugLog("[KarabinerUserCommandReceiver] v1 open_with_app: cannot resolve app '\(appPath)'")
+      return
+    }
+    let targetURL: URL
+    if target.contains("://") {
+      guard let url = URL(string: target) else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open_with_app: invalid URL '\(target)'")
+        return
+      }
+      targetURL = url
+    } else {
+      targetURL = URL(fileURLWithPath: target)
+    }
+    DispatchQueue.main.async {
+      let config = NSWorkspace.OpenConfiguration()
+      NSWorkspace.shared.open([targetURL], withApplicationAt: appURL, configuration: config)
     }
   }
 
