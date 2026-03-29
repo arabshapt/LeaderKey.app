@@ -471,25 +471,27 @@ struct ActionRowState {
   var isTextEditorPresented: Bool
   var isUrlEditorPresented: Bool
   var isCommandEditorPresented: Bool
+  var isMenuEditorPresented: Bool
   var showingKeyReference: Bool
 
   var isAnyEditorPresented: Bool {
     isShortcutEditorPresented || isTextEditorPresented || isUrlEditorPresented
-      || isCommandEditorPresented
+      || isCommandEditorPresented || isMenuEditorPresented
   }
 
   init() {
-    self.keyInputValue = ""
-    self.valueInputValue = ""
-    self.labelInputValue = ""
-    self.isListening = false
-    self.wasPreviouslyListening = false
-    self.selectedType = .shortcut
-    self.isShortcutEditorPresented = false
-    self.isTextEditorPresented = false
-    self.isUrlEditorPresented = false
-    self.isCommandEditorPresented = false
-    self.showingKeyReference = false
+    keyInputValue = ""
+    valueInputValue = ""
+    labelInputValue = ""
+    isListening = false
+    wasPreviouslyListening = false
+    selectedType = .shortcut
+    isShortcutEditorPresented = false
+    isTextEditorPresented = false
+    isUrlEditorPresented = false
+    isCommandEditorPresented = false
+    isMenuEditorPresented = false
+    showingKeyReference = false
   }
 }
 
@@ -549,6 +551,7 @@ struct ActionRow: View {
           Text("Command").tag(Type.command)
           Text("Folder").tag(Type.folder)
           Text("Type Text").tag(Type.text)
+          Text("Menu").tag(Type.menu)
           Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
           Text("Macro").tag(Type.macro)
         }
@@ -760,6 +763,27 @@ struct ActionRow: View {
             }
             .padding(24)
             .frame(width: 480, height: 300)
+          }
+        case .menu:
+          Button {
+            state.isMenuEditorPresented = true
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "filemenu.and.selection")
+              Text(
+                state.valueInputValue.isEmpty
+                  ? "Edit menu…"
+                  : (state.valueInputValue.count > 30
+                    ? "\(state.valueInputValue.prefix(30))…" : state.valueInputValue))
+            }
+          }
+          .buttonStyle(.plain)
+          .sheet(isPresented: $state.isMenuEditorPresented) {
+            MenuActionEditor(
+              value: $state.valueInputValue,
+              isPresented: $state.isMenuEditorPresented,
+              onSave: { action.value = state.valueInputValue }
+            )
           }
         case .toggleStickyMode:
           Text("No value required")
@@ -1293,6 +1317,7 @@ struct MacroStepRow: View {
   @State private var isTextEditorPresented = false
   @State private var isUrlEditorPresented = false
   @State private var isCommandEditorPresented = false
+  @State private var isMenuEditorPresented = false
   @State private var showingKeyReference = false
 
   var body: some View {
@@ -1335,6 +1360,7 @@ struct MacroStepRow: View {
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
         Text("Type Text").tag(Type.text)
+        Text("Menu").tag(Type.menu)
       }
       .frame(width: 100)
       .labelsHidden()
@@ -1534,6 +1560,27 @@ struct MacroStepRow: View {
             .padding(24)
             .frame(width: 480, height: 300)
           }
+        case .menu:
+          Button {
+            isMenuEditorPresented = true
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "filemenu.and.selection")
+              Text(
+                valueInputValue.isEmpty
+                  ? "Edit menu…"
+                  : (valueInputValue.count > 30
+                    ? "\(valueInputValue.prefix(30))…" : valueInputValue))
+            }
+          }
+          .buttonStyle(.plain)
+          .sheet(isPresented: $isMenuEditorPresented) {
+            MenuActionEditor(
+              value: $valueInputValue,
+              isPresented: $isMenuEditorPresented,
+              onSave: { step.action.value = valueInputValue }
+            )
+          }
         case .toggleStickyMode:
           Text("No value required")
             .foregroundColor(.secondary)
@@ -1603,6 +1650,101 @@ struct MacroStepRow: View {
     }
     .onChange(of: step.action.value) { newValue in
       valueInputValue = newValue
+    }
+  }
+}
+
+// MARK: - Menu Action Editor
+
+struct MenuActionEditor: View {
+  @Binding var value: String
+  @Binding var isPresented: Bool
+  var onSave: () -> Void
+
+  @State private var selectedApp: String = ""
+  @State private var menuPath: String = ""
+  @State private var appNames: [String] = []
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Edit Menu Action")
+        .font(.title2)
+
+      // App picker — running apps + choose from disk
+      HStack {
+        Text("App:")
+          .frame(width: 60, alignment: .trailing)
+        Picker("", selection: $selectedApp) {
+          Text("Select app…").tag("")
+          ForEach(appNames, id: \.self) { name in
+            Text(name).tag(name)
+          }
+        }
+        .labelsHidden()
+        Button("Browse…") {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+          if panel.runModal() == .OK, let url = panel.url {
+            let appName = (url.lastPathComponent as NSString).deletingPathExtension
+            if !appNames.contains(appName) {
+              appNames.append(appName)
+              appNames.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            }
+            selectedApp = appName
+          }
+        }
+      }
+
+      // Menu path — manual entry
+      HStack {
+        Text("Menu:")
+          .frame(width: 60, alignment: .trailing)
+        TextField("e.g. File > Sync vault", text: $menuPath)
+          .textFieldStyle(.roundedBorder)
+      }
+
+      Text("Use > to separate menu levels, e.g. Git > Branches...")
+        .font(.footnote)
+        .foregroundColor(.secondary)
+
+      HStack {
+        Spacer()
+        Button("Cancel") {
+          isPresented = false
+        }
+        Button("Save") {
+          if !selectedApp.isEmpty && !menuPath.isEmpty {
+            value = "\(selectedApp) > \(menuPath)"
+          }
+          onSave()
+          isPresented = false
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(selectedApp.isEmpty || menuPath.isEmpty)
+      }
+    }
+    .padding(24)
+    .frame(width: 460)
+    .onAppear {
+      appNames = NSWorkspace.shared.runningApplications
+        .filter { $0.activationPolicy == .regular && $0.localizedName != nil }
+        .map { $0.localizedName! }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+      // Parse existing value
+      let parts = value.components(separatedBy: " > ")
+      if parts.count >= 2 {
+        let appName = parts[0].trimmingCharacters(in: .whitespaces)
+        menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
+        if !appNames.contains(appName) {
+          appNames.append(appName)
+          appNames.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
+        selectedApp = appName
+      }
     }
   }
 }

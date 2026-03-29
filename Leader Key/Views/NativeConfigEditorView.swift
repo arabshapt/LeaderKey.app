@@ -983,6 +983,7 @@ private struct ConfigInspectorView: View {
   @State private var keyValue: String = ""
   @State private var labelValue: String = ""
   @State private var valueValue: String = ""
+  @State private var isMenuEditorPresented: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -1183,6 +1184,7 @@ private struct ConfigInspectorView: View {
         Text("Command").tag(Type.command)
         Text("Folder").tag(Type.folder)
         Text("Type Text").tag(Type.text)
+        Text("Menu").tag(Type.menu)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
         Text("Macro").tag(Type.macro)
       }
@@ -1283,6 +1285,36 @@ private struct ConfigInspectorView: View {
       Text("No value required")
         .font(.caption)
         .foregroundColor(.secondary)
+    case .menu:
+      HStack(spacing: 8) {
+        Button {
+          isMenuEditorPresented = true
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "filemenu.and.selection")
+            Text(
+              action.value.isEmpty
+                ? "Edit menu…"
+                : (action.value.count > 30
+                  ? "\(action.value.prefix(30))…" : action.value))
+          }
+        }
+        .sheet(isPresented: $isMenuEditorPresented) {
+          MenuActionEditor(
+            value: Binding(
+              get: { valueValue },
+              set: { newValue in
+                valueValue = newValue
+                var updated = action
+                updated.value = newValue
+                session.updateSelectedAction(updated)
+              }
+            ),
+            isPresented: $isMenuEditorPresented,
+            onSave: {}
+          )
+        }
+      }
     case .macro:
       MacroEditorView(action: selectedActionBinding(fallback: action), path: session.path(for: action.id) ?? [])
     default:

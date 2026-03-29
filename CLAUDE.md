@@ -116,6 +116,14 @@ sock.close()
 printf 'OPEN_APP /System/Applications/Calculator.app\n' | nc -U /tmp/seqd.sock
 ```
 
+## Speed Optimization Patterns
+- **`send_user_command` over `shell_command`** — Karabiner's `send_user_command` uses an existing datagram socket (fire-and-forget, ~1ms). `shell_command` spawns a new process each time (~100-200ms). Always prefer `send_user_command` with v1 payloads for app/URL/menu actions
+- **`NSRunningApplication.activate()` over `NSWorkspace.openApplication`** — `activate()` is direct IPC to WindowServer (~1ms). `openApplication` goes through LaunchServices (~50ms). Use `activate()` as fast path for running apps, fall back to `openApplication` for cold launches
+- **App cache (`appCache`)** — `KarabinerUserCommandReceiver` caches `app string → (url, bundleId)` to avoid repeated FileManager + Bundle lookups. First call resolves, all subsequent are dictionary hits
+- **AX menu walking** — Use `AXUIElementPerformAction(kAXPressAction)` directly (non-visual). `AXPick` and `AXShowMenu` are slower alternatives. Descendant search (depth 6) handles inconsistent menu structures across apps
+- **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management commands
+- **Macro execution** — macros that use `menu` type go through in-process AX API calls, not shell spawns. Same for `application` (cached NSRunningApplication) and `url` (NSWorkspace)
+
 ## Common Gotchas
 - **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)
 - **Config caching** — `UserConfig.appConfigs` dict caches loaded configs. Call `reloadConfig()` to bust the cache
