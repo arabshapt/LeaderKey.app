@@ -1,124 +1,101 @@
-# Cleanup — Karabiner-only architecture
+# Consolidate export output paths to Leader Key directory
 
 ## Tasks
-- [x] Delete CGEventTap input method (files + references)
-- [x] Delete Karabiner v1 input method (file + references)
-- [x] Remove global shortcut registration
-- [x] Simplify to Karabiner 2.0 only
-- [x] Make stateid self-contained in AppDelegate
+- [x] Update `KarCompilerService.swift` — computed property using `Defaults[.configDir]/export/`
+- [x] Update `Karabiner2InputMethod.swift` — both Goku and kar outputDir paths
+- [x] Update `AppDelegate.swift` — state mappings path
+- [x] Update `AlternativeMappingsView.swift` — state mappings path
+- [x] Update `AdvancedPane.swift` — "Open Export Folder" button
 - [x] Build and verify
 
 ## Review
 
 ### Summary
-Refactored Leader Key to be a Karabiner Elements companion app by removing dead input methods, global shortcut registration, and making `stateid` the self-contained entry point for actions.
+Consolidated all generated export files from scattered locations (`~/.config/karabiner.edn.d/`, `~/.config/leaderkey/kar/`) into a single `{configDir}/export/` directory under the Leader Key config folder.
 
 ### Changes Made
-
-**Deleted files:**
-- `Leader Key/CGEventTapInputMethod.swift` — CGEventTap input method (~69 lines)
-- `Leader Key/DualEventTapManager.swift` — Dual event tap manager with failover (~353 lines)
-- `Leader Key/KarabinerInputMethod.swift` — Karabiner v1 integration (~149 lines)
-
-**AppDelegate.swift (~500+ lines removed):**
-- Removed `eventTapCallback` global function
-- Removed `globalCallbackStats`, `dualTapManager` properties
-- Removed CPU monitoring (`startCPUMonitoring`, `stopCPUMonitoring`, `checkCPULoad`, etc.)
-- Removed performance stats methods (`getCallbackPerformanceStats`, etc.)
-- Removed `KeyboardShortcutsView` struct and Shortcuts settings pane
-- Removed `cacheActivationShortcuts()` method (~48 lines)
-- Removed force reset shortcut check in `processKeyEvent`
-- Simplified `startEventTapMonitoring()` to directly create `Karabiner2InputMethod`
-- Simplified `stopEventTapMonitoring()` and health timer
-- Made `executeActionByStateId()` self-contained: uses `mapping.bundleId` to show window with correct app config before navigating groups or executing sticky actions
-
-**Defaults.swift:**
-- Reduced `InputMethodPreference` to single `.karabiner2` case
-
-**Settings/AdvancedPane.swift:**
-- Renamed section to "Karabiner Integration"
-- Removed input method picker and Karabiner v1 UI
-
-**Controller.swift:**
-- Removed Karabiner v1 `leader_mode` reset block
-
-**Other:**
-- Created `tasks/future-plans.md` for planned features (bidirectional converter, search keymaps, CLI extraction)
-- Updated `project.pbxproj` to remove deleted file references
-
-### Key Design Decisions
-- `stateid` is now self-contained: if the window isn't visible, it shows it with the right config before navigating groups or executing sticky-mode actions
-- Normal-mode actions execute directly without needing the window visible
-- `KeyboardShortcuts.Name` extension kept in Defaults.swift — the exporter's `resolveActivationShortcut()` still reads these values to generate Karabiner configs
-- Goku continues using `:shell` since it doesn't natively support `send_user_command`
+- **`KarCompilerService.swift`** — Changed `generatedConfigPath` to computed property using `Defaults[.configDir]/export/leaderkey-generated.config.ts`
+- **`Karabiner2InputMethod.swift`** — Updated both Goku EDN and kar TypeScript output dirs to `Defaults[.configDir]/export/`
+- **`AppDelegate.swift`** — State mappings load path updated to `Defaults[.configDir]/export/leaderkey-state-mappings.json`
+- **`AlternativeMappingsView.swift`** — Same state mappings path update
+- **`AdvancedPane.swift`** — Renamed button to "Open Export Folder", pointing to the export directory
 
 ---
 
-# Eliminate seqd dependency + v1 payload protocol
+# IntelliJ Plugin: Add Unix Domain Socket (UDS) Server
 
-## Tasks
-- [x] Add v1 structured payload handling to `KarabinerUserCommandReceiver`
-- [x] Replace shell commands in Goku exporter with `send_user_command` v1 payloads
-- [x] Handle `open_app`, `open_app_toggle`, `open`, `open_with_app` natively in Leader Key
-- [x] Remove all seqd socket forwarding code
-- [x] Add `background` flag support for URL opens (Raycast deep links)
-- [x] Fix sticky mode: add `["leaderkey_sticky" 0]` to activation rules
-- [x] Fix sticky-mode key ordering for Karabiner key repeat
-- [x] Optimize app activation with `NSRunningApplication.activate()` fast path
-- [x] Update CLAUDE.md with v1 protocol docs, testing commands, key repeat gotcha
-- [x] Build and verify
+Two-part project: (1) Add UDS listener to IntelliJ plugin, (2) Add `intellij` action type to Leader Key.
 
-## Review
+## Part 1: IntelliJ Plugin — UDS Server
 
-### Summary
-Eliminated the seqd daemon dependency by implementing native app management in Leader Key. Replaced all `shell_command` and `socket_command` based app/URL opening with Karabiner's `send_user_command` using structured v1 JSON payloads. This removes the need for seqd (which was causing 78% CPU via ScreenCaptureKit screen recording).
+### Tasks
+- [x] 1. Create `UnixSocketServer.kt` — UDS listener at `/tmp/intellij-leaderkey.sock`
+- [x] 2. Add `UnixSocketServerService` to `PluginStartup.kt`
+- [x] 3. Update `PluginStartup.kt` — start UDS server alongside HTTP server
+- [x] 4. Register service in `plugin.xml`
+- [x] 5. Build succeeds (requires Java 21: `JAVA_HOME=.../temurin-21.0.7 ./gradlew build`)
 
-### Changes Made
+## Part 2: Leader Key — `intellij` v1 payload type
 
-**`KarabinerUserCommandReceiver.swift`** — Native app management (~100 lines added, seqd code removed):
-- Added v1 payload routing (`handleV1Payload`) for `open_app`, `open_app_toggle`, `open`, `open_with_app`
-- `resolveAppURL()` — resolves app names/paths to URLs (searches /Applications, /System/Applications, ~/Applications)
-- `findRunningApp()` — finds running app by bundle ID or localized name
-- `openApp()` — fast path via `NSRunningApplication.activate()`, fallback to `NSWorkspace.openApplication`
-- `openAppToggle()` — toggle hide/activate for running apps, launch if not running
-- `openWithApp()` — opens files/URLs with specific app
-- Background URL opening via `NSWorkspace.OpenConfiguration.activates = false`
-- Removed `sendToSeqd()`, `seqdSocket` constant
+### Tasks
+- [x] 6. Add `case "intellij"` to `handleV1Payload` in `KarabinerUserCommandReceiver.swift`
+- [x] 7. Add `case intellij` to `Type` enum in `UserConfig.swift` (display name, icon)
+- [x] 8. Add `intellij` to `Controller.swift` action execution
+- [x] 9. Add `intellij` to `Karabiner2Exporter.swift` (Goku + kar export)
+- [x] 10. Add `intellij` to type pickers in ConfigEditorView + NativeConfigEditorView
+- [x] 11. Add `intellij` icon (hammer) to ActionIcon.swift
+- [x] 12. Build Leader Key — BUILD SUCCEEDED
 
-**`Karabiner2Exporter.swift`** — v1 payload helpers:
-- Replaced `gokuSocketCommand`/`karSocketCommand` with `gokuOpenApp`/`gokuOpen`/`karOpenApp`/`karOpen`
-- All app/URL actions now use `send_user_command` with v1 JSON payloads
-- Added `["leaderkey_sticky" 0]` to all activation manipulators
-- Fixed sticky-mode key ordering (key events last for Karabiner key repeat)
+## Design Notes
 
-**`CLAUDE.md`** — Documentation:
-- v1 payload protocol in Key Design Decisions
-- Manual testing commands for all v1 payload types
-- Key repeat gotcha: last event in `to` array gets repeat
-
----
-
-# Native menu item clicking (v1 payload)
-
-## Tasks
-- [x] Add `menu` case to `handleV1Payload` in `KarabinerUserCommandReceiver.swift`
-- [x] Implement `selectMenuItem` using AX APIs with seq's improvements (descendant search depth 6, description fallback, debug logging)
-- [x] Add `gokuMenu`/`karMenu` helpers to `Karabiner2Exporter.swift`
-- [x] Add `menu` action type to `Type` enum, Controller, exporter (Goku + kar), icon, display name
-- [x] Build and verify
-- [x] Update CLAUDE.md with menu testing command
+- **Socket path**: `/tmp/intellij-leaderkey.sock` — simple, predictable, no user-id complexity
+- **Protocol**: Newline-delimited JSON over stream socket (not datagram — JVM doesn't support `SOCK_DGRAM` UDS)
+- **Payload format**: `{"action":"ReformatCode"}` or `{"actions":"SaveAll,ReformatCode","delay":100}`
+- **Same as HTTP**: Reuses exact same request format the CustomHttpServer already parses
+- **HTTP stays**: UDS is an addition, not a replacement. CLI/scripts still use HTTP
+- **Fire-and-forget from Leader Key**: Connect → write JSON + newline → close. Don't wait for response
 
 ## Review
 
-Added native menu item clicking as a first-class action type in Leader Key.
+### Part 1: IntelliJ Plugin (3 files)
+- **`UnixSocketServer.kt`** (new) — UDS listener using `java.nio.channels.ServerSocketChannel` + `UnixDomainSocketAddress`. Accepts newline-delimited JSON, routes to `ActionExecutorService`, returns JSON response. 4-thread pool, daemon acceptor thread, cleans up `.sock` file on shutdown.
+- **`PluginStartup.kt`** — Added `UnixSocketServerService` (app-level service wrapper) and starts it alongside HTTP server.
+- **`plugin.xml`** — Registered `UnixSocketServerService`.
 
-**Value format**: `"AppName > Menu > Submenu > Item"` — first component is the app name, rest is the menu path.
+### Part 2: Leader Key (7 files)
+- **`KarabinerUserCommandReceiver.swift`** — Added `case "intellij"` to v1 handler + `sendToIntelliJSocket()` static method (fire-and-forget via `SOCK_STREAM` unix socket).
+- **`UserConfig.swift`** — Added `case intellij` to `Type` enum + display name "IntelliJ: {value}".
+- **`Controller.swift`** — Added `.intellij` case calling `sendToIntelliJSocket()`.
+- **`Karabiner2Exporter.swift`** — Added `gokuIntelliJ()`/`karIntelliJ()` helpers + `.intellij` case in kar mapping + both Goku export functions.
+- **`ActionIcon.swift`** — `hammer` SF Symbol for intellij actions.
+- **`ConfigEditorView.swift`** — Added "IntelliJ" to 2 type pickers (action row + macro step).
+- **`NativeConfigEditorView.swift`** — Added "IntelliJ" to type picker.
 
-**Example config**: `{"key": "b", "type": "menu", "value": "IntelliJ IDEA > Git > Branches...", "label": "Git Branches"}`
+### Data flow
+```
+Karabiner send_user_command → Leader Key socket → handleV1Payload("intellij")
+  → sendToIntelliJSocket() → /tmp/intellij-leaderkey.sock → UnixSocketServer
+    → ActionExecutorService.executeAction() → IntelliJ action runs
+```
 
-### Files changed:
-- **`UserConfig.swift`** — Added `case menu` to `Type` enum + display name (shows menu path without app name)
-- **`Controller.swift`** — Parses value, calls `KarabinerUserCommandReceiver.selectMenuItemDirectly()`
-- **`KarabinerUserCommandReceiver.swift`** — Added `selectMenuItemDirectly()` static entry point, v1 `menu` payload handling
-- **`Karabiner2Exporter.swift`** — Added `.menu` to both Goku and kar terminal action generators + kar mapping generator
-- **`ActionIcon.swift`** — `filemenu.and.selection` SF Symbol for menu actions
+### Testing
+```bash
+# Test IntelliJ UDS server directly (requires IntelliJ running with plugin)
+echo '{"action":"SaveAll"}' | nc -U /tmp/intellij-leaderkey.sock
+
+# Test via Leader Key v1 payload
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"intellij\",\"action\":\"SaveAll\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
+
+# Example config entry
+# {"key": "s", "type": "intellij", "value": "SaveAll", "label": "Save All"}
+# {"key": "f", "type": "intellij", "value": "ReformatCode", "label": "Reformat"}
+```
+
+### Build notes
+- IntelliJ plugin requires Java 21: `JAVA_HOME=.../temurin-21.0.7 ./gradlew build`
+- Leader Key builds normally with Xcode

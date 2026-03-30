@@ -25,7 +25,7 @@ Karabiner Elements (captures keys, detects frontmost app)
 - **Karabiner is single source of truth for app detection** — bundleId always comes from Karabiner's `activate {bundleId}` command. Never use `NSWorkspace.shared.frontmostApplication` for config loading — it can't detect overlay apps like Raycast
 - **stateid is self-contained** — `executeActionByStateId()` uses `mapping.bundleId` to show the window with the correct config if not already visible
 - **Two export backends** — Goku (EDN format) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`
-- **v1 payload protocol** — `KarabinerUserCommandReceiver` handles structured `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd. String payloads route to `KarabinerCommandRouter` as before
+- **v1 payload protocol** — `KarabinerUserCommandReceiver` handles structured `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd, `menu` → AX API, `intellij` → UDS socket at `/tmp/intellij-leaderkey.sock`. String payloads route to `KarabinerCommandRouter` as before
 - **Config merging** — app-specific configs are merged with fallback config via `mergeConfigWithFallback()`
 
 ### Config Files (in `~/Library/Application Support/Leader Key/`)
@@ -53,6 +53,36 @@ Karabiner Elements (captures keys, detects frontmost app)
 - **Testing**: Descriptive test names, XCTAssert* methods. Tests in `Leader KeyTests/`
 - **Access Control**: Use appropriate access modifiers (private, fileprivate, internal)
 - Follow Swift idioms and default formatting (4-space indentation, spaces around operators)
+
+## IntelliJ Integration (v1.3.0+)
+
+The `intellij` action type sends actions directly to IntelliJ via Unix Domain Socket — no HTTP, no shell spawn.
+
+**Socket path**: `/tmp/intellij-leaderkey.sock` (created by the IntelliJ plugin on startup)
+
+**Protocol**: Newline-delimited JSON over `SOCK_STREAM`. Same request format as the HTTP server.
+
+**Single action**: `{"action":"ReformatCode"}`
+**Multiple actions**: `{"actions":"SaveAll,ReformatCode","delay":100}` (delay is optional ms between actions)
+
+**Plugin location**: `~/personalProjects/intellijPlugin/`
+**Build**: `JAVA_HOME=.../temurin-21.0.7/Contents/Home ./gradlew build` (requires Java 21 — system Java 25 breaks Gradle)
+**Install**: Settings → Plugins → ⚙️ → Install Plugin from Disk → `build/distributions/intellij-action-executor-X.Y.Z.zip`
+
+**Config example**:
+```json
+{"key": "f", "type": "intellij", "value": "ReformatCode,OptimizeImports", "label": "Format"}
+```
+
+**Export**: Goku uses `gokuIntelliJ()`, kar uses `karIntelliJ()` — both generate `send_user_command` with `{v:1, type:"intellij", action:"..."}` payload.
+
+**Adding a new v1 payload type** (pattern to follow):
+1. Add `case "newtype"` to `handleV1Payload()` in `KarabinerUserCommandReceiver.swift`
+2. Add `case newtype` to `Type` enum in `UserConfig.swift` + display name
+3. Add `case .newtype` to `Controller.swift` `runAction()`
+4. Add `gokuNewtype()`/`karNewtype()` helpers + `.newtype` cases in `Karabiner2Exporter.swift` (2 Goku sections + 1 kar section)
+5. Add icon to `ActionIcon.swift`
+6. Add to type pickers in `ConfigEditorView.swift` (2 pickers) and `NativeConfigEditorView.swift` (1 picker)
 
 ## Manual Testing (v1 payload protocol)
 
@@ -114,6 +144,20 @@ sock.close()
 
 # Direct seqd test (bypasses Karabiner)
 printf 'OPEN_APP /System/Applications/Calculator.app\n' | nc -U /tmp/seqd.sock
+
+# IntelliJ single action via UDS (requires IntelliJ running with plugin v1.3.0+)
+echo '{"action":"SaveAll"}' | nc -U /tmp/intellij-leaderkey.sock
+
+# IntelliJ multiple actions via UDS
+echo '{"actions":"SaveAll,ReformatCode","delay":100}' | nc -U /tmp/intellij-leaderkey.sock
+
+# IntelliJ action via v1 payload (via Karabiner)
+python3 -c "
+import socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.sendto(b'{\"v\":1,\"type\":\"intellij\",\"action\":\"SaveAll\"}', '/Library/Application Support/org.pqrs/tmp/user/$(id -u)/user_command_receiver.sock')
+sock.close()
+"
 ```
 
 ## Speed Optimization Patterns
@@ -123,6 +167,7 @@ printf 'OPEN_APP /System/Applications/Calculator.app\n' | nc -U /tmp/seqd.sock
 - **AX menu walking** — Use `AXUIElementPerformAction(kAXPressAction)` directly (non-visual). `AXPick` and `AXShowMenu` are slower alternatives. Descendant search (depth 6) handles inconsistent menu structures across apps
 - **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management commands
 - **Macro execution** — macros that use `menu` type go through in-process AX API calls, not shell spawns. Same for `application` (cached NSRunningApplication) and `url` (NSWorkspace)
+- **IntelliJ UDS over HTTP** — `intellij` action type connects to `/tmp/intellij-leaderkey.sock` directly (~1ms). Eliminates HTTP handshake overhead of the old `curl localhost:63343` approach (~50ms). Use `SOCK_STREAM` (not `SOCK_DGRAM`) — JVM UDS only supports stream sockets
 
 ## Common Gotchas
 - **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)
@@ -130,3 +175,6 @@ printf 'OPEN_APP /System/Applications/Calculator.app\n' | nc -U /tmp/seqd.sock
 - **Shell command escaping** in Goku EDN requires two layers: shell escaping (`'\''`) then EDN escaping (`\\`, `\"`)
 - **State IDs** in `Karabiner2Exporter` — global starts at 1, fallback at 2, inactive is 0
 - **Karabiner key repeat** — Karabiner only allows key repeat for the **last** event in the `to` array. In sticky-mode shortcuts, always put key events (`:escape`, `:!Cz`, etc.) at the end and variable sets (`["leaderkey_sticky" 1]`) before them. Correct: `[["leaderkey_sticky" 1] :!Cz]`, wrong: `[:!Cz ["leaderkey_sticky" 1]]`
+- **IntelliJ plugin build requires Java 21** — System Java may be newer (25.x) which breaks the IntelliJ Gradle plugin. Use `JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build`
+- **IntelliJ UDS socket not present** = IntelliJ not running or plugin not loaded. `sendToIntelliJSocket()` fails silently (logs a warning) so Leader Key continues normally
+- **JVM UDS is stream-only** — Java's `UnixDomainSocketAddress` only supports `SOCK_STREAM`, not `SOCK_DGRAM`. Protocol must be newline-delimited (connect → write → read response → close). Leader Key uses fire-and-forget (no read)

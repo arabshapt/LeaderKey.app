@@ -174,6 +174,14 @@ final class KarabinerUserCommandReceiver {
       }
       selectMenuItem(app: app, path: path)
 
+    case "intellij":
+      guard let action = dict["action"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 intellij missing 'action'")
+        return
+      }
+      let delay = dict["delay"] as? Int
+      KarabinerUserCommandReceiver.sendToIntelliJSocket(action: action, delay: delay)
+
     default:
       debugLog("[KarabinerUserCommandReceiver] Unknown v1 type: \(type)")
     }
@@ -440,5 +448,72 @@ final class KarabinerUserCommandReceiver {
     }
 
     return addr
+  }
+
+  // MARK: - IntelliJ UDS communication
+
+  private static let intellijSocketPath = "/tmp/intellij-leaderkey.sock"
+
+  /// Send an action to IntelliJ via Unix Domain Socket (fire-and-forget).
+  /// Public so Controller can call it directly for the `intellij` action type.
+  ///
+  /// Value format:
+  ///   Single:   "ReformatCode"
+  ///   Multiple: "SaveAll,ReformatCode"
+  ///   Delay:    "SaveAll,ReformatCode|100"   (100ms between actions)
+  static func sendToIntelliJSocket(action: String, delay: Int? = nil) {
+    // Parse optional delay suffix: "SaveAll,ReformatCode|100"
+    let parts = action.components(separatedBy: "|")
+    let actionStr = parts[0]
+    let resolvedDelay: Int? = delay ?? (parts.count > 1 ? Int(parts[1].trimmingCharacters(in: .whitespaces)) : nil)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+      guard fd >= 0 else {
+        debugLog("[KarabinerUserCommandReceiver] intellij: socket() failed")
+        return
+      }
+      defer { close(fd) }
+
+      var addr = sockaddr_un()
+      addr.sun_family = sa_family_t(AF_UNIX)
+      let path = intellijSocketPath
+      let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
+      path.withCString { cString in
+        withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+          pathPtr.withMemoryRebound(to: CChar.self, capacity: maxLen) { charPtr in
+            strncpy(charPtr, cString, maxLen - 1)
+            charPtr[maxLen - 1] = 0
+          }
+        }
+      }
+
+      let connectResult = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+          Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+      }
+      guard connectResult == 0 else {
+        debugLog("[KarabinerUserCommandReceiver] intellij: connect() failed — is IntelliJ running?")
+        return
+      }
+
+      // Build JSON payload — same format the IntelliJ UDS server expects
+      var json: String
+      if actionStr.contains(",") {
+        json = "{\"actions\":\"\(actionStr)\""
+        if let d = resolvedDelay { json += ",\"delay\":\(d)" }
+        json += "}"
+      } else {
+        json = "{\"action\":\"\(actionStr)\"}"
+      }
+      json += "\n"
+
+      json.withCString { cString in
+        _ = Darwin.write(fd, cString, strlen(cString))
+      }
+
+      debugLog("[KarabinerUserCommandReceiver] intellij: sent '\(action)' to \(path)")
+    }
   }
 }

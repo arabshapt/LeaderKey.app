@@ -472,6 +472,9 @@ class Controller {
       let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
       // Send as v1 payload to the receiver for AX-based menu clicking
       KarabinerUserCommandReceiver.selectMenuItemDirectly(app: appName, path: menuPath)
+    case .intellij:
+      // Value is action ID(s) e.g. "ReformatCode" or "SaveAll,ReformatCode"
+      KarabinerUserCommandReceiver.sendToIntelliJSocket(action: action.value)
     default:
       debugLog("\(action.type) unknown")
     }

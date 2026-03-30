@@ -1185,6 +1185,7 @@ private struct ConfigInspectorView: View {
         Text("Folder").tag(Type.folder)
         Text("Type Text").tag(Type.text)
         Text("Menu").tag(Type.menu)
+        Text("IntelliJ").tag(Type.intellij)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
         Text("Macro").tag(Type.macro)
       }
@@ -1314,6 +1315,33 @@ private struct ConfigInspectorView: View {
             onSave: {}
           )
         }
+      }
+    case .intellij:
+      VStack(alignment: .leading, spacing: 6) {
+        TextEditor(
+          text: Binding(
+            get: { valueValue },
+            set: { newValue in
+              valueValue = newValue
+              var updated = action
+              updated.value = newValue
+              session.updateSelectedAction(updated)
+            }
+          )
+        )
+        .font(.system(.body, design: .monospaced))
+        .frame(minHeight: 60)
+        .overlay(
+          RoundedRectangle(cornerRadius: 8)
+            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        )
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Single action:  ReformatCode")
+          Text("Multiple:  SaveAll,ReformatCode")
+          Text("With delay (ms):  SaveAll,ReformatCode|100")
+        }
+        .font(.system(.caption, design: .monospaced))
+        .foregroundColor(.secondary)
       }
     case .macro:
       MacroEditorView(action: selectedActionBinding(fallback: action), path: session.path(for: action.id) ?? [])

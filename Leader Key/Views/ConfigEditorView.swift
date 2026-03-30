@@ -552,6 +552,7 @@ struct ActionRow: View {
           Text("Folder").tag(Type.folder)
           Text("Type Text").tag(Type.text)
           Text("Menu").tag(Type.menu)
+          Text("IntelliJ").tag(Type.intellij)
           Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
           Text("Macro").tag(Type.macro)
         }
@@ -1361,6 +1362,7 @@ struct MacroStepRow: View {
         Text("Folder").tag(Type.folder)
         Text("Type Text").tag(Type.text)
         Text("Menu").tag(Type.menu)
+        Text("IntelliJ").tag(Type.intellij)
       }
       .frame(width: 100)
       .labelsHidden()

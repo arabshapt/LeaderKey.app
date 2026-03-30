@@ -730,6 +730,7 @@ enum Type: String, Codable {
   case toggleStickyMode
   case macro
   case menu
+  case intellij
 }
 
 struct MacroStep: Codable, Equatable, Identifiable {
@@ -808,6 +809,8 @@ struct Action: Item, Codable, Equatable, Identifiable {
       // Value format: "App > Menu > Item" — show just the menu path
       let parts = value.components(separatedBy: " > ")
       return parts.count > 1 ? parts.dropFirst().joined(separator: " > ") : value
+    case .intellij:
+      return "IntelliJ: \(value)"
     default:
       return value
     }
