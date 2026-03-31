@@ -553,6 +553,7 @@ struct ActionRow: View {
           Text("Type Text").tag(Type.text)
           Text("Menu").tag(Type.menu)
           Text("IntelliJ").tag(Type.intellij)
+          Text("Keystroke").tag(Type.keystroke)
           Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
           Text("Macro").tag(Type.macro)
         }
@@ -786,6 +787,14 @@ struct ActionRow: View {
               onSave: { action.value = state.valueInputValue }
             )
           }
+        case .keystroke:
+          KeystrokeValueEditor(value: Binding(
+            get: { state.valueInputValue },
+            set: { newValue in
+              state.valueInputValue = newValue
+              action.value = newValue
+            }
+          ))
         case .toggleStickyMode:
           Text("No value required")
             .foregroundColor(.secondary)
@@ -1363,6 +1372,7 @@ struct MacroStepRow: View {
         Text("Type Text").tag(Type.text)
         Text("Menu").tag(Type.menu)
         Text("IntelliJ").tag(Type.intellij)
+        Text("Keystroke").tag(Type.keystroke)
       }
       .frame(width: 100)
       .labelsHidden()
@@ -1583,6 +1593,14 @@ struct MacroStepRow: View {
               onSave: { step.action.value = valueInputValue }
             )
           }
+        case .keystroke:
+          KeystrokeValueEditor(value: Binding(
+            get: { valueInputValue },
+            set: { newValue in
+              valueInputValue = newValue
+              step.action.value = newValue
+            }
+          ))
         case .toggleStickyMode:
           Text("No value required")
             .foregroundColor(.secondary)
@@ -1748,5 +1766,99 @@ struct MenuActionEditor: View {
         selectedApp = appName
       }
     }
+  }
+}
+
+/// Inline editor for keystroke action values: app picker + optional focus + shortcut text field.
+struct KeystrokeValueEditor: View {
+  @Binding var value: String
+  @State private var selectedApp: String = ""
+  @State private var spec: String = ""
+  @State private var focusTargetApp = false
+  @State private var appNames: [String] = []
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Picker("Target app:", selection: $selectedApp) {
+          Text("System-wide (frontmost)").tag("")
+          Divider()
+          ForEach(appNames, id: \.self) { name in
+            Text(name).tag(name)
+          }
+        }
+        .frame(width: 220)
+        .onChange(of: selectedApp) { newValue in
+          if newValue.isEmpty {
+            focusTargetApp = false
+          }
+          composeValue()
+        }
+
+        Button("Disk…") {
+          let panel = NSOpenPanel()
+          panel.allowedContentTypes = [.applicationBundle, .application]
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = true
+          panel.allowsMultipleSelection = false
+          panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+          if panel.runModal() == .OK, let url = panel.url {
+            let appName = url.deletingPathExtension().lastPathComponent
+            if !appNames.contains(appName) {
+              appNames.append(appName)
+              appNames.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            }
+            selectedApp = appName
+          }
+        }
+      }
+
+      Toggle("Focus target app before sending", isOn: $focusTargetApp)
+        .disabled(selectedApp.isEmpty)
+        .onChange(of: focusTargetApp) { _ in composeValue() }
+
+      HStack(spacing: 8) {
+        Text("Shortcut:")
+        TextField("e.g. Ct, CSf", text: $spec)
+          .font(.system(.body, design: .monospaced))
+          .frame(width: 120)
+          .onChange(of: spec) { _ in composeValue() }
+      }
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text("C=Cmd  T=Ctrl  O=Opt  S=Shift  F=Fn  then key name")
+        Text("Examples: Ct = Cmd+T, CSf = Cmd+Shift+F, escape, f1")
+        Text("Leave focus off to send to the running target app in the background.")
+      }
+      .font(.system(.caption, design: .monospaced))
+      .foregroundColor(.secondary)
+    }
+    .onAppear {
+      appNames = NSWorkspace.shared.runningApplications
+        .filter { $0.activationPolicy == .regular && $0.localizedName != nil }
+        .map { $0.localizedName! }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+      let keystrokeValue = KeystrokeActionValue.parse(value)
+      spec = keystrokeValue.spec
+      focusTargetApp = keystrokeValue.focusTargetApp
+
+      if let appName = keystrokeValue.app {
+        if !appNames.contains(appName) {
+          appNames.append(appName)
+          appNames.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
+        selectedApp = appName
+      }
+    }
+  }
+
+  private func composeValue() {
+    value = KeystrokeActionValue(
+      app: selectedApp.isEmpty ? nil : selectedApp,
+      spec: spec,
+      focusTargetApp: focusTargetApp
+    ).serialized
   }
 }

@@ -80,6 +80,11 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
         Image(systemName: "hammer")
           .foregroundStyle(.secondary)
           .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
+    case .keystroke:
+      return AnyView(
+        Image(systemName: "keyboard")
+          .foregroundStyle(.secondary)
+          .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
     default:
       return AnyView(
         Image(systemName: "questionmark")

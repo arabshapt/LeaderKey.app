@@ -731,6 +731,7 @@ enum Type: String, Codable {
   case macro
   case menu
   case intellij
+  case keystroke
 }
 
 struct MacroStep: Codable, Equatable, Identifiable {
@@ -811,6 +812,13 @@ struct Action: Item, Codable, Equatable, Identifiable {
       return parts.count > 1 ? parts.dropFirst().joined(separator: " > ") : value
     case .intellij:
       return "IntelliJ: \(value)"
+    case .keystroke:
+      let keystrokeValue = KeystrokeActionValue.parse(value)
+      if let app = keystrokeValue.app {
+        let suffix = keystrokeValue.focusTargetApp ? " (focus)" : ""
+        return "\(app): \(keystrokeValue.spec)\(suffix)"
+      }
+      return "Keystroke: \(keystrokeValue.spec)"
     default:
       return value
     }

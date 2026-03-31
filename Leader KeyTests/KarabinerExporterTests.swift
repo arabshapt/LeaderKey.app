@@ -63,4 +63,53 @@ class KarabinerExporterTests: XCTestCase {
         // Verify Explicit Background URL action
         XCTAssertTrue(edn.contains("open -g 'https://example.com/bg'"), "EDN should contain background open command for URL with activates=false")
     }
+
+    func testGenerateGokuEDNIncludesKeystrokePayloads() {
+        let config = UserConfig()
+
+        let targetedKeystroke = Action(
+            key: "k",
+            type: .keystroke,
+            label: "Targeted Keystroke",
+            value: "Google Chrome > Ct",
+            iconPath: nil,
+            activates: nil,
+            stickyMode: false,
+            macroSteps: nil
+        )
+
+        let systemWideKeystroke = Action(
+            key: "s",
+            type: .keystroke,
+            label: "System Keystroke",
+            value: "escape",
+            iconPath: nil,
+            activates: nil,
+            stickyMode: true,
+            macroSteps: nil
+        )
+
+        let focusedKeystroke = Action(
+            key: "f",
+            type: .keystroke,
+            label: "Focused Keystroke",
+            value: "Safari > [focus] > CSf",
+            iconPath: nil,
+            activates: nil,
+            stickyMode: false,
+            macroSteps: nil
+        )
+
+        config.root.actions = [
+            .action(targetedKeystroke),
+            .action(systemWideKeystroke),
+            .action(focusedKeystroke)
+        ]
+
+        let edn = Karabiner2Exporter.generateGokuEDN(from: config)
+
+        XCTAssertTrue(edn.contains(":type \"keystroke\" :app \"Google Chrome\" :spec \"Ct\""))
+        XCTAssertTrue(edn.contains(":type \"keystroke\" :spec \"escape\""))
+        XCTAssertTrue(edn.contains(":type \"keystroke\" :app \"Safari\" :focus true :spec \"CSf\""))
+    }
 }

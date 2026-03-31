@@ -22,7 +22,10 @@
       "Bash(find /Users/arabshaptukaev/personalProjects/LeaderKeyapp -name *.edn -o -name *.yml -o -name *.yaml)",
       "Bash(wc -l /Users/arabshaptukaev/personalProjects/intellijPlugin/src/main/kotlin/com/leaderkey/intellij/*.kt)",
       "Bash(./gradlew build:*)",
-      "Bash(JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build)"
+      "Bash(JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build)",
+      "Bash(find /Users/arabshaptukaev/personalProjects/nik/seq -name *.ts -path */kar/*)",
+      "Bash(cat:*)",
+      "Bash(swiftc /tmp/test_cgeventposttopid.swift)"
     ],
     "deny": []
   }

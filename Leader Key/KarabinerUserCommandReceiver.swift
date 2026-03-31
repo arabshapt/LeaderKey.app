@@ -182,6 +182,15 @@ final class KarabinerUserCommandReceiver {
       let delay = dict["delay"] as? Int
       KarabinerUserCommandReceiver.sendToIntelliJSocket(action: action, delay: delay)
 
+    case "keystroke":
+      guard let spec = dict["spec"] as? String else {
+        debugLog("[KarabinerUserCommandReceiver] v1 keystroke missing 'spec'")
+        return
+      }
+      let app = dict["app"] as? String
+      let focus = dict["focus"] as? Bool ?? false
+      KarabinerUserCommandReceiver.sendKeystroke(app: app, spec: spec, focusApp: focus)
+
     default:
       debugLog("[KarabinerUserCommandReceiver] Unknown v1 type: \(type)")
     }
@@ -189,19 +198,81 @@ final class KarabinerUserCommandReceiver {
 
   // MARK: - Native app management
 
-  /// Cache: app string → (appURL, bundleId). Avoids repeated FileManager + Bundle lookups.
-  private static var appCache: [String: (url: URL, bundleId: String)] = [:]
+  private struct AppCacheEntry {
+    var url: URL?
+    var bundleId: String?
+    var pid: pid_t?
+  }
+
+  private struct RunningAppLookup {
+    let runningApp: NSRunningApplication
+    let strategy: String
+  }
+
+  /// Cache: app string → resolved metadata for fast repeated lookup.
+  private static var appCache: [String: AppCacheEntry] = [:]
+  private static let appCacheLock = NSLock()
+
+  private static func appCacheEntry(for app: String) -> AppCacheEntry? {
+    appCacheLock.lock()
+    defer { appCacheLock.unlock() }
+    return appCache[app]
+  }
+
+  private static func updateAppCache(_ app: String, mutate: (inout AppCacheEntry) -> Void) {
+    appCacheLock.lock()
+    defer { appCacheLock.unlock() }
+
+    var entry = appCache[app] ?? AppCacheEntry()
+    mutate(&entry)
+    appCache[app] = entry
+  }
+
+  private static func normalizedAppName(_ app: String) -> String {
+    (app as NSString)
+      .lastPathComponent
+      .replacingOccurrences(of: ".app", with: "")
+  }
+
+  private static func updateCacheFromRunningApp(_ app: String, runningApp: NSRunningApplication) {
+    updateAppCache(app) { entry in
+      if let bundleURL = runningApp.bundleURL {
+        entry.url = bundleURL
+      }
+      if let bundleIdentifier = runningApp.bundleIdentifier {
+        entry.bundleId = bundleIdentifier
+      }
+      entry.pid = runningApp.processIdentifier
+    }
+  }
+
+  private static func isValidCachedPID(
+    _ runningApp: NSRunningApplication, cachedBundleId: String?, expectedAppName: String
+  ) -> Bool {
+    if let cachedBundleId, !cachedBundleId.isEmpty {
+      return runningApp.bundleIdentifier == cachedBundleId
+    }
+
+    return runningApp.localizedName == expectedAppName
+  }
 
   private static func resolveApp(_ app: String) -> (url: URL, bundleId: String)? {
-    if let cached = appCache[app] { return cached }
+    if let cached = appCacheEntry(for: app),
+       let url = cached.url,
+       let bundleId = cached.bundleId {
+      return (url: url, bundleId: bundleId)
+    }
 
     guard let url = resolveAppURL(app) else { return nil }
     guard let bundle = Bundle(url: url),
           let bundleId = bundle.bundleIdentifier else { return nil }
 
-    let entry = (url: url, bundleId: bundleId)
-    appCache[app] = entry
-    return entry
+    updateAppCache(app) { entry in
+      entry.url = url
+      entry.bundleId = bundleId
+    }
+
+    return (url: url, bundleId: bundleId)
   }
 
   private static func resolveAppURL(_ app: String) -> URL? {
@@ -222,14 +293,38 @@ final class KarabinerUserCommandReceiver {
     return nil
   }
 
-  /// Find a running app using cached bundle ID for instant lookup
-  private static func findRunningApp(_ app: String) -> NSRunningApplication? {
-    if let resolved = resolveApp(app) {
-      return NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first
+  /// Find a running app using seq-style lookup order: cached PID, cached bundle ID, then name scan.
+  private static func findRunningAppLookup(_ app: String) -> RunningAppLookup? {
+    let expectedAppName = normalizedAppName(app)
+    let cached = appCacheEntry(for: app)
+
+    if let cachedPID = cached?.pid,
+       cachedPID > 0,
+       let runningApp = NSWorkspace.shared.runningApplications.first(where: {
+         $0.processIdentifier == cachedPID
+       }),
+       isValidCachedPID(runningApp, cachedBundleId: cached?.bundleId, expectedAppName: expectedAppName) {
+      updateCacheFromRunningApp(app, runningApp: runningApp)
+      return RunningAppLookup(runningApp: runningApp, strategy: "cached_pid")
     }
-    // Fallback: try app name match
-    let name = (app as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
-    return NSWorkspace.shared.runningApplications.first { $0.localizedName == name }
+
+    if let cachedBundleId = cached?.bundleId,
+       !cachedBundleId.isEmpty,
+       let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: cachedBundleId).first {
+      updateCacheFromRunningApp(app, runningApp: runningApp)
+      return RunningAppLookup(runningApp: runningApp, strategy: "cached_bundle")
+    }
+
+    if let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == expectedAppName }) {
+      updateCacheFromRunningApp(app, runningApp: runningApp)
+      return RunningAppLookup(runningApp: runningApp, strategy: "name_scan")
+    }
+
+    return nil
+  }
+
+  private static func findRunningApp(_ app: String) -> NSRunningApplication? {
+    findRunningAppLookup(app)?.runningApp
   }
 
   private func openApp(_ app: String) {
@@ -238,12 +333,10 @@ final class KarabinerUserCommandReceiver {
       return
     }
     DispatchQueue.main.async {
-      // Fast path: activate directly if already running (cached bundle ID lookup)
-      if let running = NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first {
+      if let running = Self.findRunningApp(app) {
         running.activate()
         return
       }
-      // Slow path: launch via LaunchServices
       let config = NSWorkspace.OpenConfiguration()
       NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
     }
@@ -255,7 +348,7 @@ final class KarabinerUserCommandReceiver {
       return
     }
     DispatchQueue.main.async {
-      if let running = NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first {
+      if let running = Self.findRunningApp(app) {
         if running.isActive {
           running.hide()
         } else {
@@ -301,17 +394,12 @@ final class KarabinerUserCommandReceiver {
   }
 
   private static func selectMenuItemImpl(app appName: String, path: String) {
-    // Find running app PID — use cache for bundle ID lookup
     let pid: pid_t
     if let running = Self.findRunningApp(appName) {
       pid = running.processIdentifier
     } else {
-      // Fallback: match by localized name
-      guard let running = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == appName }) else {
-        debugLog("[menu] app not running: \(appName)")
-        return
-      }
-      pid = running.processIdentifier
+      debugLog("[menu] app not running: \(appName)")
+      return
     }
 
     // Parse menu path: supports ">" and "/" delimiters
@@ -514,6 +602,107 @@ final class KarabinerUserCommandReceiver {
       }
 
       debugLog("[KarabinerUserCommandReceiver] intellij: sent '\(action)' to \(path)")
+    }
+  }
+
+  // MARK: - Keystroke simulation (CGEventPostToPid)
+
+  #if DEBUG
+    private static func formatTimingMilliseconds(_ nanoseconds: UInt64) -> String {
+      String(format: "%.3f", Double(nanoseconds) / 1_000_000)
+    }
+  #endif
+
+  private static func postKeystroke(
+    keyDown: CGEvent, keyUp: CGEvent, to runningApp: NSRunningApplication
+  ) -> pid_t {
+    let pid = runningApp.processIdentifier
+    keyDown.postToPid(pid)
+    keyUp.postToPid(pid)
+    return pid
+  }
+
+  private static func activateRunningAppAsync(_ runningApp: NSRunningApplication) {
+    DispatchQueue.main.async {
+      _ = runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    }
+  }
+
+  /// Send a keystroke to a specific app (by PID) or system-wide.
+  /// Uses CGEvent.postToPid for background injection when app is specified.
+  static func sendKeystroke(app appName: String?, spec: String, focusApp: Bool = false) {
+    guard let (keyCode, flags) = CompactShortcut.parse(spec) else {
+      debugLog("[KarabinerUserCommandReceiver] keystroke: invalid spec '\(spec)'")
+      return
+    }
+
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+      debugLog("[KarabinerUserCommandReceiver] keystroke: failed to create CGEvent")
+      return
+    }
+
+    keyDown.flags = flags
+    keyUp.flags = flags
+
+    #if DEBUG
+      let totalStart = DispatchTime.now().uptimeNanoseconds
+    #endif
+
+    if let appName = appName {
+      #if DEBUG
+        let resolveStart = DispatchTime.now().uptimeNanoseconds
+      #endif
+
+      if let lookup = findRunningAppLookup(appName) {
+        #if DEBUG
+          let resolveDuration = DispatchTime.now().uptimeNanoseconds - resolveStart
+          let postStart = DispatchTime.now().uptimeNanoseconds
+        #endif
+
+        let pid = postKeystroke(keyDown: keyDown, keyUp: keyUp, to: lookup.runningApp)
+        if focusApp {
+          activateRunningAppAsync(lookup.runningApp)
+        }
+
+        #if DEBUG
+          let postDuration = DispatchTime.now().uptimeNanoseconds - postStart
+          let totalDuration = DispatchTime.now().uptimeNanoseconds - totalStart
+          debugLog(
+            "[KarabinerUserCommandReceiver] keystroke: sent '\(spec)' to \(appName) (pid \(pid)) mode=\(lookup.strategy) focus=\(focusApp) resolve_ms=\(formatTimingMilliseconds(resolveDuration)) post_ms=\(formatTimingMilliseconds(postDuration)) total_ms=\(formatTimingMilliseconds(totalDuration))"
+          )
+        #else
+          debugLog("[KarabinerUserCommandReceiver] keystroke: sent '\(spec)' to \(appName) (pid \(pid)) focus=\(focusApp)")
+        #endif
+      } else {
+        #if DEBUG
+          let resolveDuration = DispatchTime.now().uptimeNanoseconds - resolveStart
+          let totalDuration = DispatchTime.now().uptimeNanoseconds - totalStart
+          debugLog(
+            "[KarabinerUserCommandReceiver] keystroke: app '\(appName)' not running mode=unresolved focus=\(focusApp) resolve_ms=\(formatTimingMilliseconds(resolveDuration)) total_ms=\(formatTimingMilliseconds(totalDuration))"
+          )
+        #else
+          debugLog("[KarabinerUserCommandReceiver] keystroke: app '\(appName)' not running focus=\(focusApp)")
+        #endif
+      }
+    } else {
+      #if DEBUG
+        let postStart = DispatchTime.now().uptimeNanoseconds
+      #endif
+
+      keyDown.post(tap: .cghidEventTap)
+      keyUp.post(tap: .cghidEventTap)
+
+      #if DEBUG
+        let postDuration = DispatchTime.now().uptimeNanoseconds - postStart
+        let totalDuration = DispatchTime.now().uptimeNanoseconds - totalStart
+        debugLog(
+          "[KarabinerUserCommandReceiver] keystroke: sent '\(spec)' system-wide mode=system_wide post_ms=\(formatTimingMilliseconds(postDuration)) total_ms=\(formatTimingMilliseconds(totalDuration))"
+        )
+      #else
+        debugLog("[KarabinerUserCommandReceiver] keystroke: sent '\(spec)' system-wide")
+      #endif
     }
   }
 }

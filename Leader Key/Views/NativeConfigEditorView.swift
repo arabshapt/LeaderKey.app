@@ -1186,6 +1186,7 @@ private struct ConfigInspectorView: View {
         Text("Type Text").tag(Type.text)
         Text("Menu").tag(Type.menu)
         Text("IntelliJ").tag(Type.intellij)
+        Text("Keystroke").tag(Type.keystroke)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
         Text("Macro").tag(Type.macro)
       }
@@ -1343,6 +1344,16 @@ private struct ConfigInspectorView: View {
         .font(.system(.caption, design: .monospaced))
         .foregroundColor(.secondary)
       }
+    case .keystroke:
+      KeystrokeValueEditor(value: Binding(
+        get: { valueValue },
+        set: { newValue in
+          valueValue = newValue
+          var updated = action
+          updated.value = newValue
+          session.updateSelectedAction(updated)
+        }
+      ))
     case .macro:
       MacroEditorView(action: selectedActionBinding(fallback: action), path: session.path(for: action.id) ?? [])
     default:

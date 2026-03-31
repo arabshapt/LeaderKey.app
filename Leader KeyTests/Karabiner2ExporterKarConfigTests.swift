@@ -50,6 +50,96 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertEqual(try encoder.encode(first.stateMappings), try encoder.encode(second.stateMappings))
   }
 
+  func testGenerateKarConfigEncodesKeystrokePayloadsAndStickyBehavior() throws {
+    let config = UserConfig()
+    let targetedAction = Action(
+      key: "k",
+      type: .keystroke,
+      label: "Targeted Keystroke",
+      value: "Google Chrome > Ct",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+    let focusedAction = Action(
+      key: "f",
+      type: .keystroke,
+      label: "Focused Keystroke",
+      value: "Safari > [focus] > CSf",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+    let stickyAction = Action(
+      key: "s",
+      type: .keystroke,
+      label: "Sticky Keystroke",
+      value: "escape",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: true,
+      macroSteps: nil
+    )
+
+    config.root.actions = [.action(targetedAction), .action(focusedAction), .action(stickyAction)]
+
+    let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let parsed = try parseConfigTS(result.configTS)
+
+    let rules = try XCTUnwrap(parsed["rules"] as? [[String: Any]])
+    let allMappings = rules.flatMap { ($0["mappings"] as? [[String: Any]]) ?? [] }
+
+    let targetedMapping = try XCTUnwrap(allMappings.first(where: { mapping in
+      fromKeyCode(in: mapping) == "k"
+        && structuredPayloads(mapping: mapping).contains(where: {
+          ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "Ct"
+        })
+    }))
+    let targetedPayload = try XCTUnwrap(
+      structuredPayloads(mapping: targetedMapping).first(where: {
+        ($0["type"] as? String) == "keystroke"
+      }))
+    XCTAssertEqual(targetedPayload["v"] as? Int, 1)
+    XCTAssertEqual(targetedPayload["app"] as? String, "Google Chrome")
+    XCTAssertEqual(targetedPayload["spec"] as? String, "Ct")
+    XCTAssertNil(targetedPayload["focus"])
+    XCTAssertTrue(hasSendUserCommand(mapping: targetedMapping, prefix: "deactivate"))
+    XCTAssertTrue(hasSetVariable(mapping: targetedMapping, name: "leader_state", value: 0))
+
+    let focusedMapping = try XCTUnwrap(allMappings.first(where: { mapping in
+      fromKeyCode(in: mapping) == "f"
+        && structuredPayloads(mapping: mapping).contains(where: {
+          ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "CSf"
+        })
+    }))
+    let focusedPayload = try XCTUnwrap(
+      structuredPayloads(mapping: focusedMapping).first(where: {
+        ($0["type"] as? String) == "keystroke"
+      }))
+    XCTAssertEqual(focusedPayload["v"] as? Int, 1)
+    XCTAssertEqual(focusedPayload["app"] as? String, "Safari")
+    XCTAssertEqual(focusedPayload["spec"] as? String, "CSf")
+    XCTAssertEqual(focusedPayload["focus"] as? Bool, true)
+
+    let stickyMapping = try XCTUnwrap(allMappings.first(where: { mapping in
+      fromKeyCode(in: mapping) == "s"
+        && structuredPayloads(mapping: mapping).contains(where: {
+          ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "escape"
+        })
+    }))
+    let stickyPayload = try XCTUnwrap(
+      structuredPayloads(mapping: stickyMapping).first(where: {
+        ($0["type"] as? String) == "keystroke"
+      }))
+    XCTAssertEqual(stickyPayload["v"] as? Int, 1)
+    XCTAssertNil(stickyPayload["app"])
+    XCTAssertEqual(stickyPayload["spec"] as? String, "escape")
+    XCTAssertTrue(hasSetVariable(mapping: stickyMapping, name: "leaderkey_sticky", value: 1))
+    XCTAssertFalse(hasSendUserCommand(mapping: stickyMapping, prefix: "deactivate"))
+  }
+
   private func makeSampleConfig() -> UserConfig {
     let config = UserConfig()
 
@@ -117,6 +207,21 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
 
     return payloads
+  }
+
+  private func structuredPayloads(mapping: [String: Any]) -> [[String: Any]] {
+    let events = (mapping["to"] as? [Any]) ?? []
+    return events.compactMap { event in
+      guard
+        let eventObject = event as? [String: Any],
+        let commandObject = eventObject["send_user_command"] as? [String: Any],
+        let payload = commandObject["payload"] as? [String: Any]
+      else {
+        return nil
+      }
+
+      return payload
+    }
   }
 
   private func fromKeyCode(in mapping: [String: Any]) -> String? {

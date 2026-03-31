@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		115AA5BF2DA521C600C17E18 /* ActionIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 115AA5BE2DA521C200C17E18 /* ActionIcon.swift */; };
 		115AA5C22DA546D500C17E18 /* SymbolPicker in Frameworks */ = {isa = PBXBuildFile; productRef = 115AA5C12DA546D500C17E18 /* SymbolPicker */; };
+		11F0B4A32E7C111100A1B2C3 /* CompactShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F0B4A42E7C111100A1B2C3 /* CompactShortcut.swift */; };
+		11F0B4A52E7C111100A1B2C3 /* CompactShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F0B4A62E7C111100A1B2C3 /* CompactShortcutTests.swift */; };
 		130196C62D73B3DE0093148B /* Breadcrumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130196C52D73B3DC0093148B /* Breadcrumbs.swift */; };
 		13080407B1A7D62ED7F8C9EB /* KarabinerCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */; };
 		2609991E2E15B62D00CCC8DD /* SearchPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2609991D2E15B62D00CCC8DD /* SearchPane.swift */; };
@@ -102,6 +104,8 @@
 		0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerCommandRouter.swift; sourceTree = "<group>"; };
 		0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerExporterTests.swift; sourceTree = "<group>"; };
 		115AA5BE2DA521C200C17E18 /* ActionIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionIcon.swift; sourceTree = "<group>"; };
+		11F0B4A42E7C111100A1B2C3 /* CompactShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactShortcut.swift; sourceTree = "<group>"; };
+		11F0B4A62E7C111100A1B2C3 /* CompactShortcutTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompactShortcutTests.swift; sourceTree = "<group>"; };
 		130196C52D73B3DC0093148B /* Breadcrumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Breadcrumbs.swift; sourceTree = "<group>"; };
 		2609991D2E15B62D00CCC8DD /* SearchPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPane.swift; sourceTree = "<group>"; };
 		260999212E19593800CCC8DD /* ViewSizeCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewSizeCache.swift; sourceTree = "<group>"; };
@@ -265,6 +269,7 @@
 				42F4CDCE2D46E2B300D0DD76 /* Cheatsheet.swift */,
 				426E625A2D2E6A98009FD2F2 /* CommandRunner.swift */,
 				427C181B2BD314B500955B98 /* Constants.swift */,
+				11F0B4A42E7C111100A1B2C3 /* CompactShortcut.swift */,
 				427C18272BD31E2E00955B98 /* Controller.swift */,
 				427C184C2BD65C5C00955B98 /* Defaults.swift */,
 				42DFCD712D5B7D46002EA111 /* Events.swift */,
@@ -314,6 +319,7 @@
 			children = (
 				42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */,
 				427C17FC2BD311B500955B98 /* UserConfigTests.swift */,
+				11F0B4A62E7C111100A1B2C3 /* CompactShortcutTests.swift */,
 				0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */,
 				A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */,
 				058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */,
@@ -562,6 +568,7 @@
 				427C18382BD3262100955B98 /* VisualEffectBackground.swift in Sources */,
 				42B21FBC2D67566100F4A2C7 /* Alerts.swift in Sources */,
 				427C183B2BD329F900955B98 /* UserConfig.swift in Sources */,
+				11F0B4A32E7C111100A1B2C3 /* CompactShortcut.swift in Sources */,
 				427C18542BD6E59300955B98 /* NSWindow+Animations.swift in Sources */,
 				130196C62D73B3DE0093148B /* Breadcrumbs.swift in Sources */,
 				423632262D68CDBB00878D92 /* Mini.swift in Sources */,
@@ -590,6 +597,7 @@
 			files = (
 				42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */,
 				427C17FD2BD311B500955B98 /* UserConfigTests.swift in Sources */,
+				11F0B4A52E7C111100A1B2C3 /* CompactShortcutTests.swift in Sources */,
 				526B4503A36B284D4B6B1D80 /* KarabinerExporterTests.swift in Sources */,
 				13080407B1A7D62ED7F8C9EB /* KarabinerCommandRouterTests.swift in Sources */,
 				E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */,

@@ -480,6 +480,13 @@ final class Karabiner2Exporter {
     let node: StateNode
   }
 
+  private static func terminalActionHasStickyMode(for node: StateNode) -> Bool {
+    if case .action(let action) = node.item {
+      return node.parentGroupHasStickyMode || action.stickyMode == true
+    }
+    return node.parentGroupHasStickyMode
+  }
+
   private static func generateKarModeRules(
     from nodes: [StateNode],
     descriptionBase: String,
@@ -514,7 +521,7 @@ final class Karabiner2Exporter {
         }
         terminalActions[parentStateId]?[key] = KarTerminalAction(
           terminalStateId: node.stateId,
-          hasStickyMode: node.parentGroupHasStickyMode,
+          hasStickyMode: terminalActionHasStickyMode(for: node),
           node: node
         )
       } else {
@@ -825,6 +832,37 @@ final class Karabiner2Exporter {
           ]
         ]
 
+      case .keystroke:
+        let keystrokeValue = KeystrokeActionValue.parse(action.value)
+        if hasStickyMode {
+          return [
+            "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+            "to": [
+              karKeystroke(
+                app: keystrokeValue.app,
+                spec: keystrokeValue.spec,
+                focusApp: keystrokeValue.focusTargetApp
+              ),
+              karSetVariable(name: "leaderkey_sticky", value: 1)
+            ]
+          ]
+        }
+        return [
+          "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+          "to": [
+            karKeystroke(
+              app: keystrokeValue.app,
+              spec: keystrokeValue.spec,
+              focusApp: keystrokeValue.focusTargetApp
+            ),
+            karSendUserCommand("deactivate"),
+            karSetVariable(name: "leaderkey_active", value: 0),
+            karSetVariable(name: "leaderkey_global", value: 0),
+            karSetVariable(name: "leaderkey_appspecific", value: 0),
+            karSetVariable(name: "leader_state", value: inactiveStateId)
+          ]
+        ]
+
       case .command:
         let shellInvocation = buildShellInvocation(action.value)
         let shellCommand = hasStickyMode ? shellInvocation : "\(shellInvocation) &"
@@ -963,6 +1001,25 @@ final class Karabiner2Exporter {
   /// Generate kar JSON for send_user_command with v1 intellij payload
   private static func karIntelliJ(action: String) -> [String: Any] {
     ["send_user_command": ["payload": ["v": 1, "type": "intellij", "action": action]]]
+  }
+
+  /// Generate Goku EDN for send_user_command with v1 keystroke payload
+  private static func gokuKeystroke(app: String?, spec: String, focusApp: Bool = false) -> String {
+    if let app = app {
+      if focusApp {
+        return "{:send_user_command {:payload {:v 1 :type \"keystroke\" :app \"\(app)\" :focus true :spec \"\(spec)\"}}}"
+      }
+      return "{:send_user_command {:payload {:v 1 :type \"keystroke\" :app \"\(app)\" :spec \"\(spec)\"}}}"
+    }
+    return "{:send_user_command {:payload {:v 1 :type \"keystroke\" :spec \"\(spec)\"}}}"
+  }
+
+  /// Generate kar JSON for send_user_command with v1 keystroke payload
+  private static func karKeystroke(app: String?, spec: String, focusApp: Bool = false) -> [String: Any] {
+    var payload: [String: Any] = ["v": 1, "type": "keystroke", "spec": spec]
+    if let app = app { payload["app"] = app }
+    if app != nil && focusApp { payload["focus"] = true }
+    return ["send_user_command": ["payload": payload]]
   }
 
   private static func karSetVariable(name: String, value: Any) -> [String: Any] {
@@ -1558,7 +1615,12 @@ final class Karabiner2Exporter {
         // Convert each key in path to Karabiner notation for CLI commands
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
+        terminalActions[parentStateId]?[key] = (
+          path: pathString,
+          terminalStateId: node.stateId,
+          hasStickyMode: terminalActionHasStickyMode(for: node),
+          node: node
+        )
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -1651,7 +1713,12 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
+        terminalActions[parentStateId]?[key] = (
+          path: pathString,
+          terminalStateId: node.stateId,
+          hasStickyMode: terminalActionHasStickyMode(for: node),
+          node: node
+        )
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -1822,7 +1889,12 @@ final class Karabiner2Exporter {
         
         let karabinerPath = node.originalPath.map { convertToKarabinerKey($0) }
         let pathString = karabinerPath.joined(separator: " ")
-        terminalActions[parentStateId]?[key] = (path: pathString, terminalStateId: node.stateId, hasStickyMode: node.parentGroupHasStickyMode, node: node)
+        terminalActions[parentStateId]?[key] = (
+          path: pathString,
+          terminalStateId: node.stateId,
+          hasStickyMode: terminalActionHasStickyMode(for: node),
+          node: node
+        )
       } else {
         if stateTransitions[parentStateId] == nil {
           stateTransitions[parentStateId] = [:]
@@ -2057,6 +2129,30 @@ final class Karabiner2Exporter {
        action.type == .intellij {
 
       let actions = "\(gokuIntelliJ(action: action.value)) \(gokuSendUserCommand("deactivate"))"
+      let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
+
+      if let bundleId = bundleId {
+        return """
+             [\(karabinerKey)
+              [\(actions) \(stateVars)]
+              {:conditions [[:frontmost_application_is ["\(bundleId)"]] [\"leader_state\" \(fromState)]]}]
+          """
+      } else {
+        return """
+             [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]
+          """
+      }
+    }
+
+    // Check if this is a keystroke action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .keystroke {
+
+      let keystrokeValue = KeystrokeActionValue.parse(action.value)
+
+      let actions =
+        "\(gokuKeystroke(app: keystrokeValue.app, spec: keystrokeValue.spec, focusApp: keystrokeValue.focusTargetApp)) \(gokuSendUserCommand("deactivate"))"
       let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
 
       if let bundleId = bundleId {
@@ -2590,6 +2686,36 @@ final class Karabiner2Exporter {
         stateVars = "[\"leaderkey_sticky\" 1]"
       } else {
         actions = "\(gokuIntelliJ(action: action.value)) \(gokuSendUserCommand("deactivate"))"
+        stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
+      }
+
+      if let alias = appAlias {
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [:\(alias) [\"leader_state\" \(fromState)]]]"
+      } else {
+        return "   [\(karabinerKey) [\(actions) \(stateVars)] [\"leader_state\" \(fromState)]]"
+      }
+    }
+
+    // Check if this is a keystroke action that can be executed directly
+    if let node = node,
+       case .action(let action) = node.item,
+       action.type == .keystroke {
+
+      let keystrokeValue = KeystrokeActionValue.parse(action.value)
+
+      var actions: String
+      let stateVars: String
+
+      if hasStickyMode {
+        actions = gokuKeystroke(
+          app: keystrokeValue.app,
+          spec: keystrokeValue.spec,
+          focusApp: keystrokeValue.focusTargetApp
+        )
+        stateVars = "[\"leaderkey_sticky\" 1]"
+      } else {
+        actions =
+          "\(gokuKeystroke(app: keystrokeValue.app, spec: keystrokeValue.spec, focusApp: keystrokeValue.focusTargetApp)) \(gokuSendUserCommand("deactivate"))"
         stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
       }
 
