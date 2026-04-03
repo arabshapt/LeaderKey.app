@@ -10,6 +10,7 @@ import {
 import {
   appendChildToGroup,
   createItemAtPath,
+  materializeRecordToConfigItem,
   type CachePayload,
   findInstalledApps,
   insertSiblingAfter,
@@ -21,7 +22,12 @@ import {
 import { useEffect, useState } from "react";
 
 import { rebuildIndex } from "./cache.js";
-import { emptyFormState, encodeKeystrokeRawValue, recordToFormState, type ItemFormState } from "./form-utils.js";
+import {
+  emptyFormState,
+  encodeKeystrokeRawValue,
+  recordToFormState,
+  type ItemFormState,
+} from "./form-utils.js";
 
 type EditorMode = "append-child" | "create-at-path" | "create-sibling" | "edit-source" | "override-in-effective-config";
 
@@ -40,17 +46,21 @@ interface SaveResultContext {
 interface RecordEditorFormProps {
   createAtPath?: PathCreationTarget;
   configDirectory: string;
+  initialFormState?: ItemFormState;
   initialType?: ConfigItem["type"];
   mode: EditorMode;
   onDidSave?: (payload: CachePayload, context: SaveResultContext) => Promise<void> | void;
+  preserveItem?: ConfigItem;
   targetRecord?: FlatIndexRecord;
   title: string;
 }
 
-function formStateToItem(state: ItemFormState): ConfigItem {
+function formStateToItem(state: ItemFormState, preserveItem?: ConfigItem): ConfigItem {
   if (state.type === "group") {
+    const preservedGroup = preserveItem?.type === "group" ? preserveItem : undefined;
     return {
-      actions: [],
+      actions: preservedGroup?.actions ?? [],
+      iconPath: preservedGroup?.iconPath,
       key: state.key.trim(),
       label: state.label.trim() || undefined,
       stickyMode: state.stickyMode || undefined,
@@ -58,8 +68,10 @@ function formStateToItem(state: ItemFormState): ConfigItem {
     };
   }
 
+  const preservedAction = preserveItem?.type === state.type ? preserveItem : undefined;
   const baseItem = {
     activates: state.type === "url" ? state.activates : undefined,
+    iconPath: preservedAction?.iconPath,
     key: state.key.trim(),
     label: state.label.trim() || undefined,
     stickyMode: state.stickyMode || undefined,
@@ -78,7 +90,11 @@ function formStateToItem(state: ItemFormState): ConfigItem {
     case "keystroke":
       return { ...baseItem, value: encodeKeystrokeRawValue(state.keystroke) };
     case "macro":
-      return { ...baseItem, macroSteps: [], value: "" };
+      return {
+        ...baseItem,
+        macroSteps: preservedAction?.type === "macro" ? preservedAction.macroSteps ?? [] : [],
+        value: preservedAction?.type === "macro" ? preservedAction.value : "",
+      };
     case "menu":
       return { ...baseItem, value: state.menuValue.trim() };
     case "shortcut":
@@ -117,8 +133,16 @@ function validateItem(item: ConfigItem): string | undefined {
 }
 
 export function RecordEditorForm(props: RecordEditorFormProps) {
-  const { configDirectory, createAtPath, initialType, mode, targetRecord, title } = props;
+  const { configDirectory, createAtPath, initialFormState, initialType, mode, preserveItem: initialPreserveItem, targetRecord, title } = props;
   const [formState, setFormState] = useState<ItemFormState>(() => {
+    if (initialFormState) {
+      const nextState = structuredClone(initialFormState);
+      if (mode === "create-at-path" && createAtPath?.suggestedKey && !nextState.key.trim()) {
+        nextState.key = createAtPath.suggestedKey;
+      }
+      return nextState;
+    }
+
     if (mode === "edit-source" || mode === "override-in-effective-config") {
       if (!targetRecord) {
         throw new Error("RecordEditorForm requires a targetRecord in edit modes.");
@@ -132,6 +156,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
     return nextState;
   });
+  const [preservedItem, setPreservedItem] = useState<ConfigItem | undefined>(initialPreserveItem);
   const [installedApps, setInstalledApps] = useState<Array<{ bundlePath: string; name: string }>>([]);
   const [isSaving, setIsSaving] = useState(false);
   const { pop } = useNavigation();
@@ -148,8 +173,38 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     };
   }, []);
 
+  useEffect(() => {
+    setPreservedItem(initialPreserveItem);
+  }, [initialPreserveItem]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!targetRecord) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    void materializeRecordToConfigItem(targetRecord)
+      .then((item) => {
+        if (isMounted) {
+          setPreservedItem(item);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setPreservedItem(initialPreserveItem);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialPreserveItem, targetRecord]);
+
   async function handleSubmit(): Promise<void> {
-    const nextItem = formStateToItem(formState);
+    const nextItem = formStateToItem(formState, preservedItem);
     const validationError = validateItem(nextItem);
     if (validationError) {
       await showToast({ style: Toast.Style.Failure, title: validationError });

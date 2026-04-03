@@ -189,7 +189,7 @@ private struct OpacityPane: View {
 }
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSocketServerDelegate {
   // --- Properties ---
   var controller: Controller!
   let statusItem = StatusItem()
@@ -203,6 +203,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   private var actionCache: [Int32: Action] = [:]  // Cache stateId -> Action for efficient lookup
   private var stateMappingsLastLoaded: Date?
   private var cancellables = Set<AnyCancellable>()
+  private let controlSocketServer = UnixSocketServer.shared
+  private let exportRefreshQueue = DispatchQueue(label: "com.leaderkey.export-refresh")
+  private var isExportRefreshInFlight = false
+  private var hasPendingExportRefresh = false
 
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
@@ -308,6 +312,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       }
     }.store(in: &cancellables)
 
+    controlSocketServer.delegate = self
+    if controlSocketServer.start() {
+      debugLog("[AppDelegate] Started app control socket")
+    } else {
+      debugLog("[AppDelegate] Failed to start app control socket")
+    }
+
     // Setup background services and UI elements
     setupFileMonitor()  // Defined in private extension
     setupStatusItem()  // Defined in private extension
@@ -374,6 +385,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
   func applicationWillTerminate(_ notification: Notification) {
     print("[AppDelegate] applicationWillTerminate: Stopping event tap and saving config...")
     stopEventTapMonitoring()  // Defined in Event Tap Handling extension
+    controlSocketServer.stop()
     config.saveCurrentlyEditingConfig()  // Save any unsaved changes from the settings pane
     stateRecoveryTimer?.invalidate()  // Stop state recovery timer
     inputMethodHealthTimer?.invalidate()  // Stop input method health timer
@@ -1116,69 +1128,69 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
   }
 }
 
-// MARK: - URL Scheme Handling
+// MARK: - External Config Apply
 extension AppDelegate {
   private func applyExternalConfigChanges(trigger: String) {
     print("[AppDelegate] applyExternalConfigChanges: trigger=\(trigger)")
     config.reloadConfig()
-    Events.send(.didSaveConfig)
+  }
+}
+
+// MARK: - Unix Socket Delegate
+extension AppDelegate {
+  private func recordSocketTransportState(_ state: Int32) {
+    (currentInputMethod as? Karabiner2InputMethod)?.recordTransportState(state)
   }
 
-  // Handles opening the app via leaderkey:// URLs
-  func application(_ application: NSApplication, open urls: [URL]) {
-    print("[AppDelegate] application:open:urls: Received URL(s): \(urls.map { $0.absoluteString })")
-    for url in urls { handleURL(url) }
+  func unixSocketServerDidReceiveActivation(bundleId: String?) {
+    debugLog("[AppDelegate] Control socket activation, bundleId: \(bundleId ?? "nil")")
+    recordSocketTransportState(1)
+    inputMethodDidReceiveActivation(bundleId: bundleId)
   }
 
-  private func handleURL(_ url: URL) {
-    print("[AppDelegate] handleURL: Processing URL: \(url.absoluteString)")
-    guard url.scheme == "leaderkey" else {
-      print("[AppDelegate] handleURL: Ignoring URL with incorrect scheme.")
-      return
-    }
-    if url.host == "reload-config" || url.host == "apply-config" {
-      print("[AppDelegate] handleURL: Applying config from external trigger.")
-      applyExternalConfigChanges(trigger: "url:\(url.host ?? "unknown")")
-      return
-    }
-
-    // Show the window for interactive URL actions
-    show()
-    if url.host == "navigate",  // Expecting leaderkey://navigate?keys=a,b,c
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      let queryItems = components.queryItems,
-      let keysParam = queryItems.first(where: { $0.name == "keys" })?.value
-    {
-      let keys = keysParam.split(separator: ",").map(String.init)
-      print("[AppDelegate] handleURL: Navigating with keys: \(keys)")
-      processKeys(keys)  // Process the sequence provided in the URL
-    } else {
-      print("[AppDelegate] handleURL: URL host is not 'navigate' or keys parameter is missing.")
-    }
+  func unixSocketServerDidReceiveApplyConfig() {
+    debugLog("[AppDelegate] Control socket apply-config")
+    inputMethodDidReceiveApplyConfig()
   }
 
-  // Processes a sequence of keys provided, typically from a URL scheme
-  private func processKeys(_ keys: [String]) {
-    guard !keys.isEmpty else {
-      print("[AppDelegate] processKeys: No keys to process.")
-      return
-    }
-    // Handle the first key immediately
-    print("[AppDelegate] processKeys: Handling key '\(keys[0])'")
-    controller.handleKey(keys[0])
-    // Handle subsequent keys with a slight delay between each to simulate typing
-    if keys.count > 1 {
-      let remainingKeys = Array(keys.dropFirst())
-      var delayMs = 100  // Initial delay for the second key
-      for key in remainingKeys {
-        print("[AppDelegate] processKeys: Scheduling key '\(key)' with delay \(delayMs)ms.")
-        delay(delayMs) { [weak self] in
-          print("[AppDelegate] processKeys: Handling delayed key '\(key)'")
-          self?.controller.handleKey(key)
-        }
-        delayMs += 100  // Increase delay for subsequent keys
-      }
-    }
+  func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+    debugLog("[AppDelegate] Control socket key: \(keyCode), modifiers: \(modifiers)")
+    inputMethodDidReceiveKey(keyCode, modifiers: modifiers)
+  }
+
+  func unixSocketServerDidReceiveDeactivation() {
+    debugLog("[AppDelegate] Control socket deactivation")
+    recordSocketTransportState(0)
+    inputMethodDidReceiveDeactivation()
+  }
+
+  func unixSocketServerDidReceiveSettings() {
+    debugLog("[AppDelegate] Control socket settings")
+    inputMethodDidReceiveSettings()
+  }
+
+  func unixSocketServerDidReceiveSequence(_ sequence: String) {
+    debugLog("[AppDelegate] Control socket sequence: \(sequence)")
+    recordSocketTransportState(0)
+    inputMethodDidReceiveSequence(sequence)
+  }
+
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
+    debugLog("[AppDelegate] Control socket state ID: \(stateId), sticky: \(sticky)")
+    recordSocketTransportState(0)
+    inputMethodDidReceiveStateId(stateId, sticky: sticky)
+  }
+
+  func unixSocketServerDidReceiveShake() {
+    debugLog("[AppDelegate] Control socket shake")
+    inputMethodDidReceiveShake()
+  }
+
+  func unixSocketServerRequestState() -> [String: Any] {
+    var state = inputMethodDidRequestState()
+    state["currentState"] = (currentInputMethod as? Karabiner2InputMethod)?.transportState ?? 0
+    state["mode"] = currentInputMethod is Karabiner2InputMethod ? "karabiner2" : "app_socket"
+    return state
   }
 }
 
@@ -2780,17 +2792,43 @@ extension AppDelegate {
   }
   
   private func refreshStateMappingsIfNeeded() {
-    // Only refresh if we're using Karabiner2 input method
-    guard Defaults[.inputMethodPreference] == .karabiner2,
-          let karabiner2Method = currentInputMethod as? Karabiner2InputMethod else {
+    guard Defaults[.inputMethodPreference] == .karabiner2 else {
       return
     }
 
+    exportRefreshQueue.async { [weak self] in
+      guard let self else { return }
+
+      if self.isExportRefreshInFlight {
+        self.hasPendingExportRefresh = true
+        debugLog("[AppDelegate] Export refresh already running; coalescing request")
+        return
+      }
+
+      self.isExportRefreshInFlight = true
+      self.runExportRefresh()
+    }
+  }
+
+  private func runExportRefresh() {
     debugLog("[AppDelegate] Refreshing state mappings after config change")
-    DispatchQueue.global(qos: .utility).async { [weak self] in
-      karabiner2Method.exportCurrentConfiguration()
-      DispatchQueue.main.async {
-        self?.loadStateMappings()
+    let karabiner2Method = (currentInputMethod as? Karabiner2InputMethod) ?? Karabiner2InputMethod()
+    karabiner2Method.exportCurrentConfiguration()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.loadStateMappings()
+    }
+
+    exportRefreshQueue.async { [weak self] in
+      guard let self else { return }
+
+      self.isExportRefreshInFlight = false
+
+      if self.hasPendingExportRefresh {
+        self.hasPendingExportRefresh = false
+        self.isExportRefreshInFlight = true
+        debugLog("[AppDelegate] Running coalesced export refresh")
+        self.runExportRefresh()
       }
     }
   }

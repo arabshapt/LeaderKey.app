@@ -42,16 +42,13 @@ final class Karabiner2InputMethod: InputMethod {
   func start(with delegate: InputMethodDelegate) -> Bool {
     self.delegate = delegate
 
-    socketServer.delegate = self
-    userCommandReceiver.delegate = self
-
-    let socketSuccess = socketServer.start()
+    userCommandReceiver.delegate = delegate as? UnixSocketServerDelegate
     let receiverSuccess = userCommandReceiver.start()
 
-    if socketSuccess {
+    if receiverSuccess {
       debugLog("[Karabiner2InputMethod] Started successfully")
-      if !receiverSuccess {
-        debugLog("[Karabiner2InputMethod] User command receiver did not start - falling back to legacy socket transport")
+      if !isActive {
+        debugLog("[Karabiner2InputMethod] Warning: app-level control socket is not active")
       }
       DispatchQueue.global(qos: .utility).async { [weak self] in
         self?.exportCurrentConfiguration()
@@ -60,12 +57,11 @@ final class Karabiner2InputMethod: InputMethod {
       debugLog("[Karabiner2InputMethod] Failed to start")
     }
 
-    return socketSuccess
+    return receiverSuccess
   }
 
   func stop() {
     userCommandReceiver.stop()
-    socketServer.stop()
     currentState = 0
     debugLog("[Karabiner2InputMethod] Stopped")
   }
@@ -84,6 +80,14 @@ final class Karabiner2InputMethod: InputMethod {
       Current State: \(currentState)
       Mode: Karabiner 2.0 (State Machine)
       """
+  }
+
+  var transportState: Int32 {
+    currentState
+  }
+
+  func recordTransportState(_ state: Int32) {
+    currentState = state
   }
 
   func exportCurrentConfiguration() {
@@ -331,58 +335,5 @@ final class Karabiner2InputMethod: InputMethod {
       debugLog("[Karabiner2InputMethod] Failed to check karabiner_grabber: \(error)")
       return false
     }
-  }
-}
-
-extension Karabiner2InputMethod: UnixSocketServerDelegate {
-  func unixSocketServerDidReceiveActivation(bundleId: String?) {
-    debugLog("[Karabiner2InputMethod] Received activation, bundleId: \(bundleId ?? "nil")")
-    currentState = 1
-    delegate?.inputMethodDidReceiveActivation(bundleId: bundleId)
-  }
-
-  func unixSocketServerDidReceiveApplyConfig() {
-    debugLog("[Karabiner2InputMethod] Received apply-config")
-    delegate?.inputMethodDidReceiveApplyConfig()
-  }
-
-  func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
-    debugLog("[Karabiner2InputMethod] Received key: \(keyCode), modifiers: \(modifiers)")
-    delegate?.inputMethodDidReceiveKey(keyCode, modifiers: modifiers)
-  }
-
-  func unixSocketServerDidReceiveDeactivation() {
-    debugLog("[Karabiner2InputMethod] Received deactivation")
-    currentState = 0
-    delegate?.inputMethodDidReceiveDeactivation()
-  }
-
-  func unixSocketServerDidReceiveSettings() {
-    debugLog("[Karabiner2InputMethod] Received settings command")
-    delegate?.inputMethodDidReceiveSettings()
-  }
-
-  func unixSocketServerDidReceiveSequence(_ sequence: String) {
-    debugLog("[Karabiner2InputMethod] Received sequence: \(sequence)")
-    currentState = 0
-    delegate?.inputMethodDidReceiveSequence(sequence)
-  }
-  
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
-    debugLog("[Karabiner2InputMethod] Received state ID: \(stateId), sticky: \(sticky)")
-    currentState = 0
-    delegate?.inputMethodDidReceiveStateId(stateId, sticky: sticky)
-  }
-
-  func unixSocketServerDidReceiveShake() {
-    debugLog("[Karabiner2InputMethod] Received shake command")
-    delegate?.inputMethodDidReceiveShake()
-  }
-
-  func unixSocketServerRequestState() -> [String: Any] {
-    var state = delegate?.inputMethodDidRequestState() ?? ["active": false]
-    state["currentState"] = currentState
-    state["mode"] = "karabiner2"
-    return state
   }
 }

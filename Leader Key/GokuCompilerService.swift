@@ -51,8 +51,10 @@ final class GokuCompilerService {
     let resolved = resolvedGokuBinaryPath()
     let process = Process()
     process.launchPath = resolved
-    process.arguments = ["-c", configPath]
-    process.environment = enrichedEnvironment()
+    process.arguments = []
+    var environment = enrichedEnvironment()
+    environment["GOKU_EDN_CONFIG_FILE"] = configPath
+    process.environment = environment
 
     let stdout = Pipe()
     let stderr = Pipe()
@@ -66,13 +68,26 @@ final class GokuCompilerService {
       return GokuCompilerResult(success: false, message: "Failed to run goku: \(error)")
     }
 
+    let stdoutOutput = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let stderrOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+
     guard process.terminationStatus == 0 else {
-      let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      return GokuCompilerResult(success: false, message: "goku failed: \(errorOutput)")
+      let trimmedStdout = stdoutOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+      let trimmedStderr = stderrOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+      let detail = [
+        !trimmedStdout.isEmpty ? "stdout=\(trimmedStdout)" : nil,
+        !trimmedStderr.isEmpty ? "stderr=\(trimmedStderr)" : nil,
+      ]
+      .compactMap { $0 }
+      .joined(separator: "; ")
+
+      let message = detail.isEmpty
+        ? "goku failed with exit code \(process.terminationStatus) using \(resolved)"
+        : "goku failed with exit code \(process.terminationStatus) using \(resolved): \(detail)"
+      return GokuCompilerResult(success: false, message: message)
     }
 
-    let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = stdoutOutput.trimmingCharacters(in: .whitespacesAndNewlines)
     let message = trimmed.isEmpty ? "goku compiled karabiner.edn" : trimmed
     return GokuCompilerResult(success: true, message: message)
   }

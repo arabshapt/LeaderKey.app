@@ -9,8 +9,10 @@ import {
   List,
   Toast,
   showToast,
+  useNavigation,
 } from "@raycast/api";
 import {
+  createItemAtPath,
   deleteRecord,
   locateNodeInFile,
   openInEditor,
@@ -23,9 +25,11 @@ import {
 import { useEffect, useState } from "react";
 
 import { rebuildIndex } from "./cache.js";
+import { copyRecordToInternalClipboard, readInternalClipboard } from "./clipboard.js";
 import { recordListItemDetail, RecordDetailView } from "./detail.js";
 import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js";
 import { RecordEditorForm } from "./editor-form.js";
+import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 
 interface ConfigNodesListProps {
@@ -133,6 +137,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
   const [selectedId, setSelectedId] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
+  const { push } = useNavigation();
 
   useEffect(() => {
     setPayload(initialPayload);
@@ -159,6 +164,110 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
   function handleDidMutate(nextPayload: CachePayload): void {
     setPayload(nextPayload);
     onDidMutate(nextPayload);
+  }
+
+  function conflictForPaste(parentKeyPath: string[], key: string): FlatIndexRecord | undefined {
+    return payload.records.find((record) =>
+      record.effectiveConfigDisplayName === configDisplayName &&
+      record.key === key &&
+      effectivePathMatches(record.parentEffectiveKeyPath, parentKeyPath)
+    );
+  }
+
+  async function handleCopy(record: FlatIndexRecord): Promise<void> {
+    try {
+      const clipboardPayload = await copyRecordToInternalClipboard(record);
+      await showToast({
+        style: Toast.Style.Success,
+        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        message: clipboardPayload.sourceDisplayLabel,
+      });
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Copy failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handlePasteIntoGroup(targetConfigPath: string, parentKeyPath: string[], groupLabel: string): Promise<void> {
+    try {
+      const clipboardPayload = await readInternalClipboard();
+      if (!clipboardPayload) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Clipboard is empty",
+          message: "Copy an action or group in the Leader Key Raycast extension first.",
+        });
+        return;
+      }
+
+      const key = clipboardPayload.item.key?.trim();
+      if (!key) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Clipboard item has no key",
+        });
+        return;
+      }
+
+      const conflict = conflictForPaste(parentKeyPath, key);
+      if (conflict) {
+        push(
+          <RecordEditorForm
+            configDirectory={configDirectory}
+            createAtPath={{
+              configDisplayName,
+              configPath: targetConfigPath,
+              parentKeyPath,
+              suggestedKey: key,
+            }}
+            initialFormState={itemToFormState(clipboardPayload.item)}
+            initialType={clipboardPayload.item.type}
+            mode="create-at-path"
+            onDidSave={async (nextPayload) => {
+              handleDidMutate(nextPayload);
+            }}
+            preserveItem={clipboardPayload.item}
+            title={`Resolve Key Conflict in ${groupLabel}`}
+          />,
+        );
+        return;
+      }
+
+      await createItemAtPath(targetConfigPath, parentKeyPath, clipboardPayload.item);
+
+      let syncError: unknown;
+      try {
+        await triggerLeaderKeyConfigReload(configDirectory);
+      } catch (error) {
+        syncError = error;
+      }
+
+      const nextPayload = await rebuildIndex(configDirectory);
+      handleDidMutate(nextPayload);
+
+      await showToast(
+        syncError
+          ? {
+              style: Toast.Style.Failure,
+              title: "Pasted item, but Leader Key sync failed",
+              message: syncError instanceof Error ? syncError.message : String(syncError),
+            }
+          : {
+              style: Toast.Style.Success,
+              title: clipboardPayload.kind === "group" ? "Pasted group" : "Pasted action",
+              message: `Added to ${groupLabel}`,
+            },
+      );
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Paste failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async function handleDelete(record: FlatIndexRecord): Promise<void> {
@@ -274,6 +383,16 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
           title="Add First Group"
         />
         <Action
+          icon={Icon.Clipboard}
+          onAction={() => void handlePasteIntoGroup(
+            contextRecord.effectiveConfigPath,
+            contextRecord.effectiveKeyPath,
+            contextRecord.displayLabel,
+          )}
+          shortcut={{ modifiers: ["cmd"], key: "v" }}
+          title="Paste into This Group"
+        />
+        <Action
           icon={Icon.Code}
           onAction={() => void openRecordInEditor(contextRecord, preferredEditor)}
           title="Open in Editor"
@@ -352,6 +471,23 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   shortcut={showDetailsShortcut}
                   target={<RecordDetailView record={record} />}
                   title="Show Details"
+                />
+                <Action
+                  icon={Icon.CopyClipboard}
+                  onAction={() => void handleCopy(record)}
+                  shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                />
+                <Action
+                  icon={Icon.Clipboard}
+                  onAction={() =>
+                    void handlePasteIntoGroup(
+                      contextRecord?.effectiveConfigPath ?? record.effectiveConfigPath,
+                      contextRecord?.effectiveKeyPath ?? parentEffectiveKeyPath,
+                      contextRecord?.displayLabel ?? configDisplayName,
+                    )}
+                  shortcut={{ modifiers: ["cmd"], key: "v" }}
+                  title="Paste into Current Group"
                 />
                 <Action
                   icon={Icon.Code}

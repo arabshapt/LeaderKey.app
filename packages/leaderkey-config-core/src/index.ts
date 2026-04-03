@@ -10,7 +10,7 @@ export { findInstalledApps } from "./apps.js";
 export { configFingerprint, discoverLiveConfigs, loadGroupFromFile, loadMetadata, saveMetadata } from "./discovery.js";
 export { buildEditorCommand, openInEditor } from "./editors.js";
 export { buildCachePayload, recordsForConfig } from "./indexing.js";
-export { buildLeaderKeyReloadCommand, triggerLeaderKeyConfigReload } from "./leaderkey.js";
+export { triggerLeaderKeyConfigReload } from "./leaderkey.js";
 export {
   createItemAtPath,
   appendChildToGroup,
@@ -18,6 +18,7 @@ export {
   deleteRecord,
   insertSiblingAfter,
   locateNodeInFile,
+  materializeRecordToConfigItem,
   updateRecord,
 } from "./mutations.js";
 export { normalizeLabelsInConfigDirectory } from "./normalize.js";

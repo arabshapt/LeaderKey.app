@@ -381,6 +381,12 @@ export async function createItemAtPath(
   return configFilePath;
 }
 
+export async function materializeRecordToConfigItem(record: FlatIndexRecord): Promise<ConfigItem> {
+  const root = await loadGroupFromFile(record.sourceConfigPath);
+  const item = getMutableItemAtPath(root, record.sourceNodePath);
+  return cloneConfigItem(item);
+}
+
 export function cloneRecordToConfigItem(record: FlatIndexRecord): ConfigItem {
   if (record.kind === "group") {
     return {

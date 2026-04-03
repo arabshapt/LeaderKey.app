@@ -1,15 +1,30 @@
-import { Action, ActionPanel, Icon, Keyboard, List, Toast, environment, showToast } from "@raycast/api";
 import {
+  Action,
+  ActionPanel,
+  Alert,
+  confirmAlert,
+  Icon,
+  Keyboard,
+  List,
+  Toast,
+  environment,
+  showToast,
+} from "@raycast/api";
+import {
+  deleteRecord,
   locateNodeInFile,
   openInEditor,
   searchRecords,
+  triggerLeaderKeyConfigReload,
   type CachePayload,
   type FlatIndexRecord,
 } from "@leaderkey/config-core";
 import { useEffect, useState } from "react";
 
 import { loadIndex } from "./cache.js";
+import { rebuildIndex } from "./cache.js";
 import { ConfigNodesList } from "./browser.js";
+import { copyRecordToInternalClipboard } from "./clipboard.js";
 import { recordListItemDetail, RecordDetailView } from "./detail.js";
 import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js";
 import { RecordEditorForm } from "./editor-form.js";
@@ -85,6 +100,72 @@ export default function SearchShortcutsCommand() {
       await showToast({
         style: Toast.Style.Failure,
         title: "Open in editor failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handleCopy(record: FlatIndexRecord): Promise<void> {
+    try {
+      const clipboardPayload = await copyRecordToInternalClipboard(record);
+      await showToast({
+        style: Toast.Style.Success,
+        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        message: clipboardPayload.sourceDisplayLabel,
+      });
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Copy failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handleDelete(record: FlatIndexRecord): Promise<void> {
+    const confirmed = await confirmAlert({
+      title: `Delete ${record.displayLabel}?`,
+      message: "This removes the item from the source config file.",
+      primaryAction: {
+        style: Alert.ActionStyle.Destructive,
+        title: "Delete",
+      },
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteRecord(record);
+
+      let syncError: unknown;
+      try {
+        await triggerLeaderKeyConfigReload(configDirectory);
+      } catch (error) {
+        syncError = error;
+      }
+
+      const nextPayload = await rebuildIndex(configDirectory);
+      setPayload(nextPayload);
+
+      await showToast(
+        syncError
+          ? {
+              style: Toast.Style.Failure,
+              title: "Deleted item, but Leader Key sync failed",
+              message: syncError instanceof Error ? syncError.message : String(syncError),
+            }
+          : {
+              style: Toast.Style.Success,
+              title: "Deleted config item",
+              message: "Triggered Leader Key reload",
+            },
+      );
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Delete failed",
         message: error instanceof Error ? error.message : String(error),
       });
     }
@@ -171,6 +252,12 @@ export default function SearchShortcutsCommand() {
                   title="Show Details"
                 />
                 <Action
+                  icon={Icon.CopyClipboard}
+                  onAction={() => void handleCopy(record)}
+                  shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                />
+                <Action
                   icon={Icon.Code}
                   onAction={() => void handleOpenInEditor(record.id)}
                   shortcut={record.kind === "action" ? { modifiers: ["cmd"], key: "return" } : undefined}
@@ -233,6 +320,15 @@ export default function SearchShortcutsCommand() {
                       />
                     }
                     title="Create App Override"
+                  />
+                ) : null}
+                {!record.inherited ? (
+                  <Action
+                    icon={Icon.Trash}
+                    onAction={() => void handleDelete(record)}
+                    shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                    style={Action.Style.Destructive}
+                    title="Delete"
                   />
                 ) : null}
               </ActionPanel>

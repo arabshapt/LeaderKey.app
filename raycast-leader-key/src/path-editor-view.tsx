@@ -1,17 +1,25 @@
 import {
   Action,
   ActionPanel,
+  Alert,
+  confirmAlert,
   Icon,
   Keyboard,
   List,
+  Toast,
   environment,
+  showToast,
   type Image,
   type List as RaycastList,
+  useNavigation,
 } from "@raycast/api";
 import {
   analyzePathInConfig,
+  createItemAtPath,
+  deleteRecord,
   locateNodeInFile,
   openInEditor,
+  triggerLeaderKeyConfigReload,
   type CachePayload,
   type ConfigSummary,
   type EditorId,
@@ -20,11 +28,14 @@ import {
 } from "@leaderkey/config-core";
 import { useEffect, useMemo, useState } from "react";
 
+import { rebuildIndex } from "./cache.js";
+import { copyRecordToInternalClipboard, readInternalClipboard } from "./clipboard.js";
 import { ConfigNodesList } from "./browser.js";
 import { recordListItemDetail, RecordDetailView } from "./detail.js";
 import type { DetailMetadataRow } from "./detail-presentation.js";
 import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js";
 import { RecordEditorForm } from "./editor-form.js";
+import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
 
@@ -50,6 +61,11 @@ interface MetadataComponents {
   Label: any;
   Root: any;
   Separator: any;
+}
+
+interface PasteTarget {
+  groupLabel: string;
+  parentKeyPath: string[];
 }
 
 function renderMetadata(rows: DetailMetadataRow[], components: MetadataComponents) {
@@ -102,6 +118,7 @@ function rootOutcomeRow(
   payload: CachePayload,
   onDidMutate: (payload: CachePayload) => void,
   preferredEditor: EditorId,
+  onPaste: () => void,
 ): OutcomeRow {
   const metadata = [
     ...baseMetadata(analysis),
@@ -124,6 +141,12 @@ function rootOutcomeRow(
             />
           }
           title="Open Config Root"
+        />
+        <Action
+          icon={Icon.Clipboard}
+          onAction={onPaste}
+          shortcut={{ modifiers: ["cmd"], key: "v" }}
+          title="Paste at Root"
         />
       </ActionPanel>
     ),
@@ -155,6 +178,10 @@ function rootOutcomeRow(
 
 function childBrowseTarget(record: FlatIndexRecord): string[] {
   return record.kind === "group" ? record.effectiveKeyPath : record.parentEffectiveKeyPath;
+}
+
+function keyPathMatches(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
 }
 
 export function recordPathInput(record: Pick<FlatIndexRecord, "effectiveKeyPath">): string {
@@ -212,6 +239,7 @@ export function PathEditorView(props: PathEditorViewProps) {
   const [selectedId, setSelectedId] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
+  const { push } = useNavigation();
 
   useEffect(() => {
     setPayload(initialPayload);
@@ -242,9 +270,203 @@ export function PathEditorView(props: PathEditorViewProps) {
     );
   }
 
+  function conflictForPaste(parentKeyPath: string[], key: string): FlatIndexRecord | undefined {
+    return payload.records.find((record) =>
+      record.effectiveConfigDisplayName === configSummary.displayName &&
+      record.key === key &&
+      keyPathMatches(record.parentEffectiveKeyPath, parentKeyPath)
+    );
+  }
+
+  async function handleCopy(record: FlatIndexRecord): Promise<void> {
+    try {
+      const clipboardPayload = await copyRecordToInternalClipboard(record);
+      await showToast({
+        style: Toast.Style.Success,
+        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        message: clipboardPayload.sourceDisplayLabel,
+      });
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Copy failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handleDelete(record: FlatIndexRecord): Promise<void> {
+    const confirmed = await confirmAlert({
+      title: `Delete ${record.displayLabel}?`,
+      message: "This removes the item from the source config file.",
+      primaryAction: {
+        style: Alert.ActionStyle.Destructive,
+        title: "Delete",
+      },
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteRecord(record);
+
+      let syncError: unknown;
+      try {
+        await triggerLeaderKeyConfigReload(configDirectory);
+      } catch (error) {
+        syncError = error;
+      }
+
+      const nextPayload = await rebuildIndex(configDirectory);
+      await handleDidMutate(nextPayload);
+
+      await showToast(
+        syncError
+          ? {
+              style: Toast.Style.Failure,
+              title: "Deleted item, but Leader Key sync failed",
+              message: syncError instanceof Error ? syncError.message : String(syncError),
+            }
+          : {
+              style: Toast.Style.Success,
+              title: "Deleted config item",
+              message: "Triggered Leader Key reload",
+            },
+      );
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Delete failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function handlePasteIntoGroup(target: PasteTarget): Promise<void> {
+    try {
+      const clipboardPayload = await readInternalClipboard();
+      if (!clipboardPayload) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Clipboard is empty",
+          message: "Copy an action or group in the Leader Key Raycast extension first.",
+        });
+        return;
+      }
+
+      const key = clipboardPayload.item.key?.trim();
+      if (!key) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Clipboard item has no key",
+        });
+        return;
+      }
+
+      const conflict = conflictForPaste(target.parentKeyPath, key);
+      if (conflict) {
+        push(
+          <RecordEditorForm
+            configDirectory={configDirectory}
+            createAtPath={{
+              configDisplayName: configSummary.displayName,
+              configPath: configSummary.filePath,
+              parentKeyPath: target.parentKeyPath,
+              suggestedKey: key,
+            }}
+            initialFormState={itemToFormState(clipboardPayload.item)}
+            initialType={clipboardPayload.item.type}
+            mode="create-at-path"
+            onDidSave={async (nextPayload, context) => {
+              handleSavedPath(nextPayload, context.savedKeyPath);
+            }}
+            preserveItem={clipboardPayload.item}
+            title={`Resolve Key Conflict in ${target.groupLabel}`}
+          />,
+        );
+        return;
+      }
+
+      await createItemAtPath(configSummary.filePath, target.parentKeyPath, clipboardPayload.item);
+
+      let syncError: unknown;
+      try {
+        await triggerLeaderKeyConfigReload(configDirectory);
+      } catch (error) {
+        syncError = error;
+      }
+
+      const nextPayload = await rebuildIndex(configDirectory);
+      await handleDidMutate(nextPayload);
+
+      await showToast(
+        syncError
+          ? {
+              style: Toast.Style.Failure,
+              title: "Pasted item, but Leader Key sync failed",
+              message: syncError instanceof Error ? syncError.message : String(syncError),
+            }
+          : {
+              style: Toast.Style.Success,
+              title: clipboardPayload.kind === "group" ? "Pasted group" : "Pasted action",
+              message: `Added to ${target.groupLabel}`,
+            },
+      );
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Paste failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  function currentPasteTarget(): PasteTarget {
+    if (analysis.state === "exact-group" && analysis.exactMatch) {
+      return {
+        groupLabel: analysis.exactMatch.displayLabel,
+        parentKeyPath: analysis.exactMatch.effectiveKeyPath,
+      };
+    }
+
+    if (analysis.state === "root") {
+      return {
+        groupLabel: configSummary.displayName,
+        parentKeyPath: [],
+      };
+    }
+
+    if (analysis.state === "exact-action" && analysis.exactMatch) {
+      return {
+        groupLabel: analysis.exactMatch.parentEffectiveKeyPath.length > 0
+          ? keyPathText(analysis.exactMatch.parentEffectiveKeyPath)
+          : configSummary.displayName,
+        parentKeyPath: analysis.exactMatch.parentEffectiveKeyPath,
+      };
+    }
+
+    return {
+      groupLabel: analysis.deepestExistingGroupPath.length > 0
+        ? keyPathText(analysis.deepestExistingGroupPath)
+        : configSummary.displayName,
+      parentKeyPath: analysis.deepestExistingGroupPath,
+    };
+  }
+
   function outcomeRows(): OutcomeRow[] {
     if (analysis.state === "root") {
-      return [rootOutcomeRow(analysis, configDirectory, payload, (nextPayload) => void handleDidMutate(nextPayload), preferredEditor)];
+      return [
+        rootOutcomeRow(
+          analysis,
+          configDirectory,
+          payload,
+          (nextPayload) => void handleDidMutate(nextPayload),
+          preferredEditor,
+          () => void handlePasteIntoGroup(currentPasteTarget()),
+        ),
+      ];
     }
 
     if (analysis.state === "exact-action" && analysis.exactMatch) {
@@ -268,6 +490,18 @@ export function PathEditorView(props: PathEditorViewProps) {
                   />
                 }
                 title={record.inherited ? "Edit Fallback Source" : "Edit Action"}
+              />
+              <Action
+                icon={Icon.CopyClipboard}
+                onAction={() => void handleCopy(record)}
+                shortcut={{ modifiers: ["cmd"], key: "c" }}
+                title="Copy Action"
+              />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Parent Group"
               />
               <Action
                 icon={Icon.Code}
@@ -306,6 +540,15 @@ export function PathEditorView(props: PathEditorViewProps) {
                     />
                   }
                   title="Create App Override"
+                />
+              ) : null}
+              {!record.inherited ? (
+                <Action
+                  icon={Icon.Trash}
+                  onAction={() => void handleDelete(record)}
+                  shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                  style={Action.Style.Destructive}
+                  title="Delete Action"
                 />
               ) : null}
             </ActionPanel>
@@ -363,11 +606,32 @@ export function PathEditorView(props: PathEditorViewProps) {
                 title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
               />
               <Action
+                icon={Icon.CopyClipboard}
+                onAction={() => void handleCopy(record)}
+                shortcut={{ modifiers: ["cmd"], key: "c" }}
+                title="Copy Group"
+              />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Group"
+              />
+              <Action
                 icon={Icon.Code}
                 onAction={() => void openRecordInEditor(record, preferredEditor)}
                 shortcut={{ modifiers: ["cmd"], key: "return" }}
                 title="Open in Editor"
               />
+              {!record.inherited ? (
+                <Action
+                  icon={Icon.Trash}
+                  onAction={() => void handleDelete(record)}
+                  shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                  style={Action.Style.Destructive}
+                  title="Delete Group"
+                />
+              ) : null}
             </ActionPanel>
           ),
           detail: recordListItemDetail(record),
@@ -422,6 +686,12 @@ export function PathEditorView(props: PathEditorViewProps) {
                   />
                 }
                 title="Browse Parent Group"
+              />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
           ),
@@ -522,6 +792,12 @@ export function PathEditorView(props: PathEditorViewProps) {
                 }
                 title="Browse Deepest Existing Group"
               />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Deepest Existing Group"
+              />
             </ActionPanel>
           ),
           detail: createOutcomeDetail(
@@ -566,6 +842,12 @@ export function PathEditorView(props: PathEditorViewProps) {
                   />
                 }
                 title="Create Group at Path"
+              />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
           ),
@@ -691,6 +973,18 @@ export function PathEditorView(props: PathEditorViewProps) {
                     title="Show Details"
                   />
                   <Action
+                    icon={Icon.CopyClipboard}
+                    onAction={() => void handleCopy(record)}
+                    shortcut={{ modifiers: ["cmd"], key: "c" }}
+                    title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                  />
+                  <Action
+                    icon={Icon.Clipboard}
+                    onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                    shortcut={{ modifiers: ["cmd"], key: "v" }}
+                    title="Paste into Current Group"
+                  />
+                  <Action
                     icon={Icon.Code}
                     onAction={() => void openRecordInEditor(record, preferredEditor)}
                     shortcut={record.kind === "action" ? { modifiers: ["cmd"], key: "return" } : undefined}
@@ -717,6 +1011,15 @@ export function PathEditorView(props: PathEditorViewProps) {
                     }
                     title={record.kind === "group" ? "Browse Group in Config" : "Browse in Config"}
                   />
+                  {!record.inherited ? (
+                    <Action
+                      icon={Icon.Trash}
+                      onAction={() => void handleDelete(record)}
+                      shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                      style={Action.Style.Destructive}
+                      title="Delete"
+                    />
+                  ) : null}
                 </ActionPanel>
               }
             />

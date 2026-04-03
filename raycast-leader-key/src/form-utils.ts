@@ -99,3 +99,53 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
     urlValue: record.actionType === "url" ? record.rawValue : "",
   };
 }
+
+export function itemToFormState(item?: ConfigItem): ItemFormState {
+  if (!item) {
+    return emptyFormState();
+  }
+
+  if (item.type === "group") {
+    return {
+      ...emptyFormState("group"),
+      key: item.key ?? "",
+      label: item.label ?? "",
+      stickyMode: item.stickyMode ?? false,
+      type: "group",
+    };
+  }
+
+  const baseState: ItemFormState = {
+    ...emptyFormState(item.type),
+    activates: item.activates ?? false,
+    key: item.key ?? "",
+    label: item.label ?? "",
+    stickyMode: item.stickyMode ?? false,
+    type: item.type,
+  };
+
+  switch (item.type) {
+    case "application":
+      return { ...baseState, applicationPath: item.value };
+    case "command":
+      return { ...baseState, commandValue: item.value };
+    case "folder":
+      return { ...baseState, folderPath: item.value };
+    case "intellij":
+      return { ...baseState, intellijValue: item.value };
+    case "keystroke":
+      return { ...baseState, keystroke: parseKeystrokeRawValue(item.value) };
+    case "macro":
+      return baseState;
+    case "menu":
+      return { ...baseState, menuValue: item.value };
+    case "shortcut":
+      return { ...baseState, shortcutValue: item.value };
+    case "text":
+      return { ...baseState, textValue: item.value };
+    case "toggleStickyMode":
+      return baseState;
+    case "url":
+      return { ...baseState, urlValue: item.value };
+  }
+}
