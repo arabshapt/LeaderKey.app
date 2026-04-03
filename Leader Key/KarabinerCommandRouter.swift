@@ -18,6 +18,10 @@ enum KarabinerCommandRouter {
       delegate?.unixSocketServerDidReceiveActivation(bundleId: bundleId)
       return "OK"
 
+    case "apply-config":
+      delegate?.unixSocketServerDidReceiveApplyConfig()
+      return "OK"
+
     case "key":
       guard parts.count > 1 else {
         return "ERROR: Key command requires keycode"

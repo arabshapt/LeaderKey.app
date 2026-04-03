@@ -341,6 +341,11 @@ extension Karabiner2InputMethod: UnixSocketServerDelegate {
     delegate?.inputMethodDidReceiveActivation(bundleId: bundleId)
   }
 
+  func unixSocketServerDidReceiveApplyConfig() {
+    debugLog("[Karabiner2InputMethod] Received apply-config")
+    delegate?.inputMethodDidReceiveApplyConfig()
+  }
+
   func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
     debugLog("[Karabiner2InputMethod] Received key: \(keyCode), modifiers: \(modifiers)")
     delegate?.inputMethodDidReceiveKey(keyCode, modifiers: modifiers)

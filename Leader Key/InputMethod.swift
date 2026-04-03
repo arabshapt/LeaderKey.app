@@ -13,6 +13,7 @@ protocol InputMethod: AnyObject {
 
 protocol InputMethodDelegate: AnyObject {
   func inputMethodDidReceiveActivation(bundleId: String?)
+  func inputMethodDidReceiveApplyConfig()
   func inputMethodDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
   func inputMethodDidReceiveDeactivation()
   func inputMethodDidReceiveSettings()

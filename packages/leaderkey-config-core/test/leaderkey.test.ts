@@ -6,7 +6,7 @@ import { buildLeaderKeyReloadCommand, defaultConfigDirectory } from "../src/inde
 test("builds the background Leader Key reload URL command", () => {
   assert.deepEqual(buildLeaderKeyReloadCommand(), {
     command: "open",
-    args: ["-g", "leaderkey://reload-config"],
+    args: ["-g", "leaderkey://apply-config"],
   });
 });
 

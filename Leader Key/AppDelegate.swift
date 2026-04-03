@@ -1118,6 +1118,12 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 
 // MARK: - URL Scheme Handling
 extension AppDelegate {
+  private func applyExternalConfigChanges(trigger: String) {
+    print("[AppDelegate] applyExternalConfigChanges: trigger=\(trigger)")
+    config.reloadConfig()
+    Events.send(.didSaveConfig)
+  }
+
   // Handles opening the app via leaderkey:// URLs
   func application(_ application: NSApplication, open urls: [URL]) {
     print("[AppDelegate] application:open:urls: Received URL(s): \(urls.map { $0.absoluteString })")
@@ -1130,9 +1136,9 @@ extension AppDelegate {
       print("[AppDelegate] handleURL: Ignoring URL with incorrect scheme.")
       return
     }
-    if url.host == "reload-config" {
-      print("[AppDelegate] handleURL: Reloading config from external trigger.")
-      config.reloadConfig()
+    if url.host == "reload-config" || url.host == "apply-config" {
+      print("[AppDelegate] handleURL: Applying config from external trigger.")
+      applyExternalConfigChanges(trigger: "url:\(url.host ?? "unknown")")
       return
     }
 
@@ -2456,6 +2462,12 @@ extension AppDelegate {
   }
 
   // MARK: - InputMethodDelegate
+
+  func inputMethodDidReceiveApplyConfig() {
+    DispatchQueue.main.async { [weak self] in
+      self?.applyExternalConfigChanges(trigger: "unix-socket")
+    }
+  }
 
   func inputMethodDidReceiveActivation(bundleId: String?) {
     // Handle activation from Karabiner
