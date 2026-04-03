@@ -192,7 +192,7 @@ private struct OpacityPane: View {
 class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSocketServerDelegate {
   // --- Properties ---
   var controller: Controller!
-  let statusItem = StatusItem()
+  var statusItem = StatusItem()
   let config = UserConfig()
   var fileMonitor: FileMonitor!
   var state: UserState!
@@ -291,25 +291,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     // Subscribe to reload events to manage event processing
     Events.sink { [weak self] event in
       guard let self = self else { return }
-      switch event {
-      case .willReload:
-        self.isReloading = true
-        #if DEBUG
-          debugLog("[AppDelegate] Config reload started - pausing event processing")
-        #endif
-      case .didReload:
-        self.isReloading = false
-        self.refreshStateMappingsIfNeeded()
-        self.refreshActiveSequenceAfterReloadIfNeeded()
-        #if DEBUG
-          debugLog("[AppDelegate] Config reload completed - resuming event processing")
-        #endif
-      case .didSaveConfig:
-        self.refreshStateMappingsIfNeeded()
-        debugLog("[AppDelegate] Config saved - state mappings refreshed")
-      default:
-        break
-      }
+      self.handleConfigEvent(
+        event,
+        refreshStateMappings: { self.refreshStateMappingsIfNeeded() },
+        refreshActiveSequenceAfterReload: { self.refreshActiveSequenceAfterReloadIfNeeded() }
+      )
     }.store(in: &cancellables)
 
     controlSocketServer.delegate = self
@@ -1019,6 +1005,33 @@ extension AppDelegate {
           }
         }
       }
+    }
+  }
+
+  func handleConfigEvent(
+    _ event: EventKey,
+    refreshStateMappings: () -> Void,
+    refreshActiveSequenceAfterReload: () -> Void
+  ) {
+    switch event {
+    case .willReload:
+      isReloading = true
+      #if DEBUG
+        debugLog("[AppDelegate] Config reload started - pausing event processing")
+      #endif
+    case .didReload:
+      isReloading = false
+      refreshStateMappings()
+      refreshActiveSequenceAfterReload()
+      statusItem.indicateReloadSuccess()
+      #if DEBUG
+        debugLog("[AppDelegate] Config reload completed - resuming event processing")
+      #endif
+    case .didSaveConfig:
+      refreshStateMappings()
+      debugLog("[AppDelegate] Config saved - state mappings refreshed")
+    default:
+      break
     }
   }
 

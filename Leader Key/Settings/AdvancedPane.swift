@@ -15,6 +15,7 @@ struct AdvancedPane: View {
   @Default(.autoOpenCheatsheet) var autoOpenCheatsheet
   @Default(.cheatsheetDelayMS) var cheatsheetDelayMS
   @Default(.reactivateBehavior) var reactivateBehavior
+  @Default(.playReloadSuccessSound) var playReloadSuccessSound
   @Default(.showAppIconsInCheatsheet) var showAppIconsInCheatsheet
   @Default(.automaticallyChecksForUpdates) var automaticallyChecksForUpdates
   @Default(.resetOnCmdRelease) var resetOnCmdRelease
@@ -457,6 +458,7 @@ struct AdvancedPane: View {
 
         Settings.Section(title: "Other") {
           Defaults.Toggle("Show Leader Key in menubar", key: .showMenuBarIcon)
+          Defaults.Toggle("Play reload success sound", key: .playReloadSuccessSound)
           Defaults.Toggle(
             "Force English keyboard layout", key: .forceEnglishKeyboardLayout)
           Defaults.Toggle("Automatically check for updates", key: .automaticallyChecksForUpdates)

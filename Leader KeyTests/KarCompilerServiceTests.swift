@@ -1,3 +1,5 @@
+import Cocoa
+import Defaults
 import XCTest
 @testable import Leader_Key
 
@@ -111,5 +113,144 @@ final class KarCompilerServiceTests: XCTestCase {
     XCTAssertEqual(
       descriptions,
       ["LeadingRule", "LeaderKeyManaged/NewA", "LeaderKeyManaged/NewB", "TrailingRule"])
+  }
+}
+
+final class StatusItemTests: XCTestCase {
+  private var statusItem: TestStatusItem!
+
+  override func setUp() {
+    super.setUp()
+    defaultsSuite = UserDefaults(suiteName: name)!
+    defaultsSuite.removePersistentDomain(forName: name)
+    Defaults[.playReloadSuccessSound] = false
+
+    statusItem = TestStatusItem()
+    statusItem.reloadSuccessFeedbackTiming = .init(fadeDuration: 0.005, holdDuration: 0.05)
+  }
+
+  override func tearDown() {
+    statusItem = nil
+    defaultsSuite.removePersistentDomain(forName: name)
+    super.tearDown()
+  }
+
+  func testIndicateReloadSuccessNoOpsWithoutStatusItem() {
+    statusItem.providesFeedbackButton = false
+    statusItem.indicateReloadSuccess()
+
+    XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .normal)
+  }
+
+  func testIndicateReloadSuccessRestoresActiveAppearanceAfterPulse() {
+    statusItem.appearance = .active
+
+    statusItem.indicateReloadSuccess()
+
+    XCTAssertTrue(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .reloadSuccess)
+    XCTAssertNotNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.alphaValue, 1.0)
+
+    statusItem.fireLatestScheduledReset()
+
+    XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .active)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.alphaValue, 1.0)
+  }
+
+  func testIndicateReloadSuccessRestartsExistingPulse() throws {
+    statusItem.indicateReloadSuccess()
+    let firstReset = try XCTUnwrap(statusItem.scheduledResetWorkItems.last)
+
+    statusItem.indicateReloadSuccess()
+    let secondReset = try XCTUnwrap(statusItem.scheduledResetWorkItems.last)
+
+    XCTAssertFalse(firstReset === secondReset)
+    XCTAssertEqual(statusItem.scheduledResetWorkItems.count, 2)
+    XCTAssertTrue(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .reloadSuccess)
+
+    statusItem.fireLatestScheduledReset()
+
+    XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .normal)
+  }
+}
+
+private final class TestStatusItem: StatusItem {
+  let testButton = NSButton(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+  var providesFeedbackButton = true
+  var scheduledResetWorkItems: [DispatchWorkItem] = []
+
+  override func feedbackButton() -> NSButton? {
+    providesFeedbackButton ? testButton : nil
+  }
+
+  override func performOnMain(_ work: @escaping () -> Void) {
+    work()
+  }
+
+  override func scheduleReloadSuccessReset(after delay: TimeInterval, workItem: DispatchWorkItem) {
+    _ = delay
+    scheduledResetWorkItems.append(workItem)
+  }
+
+  override func animate(
+    button: NSButton,
+    toAlpha alphaValue: CGFloat,
+    duration: TimeInterval,
+    completion: (() -> Void)? = nil
+  ) {
+    button.alphaValue = alphaValue
+    completion?()
+  }
+
+  func fireLatestScheduledReset() {
+    let workItem = scheduledResetWorkItems.removeLast()
+    workItem.perform()
+  }
+}
+
+private final class StatusItemSpy: StatusItem {
+  var reloadSuccessCount = 0
+
+  override func indicateReloadSuccess() {
+    reloadSuccessCount += 1
+  }
+}
+
+final class AppDelegateConfigEventTests: XCTestCase {
+  override func setUp() {
+    super.setUp()
+    defaultsSuite = UserDefaults(suiteName: name)!
+    defaultsSuite.removePersistentDomain(forName: name)
+  }
+
+  override func tearDown() {
+    defaultsSuite.removePersistentDomain(forName: name)
+    super.tearDown()
+  }
+
+  func testHandleConfigEventTriggersSuccessFeedbackOnlyForDidReload() {
+    let appDelegate = AppDelegate()
+    let statusItemSpy = StatusItemSpy()
+    appDelegate.statusItem = statusItemSpy
+
+    appDelegate.handleConfigEvent(
+      .didSaveConfig,
+      refreshStateMappings: {},
+      refreshActiveSequenceAfterReload: {}
+    )
+    XCTAssertEqual(statusItemSpy.reloadSuccessCount, 0)
+
+    appDelegate.handleConfigEvent(
+      .didReload,
+      refreshStateMappings: {},
+      refreshActiveSequenceAfterReload: {}
+    )
+    XCTAssertEqual(statusItemSpy.reloadSuccessCount, 1)
   }
 }

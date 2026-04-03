@@ -84,6 +84,22 @@ The `intellij` action type sends actions directly to IntelliJ via Unix Domain So
 5. Add icon to `ActionIcon.swift`
 6. Add to type pickers in `ConfigEditorView.swift` (2 pickers) and `NativeConfigEditorView.swift` (1 picker)
 
+## Raycast Config Editing
+
+The Raycast extension is a separate fast-path editor and discoverability surface. It is intentionally independent from the native settings UI.
+
+**Commands**:
+- `Search Shortcuts` — global/effective search across derived shortcut records
+- `Browse Configs` — config-first navigation and editing
+- `Add/Edit by Path` — character-driven path editor (`ab.c` = `a → b → . → c`)
+
+**Key behaviors**:
+- Current-app Raycast deeplinks must be resolved **before** Raycast opens. Use `app:{frontmostBundleId}` in the Raycast deeplink target and let Leader Key expand `{frontmostBundleId}` at execution time.
+- Raycast copy/paste uses an internal extension clipboard, not the macOS clipboard.
+- Paste is conflict-safe: if the copied key already exists in the target group, open a prefilled create/edit form instead of overwriting.
+- Empty groups must still expose create actions (`Add First Action`, `Add First Group`) so they are never dead ends.
+- Raycast writes JSON directly, then triggers apply over Leader Key's local socket. Do not rely on URL callbacks.
+
 ## Manual Testing (v1 payload protocol)
 
 Launch Leader Key from terminal to see stdout logs:
@@ -168,6 +184,7 @@ sock.close()
 - **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management commands
 - **Macro execution** — macros that use `menu` type go through in-process AX API calls, not shell spawns. Same for `application` (cached NSRunningApplication) and `url` (NSWorkspace)
 - **IntelliJ UDS over HTTP** — `intellij` action type connects to `/tmp/intellij-leaderkey.sock` directly (~1ms). Eliminates HTTP handshake overhead of the old `curl localhost:63343` approach (~50ms). Use `SOCK_STREAM` (not `SOCK_DGRAM`) — JVM UDS only supports stream sockets
+- **Always-on control socket for external apply** — Raycast and other local tools should send `apply-config` to `/tmp/leaderkey.sock` instead of touching files or using URL schemes. This keeps apply in-process and avoids duplicate reload paths
 
 ## Common Gotchas
 - **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)
@@ -178,3 +195,5 @@ sock.close()
 - **IntelliJ plugin build requires Java 21** — System Java may be newer (25.x) which breaks the IntelliJ Gradle plugin. Use `JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build`
 - **IntelliJ UDS socket not present** = IntelliJ not running or plugin not loaded. `sendToIntelliJSocket()` fails silently (logs a warning) so Leader Key continues normally
 - **JVM UDS is stream-only** — Java's `UnixDomainSocketAddress` only supports `SOCK_STREAM`, not `SOCK_DGRAM`. Protocol must be newline-delimited (connect → write → read response → close). Leader Key uses fire-and-forget (no read)
+- **`leaderkey://` is gone** — External config apply should use the local socket (`/tmp/leaderkey.sock`). Do not add new app URL handlers for reload/apply/navigation.
+- **Some Goku builds advertise `-c` but crash** — Prefer `GOKU_EDN_CONFIG_FILE=/path/to/karabiner.edn goku` over `goku -c /path/to/karabiner.edn`. Leader Key uses the environment-variable form for compatibility.

@@ -6,7 +6,6 @@ final class UserState: ObservableObject {
   var userConfig: UserConfig!
 
   @Published var display: String?
-  @Published var isShowingRefreshState: Bool
   @Published var navigationPath: [Group] = []
   @Published var activeRoot: Group?  // Root group for the current context (app-specific or default)
   var activeConfigKey: String?  // The config key that was used to load activeRoot
@@ -17,14 +16,9 @@ final class UserState: ObservableObject {
     return navigationPath.last
   }
 
-  init(
-    userConfig: UserConfig!,
-    lastChar: String? = nil,
-    isShowingRefreshState: Bool = false
-  ) {
+  init(userConfig: UserConfig!, lastChar: String? = nil) {
     self.userConfig = userConfig
     display = lastChar
-    self.isShowingRefreshState = isShowingRefreshState
     self.navigationPath = []
     self.activeRoot = userConfig.root  // Initialize with default root
   }
@@ -32,7 +26,6 @@ final class UserState: ObservableObject {
   func clear() {
     display = nil
     navigationPath = []
-    isShowingRefreshState = false
     // Reset activeRoot to the default when clearing
     activeRoot = userConfig.root
     activeConfigKey = nil

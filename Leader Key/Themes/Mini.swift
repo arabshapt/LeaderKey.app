@@ -59,15 +59,9 @@ enum Mini {
 
     var body: some View {
       ZStack {
-        let text = Text(userState.currentGroup?.key ?? userState.display ?? "●")
+        Text(userState.currentGroup?.key ?? userState.display ?? "●")
           .fontDesign(.rounded)
           .fontWeight(.bold)
-
-        if userState.isShowingRefreshState {
-          text.pulsate()
-        } else {
-          text
-        }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       .font(.system(size: 16, weight: .semibold, design: .rounded))

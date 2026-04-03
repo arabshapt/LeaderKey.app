@@ -52,16 +52,10 @@ enum MysteryBox {
 
     var body: some View {
       ZStack {
-        let text = Text(userState.currentGroup?.key ?? userState.display ?? "●")
+        Text(userState.currentGroup?.key ?? userState.display ?? "●")
           .fontDesign(.rounded)
           .fontWeight(.semibold)
           .font(.system(size: 28, weight: .semibold, design: .rounded))
-
-        if userState.isShowingRefreshState {
-          text.pulsate()
-        } else {
-          text
-        }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       .background(

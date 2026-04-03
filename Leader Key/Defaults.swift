@@ -13,6 +13,8 @@ extension Defaults.Keys {
     "configDir", default: UserConfig.defaultDirectory(), suite: defaultsSuite)
   static let showMenuBarIcon = Key<Bool>(
     "showInMenubar", default: true, suite: defaultsSuite)
+  static let playReloadSuccessSound = Key<Bool>(
+    "playReloadSuccessSound", default: false, suite: defaultsSuite)
   static let forceEnglishKeyboardLayout = Key<Bool>(
     "forceEnglishKeyboardLayout", default: false, suite: defaultsSuite)
   static let modifierKeyConfiguration = Key<ModifierKeyConfig>(

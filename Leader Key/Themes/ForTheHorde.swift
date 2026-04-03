@@ -97,12 +97,7 @@ enum ForTheHorde {
           .fontWeight(.semibold)
           .font(.system(size: 28, weight: .semibold, design: .rounded))
           .foregroundColor(Color(red: 1, green: 0.769, blue: 0))
-
-        if userState.isShowingRefreshState {
-          text.pulsate()
-        } else {
-          text
-        }
+        text
 
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)

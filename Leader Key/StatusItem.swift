@@ -1,11 +1,23 @@
 import Cocoa
 import Combine
+import Defaults
 import Sparkle
 
 class StatusItem {
   enum Appearance {
     case normal
     case active
+  }
+
+  enum ResolvedAppearance: Equatable {
+    case normal
+    case active
+    case reloadSuccess
+  }
+
+  struct ReloadSuccessFeedbackTiming {
+    var fadeDuration: TimeInterval = 0.18
+    var holdDuration: TimeInterval = 0.38
   }
 
   var appearance: Appearance = .normal {
@@ -15,7 +27,11 @@ class StatusItem {
   }
 
   var statusItem: NSStatusItem?
+  var reloadSuccessFeedbackTiming = ReloadSuccessFeedbackTiming()
+  private(set) var isShowingReloadSuccessFeedback = false
+  private(set) var renderedAppearance: ResolvedAppearance = .normal
   private var cancellables = Set<AnyCancellable>()
+  private var reloadSuccessResetWorkItem: DispatchWorkItem?
 
   var handlePreferences: (() -> Void)?
   var handleReloadConfig: (() -> Void)?
@@ -35,6 +51,8 @@ class StatusItem {
 
     if let menubarButton = item.button {
       menubarButton.image = NSImage(named: NSImage.Name("StatusItem"))
+      menubarButton.alphaValue = 1.0
+      menubarButton.contentTintColor = nil
     }
 
     let menu = NSMenu()
@@ -113,9 +131,51 @@ class StatusItem {
   func disable() {
     guard let item = statusItem else { return }
 
+    cancelReloadSuccessFeedback()
     cancellables.removeAll()
     NSStatusBar.system.removeStatusItem(item)
     statusItem = nil
+  }
+
+  func indicateReloadSuccess() {
+    performOnMain {
+      guard let button = self.feedbackButton() else { return }
+
+      let shouldPlaySound = !self.isShowingReloadSuccessFeedback
+      self.reloadSuccessResetWorkItem?.cancel()
+      self.isShowingReloadSuccessFeedback = true
+      self.updateStatusItemAppearance()
+
+      button.alphaValue = 0.76
+      self.animate(button: button, toAlpha: 1.0, duration: self.reloadSuccessFeedbackTiming.fadeDuration)
+
+      if shouldPlaySound {
+        self.playReloadSuccessSoundIfNeeded()
+      }
+
+      let restoreWorkItem = DispatchWorkItem { [weak self, weak button] in
+        guard let self, let button else { return }
+
+        self.animate(
+          button: button,
+          toAlpha: 0.84,
+          duration: self.reloadSuccessFeedbackTiming.fadeDuration
+        ) { [weak self, weak button] in
+          guard let self, let button else { return }
+
+          self.isShowingReloadSuccessFeedback = false
+          self.reloadSuccessResetWorkItem = nil
+          self.updateStatusItemAppearance()
+          self.animate(button: button, toAlpha: 1.0, duration: self.reloadSuccessFeedbackTiming.fadeDuration)
+        }
+      }
+
+      self.reloadSuccessResetWorkItem = restoreWorkItem
+      self.scheduleReloadSuccessReset(
+        after: self.reloadSuccessFeedbackTiming.holdDuration,
+        workItem: restoreWorkItem
+      )
+    }
   }
 
   @objc func showPreferences() {
@@ -143,13 +203,90 @@ class StatusItem {
   }
 
   private func updateStatusItemAppearance() {
-    guard let button = statusItem?.button else { return }
+    let resolvedAppearance = currentResolvedAppearance()
+    renderedAppearance = resolvedAppearance
+
+    guard let button = feedbackButton() else { return }
+
+    button.image = image(for: resolvedAppearance)
+
+    switch resolvedAppearance {
+    case .normal, .active:
+      button.contentTintColor = nil
+    case .reloadSuccess:
+      button.contentTintColor = NSColor.systemGreen
+    }
+  }
+
+  private func currentResolvedAppearance() -> ResolvedAppearance {
+    if isShowingReloadSuccessFeedback {
+      return .reloadSuccess
+    }
 
     switch appearance {
     case .normal:
-      button.image = NSImage(named: NSImage.Name("StatusItem"))
+      return .normal
     case .active:
-      button.image = NSImage(named: NSImage.Name("StatusItem-filled"))
+      return .active
     }
+  }
+
+  private func image(for appearance: ResolvedAppearance) -> NSImage? {
+    switch appearance {
+    case .normal:
+      return NSImage(named: NSImage.Name("StatusItem"))
+    case .active, .reloadSuccess:
+      return NSImage(named: NSImage.Name("StatusItem-filled"))
+    }
+  }
+
+  private func cancelReloadSuccessFeedback() {
+    reloadSuccessResetWorkItem?.cancel()
+    reloadSuccessResetWorkItem = nil
+    isShowingReloadSuccessFeedback = false
+    if let button = feedbackButton() {
+      button.alphaValue = 1.0
+    }
+    updateStatusItemAppearance()
+  }
+
+  func feedbackButton() -> NSButton? {
+    statusItem?.button
+  }
+
+  func performOnMain(_ work: @escaping () -> Void) {
+    DispatchQueue.main.async(execute: work)
+  }
+
+  func scheduleReloadSuccessReset(after delay: TimeInterval, workItem: DispatchWorkItem) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+  }
+
+  func playReloadSuccessSoundIfNeeded() {
+    guard Defaults[.playReloadSuccessSound] else { return }
+    NSSound(named: .init("Glass"))?.play()
+  }
+
+  func animate(
+    button: NSButton,
+    toAlpha alphaValue: CGFloat,
+    duration: TimeInterval,
+    completion: (() -> Void)? = nil
+  ) {
+    guard duration > 0 else {
+      button.alphaValue = alphaValue
+      completion?()
+      return
+    }
+
+    NSAnimationContext.runAnimationGroup(
+      { context in
+        context.duration = duration
+        button.animator().alphaValue = alphaValue
+      },
+      completionHandler: {
+        completion?()
+      }
+    )
   }
 }

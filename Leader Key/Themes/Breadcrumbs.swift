@@ -94,15 +94,9 @@ enum Breadcrumbs {
     var body: some View {
       HStack(spacing: 0) {
         if breadcrumbPath.isEmpty {
-          let text = Text("●")
+          Text("●")
             .foregroundStyle(.secondary)
             .padding(.horizontal, Breadcrumbs.padding)
-
-          if userState.isShowingRefreshState {
-            text.pulsate()
-          } else {
-            text
-          }
         } else {
           ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
@@ -113,15 +107,9 @@ enum Breadcrumbs {
                     .foregroundStyle(.secondary)
                 }
 
-                let text = Text(breadcrumbPath[index])
+                Text(breadcrumbPath[index])
                   .lineLimit(1)
                   .truncationMode(.middle)
-
-                if userState.isShowingRefreshState {
-                  text.pulsate()
-                } else {
-                  text
-                }
               }
             }
             .padding(.horizontal, Breadcrumbs.padding)

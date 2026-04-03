@@ -50,15 +50,7 @@ class Controller {
     Events.sink { event in
       switch event {
       case .didReload:
-        // This should all be handled by the themes
         ViewSizeCache.shared.clear()  // invalidate cached sizes when config changes
-        self.userState.isShowingRefreshState = true
-        self.show()
-        // Delay for 4 * 300ms to wait for animation to be noticeable
-        delay(Int(Pulsate.singleDurationS * 1000) * 3) {
-          self.hide()
-          self.userState.isShowingRefreshState = false
-        }
       default: break
       }
     }.store(in: &cancellables)
@@ -184,7 +176,7 @@ class Controller {
       self.window.ignoresMouseEvents = Defaults[.panelClickThrough]
     }
 
-    if !window.hasCheatsheet || userState.isShowingRefreshState {
+    if !window.hasCheatsheet {
       return
     }
 

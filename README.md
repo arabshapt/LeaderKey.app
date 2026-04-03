@@ -17,6 +17,8 @@ Watch the original intro videos by [@mikker](https://github.com/mikker):
 
 *The original videos showcase the core functionality that this enhanced fork builds upon.*
 
+Recent development changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## Fork Enhancements
 
 This enhanced version includes several improvements over the original:
