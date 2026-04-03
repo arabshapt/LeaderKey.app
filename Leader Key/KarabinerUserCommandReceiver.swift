@@ -327,37 +327,71 @@ final class KarabinerUserCommandReceiver {
     findRunningAppLookup(app)?.runningApp
   }
 
+  static func openAppDirectly(_ app: String) {
+    openAppImpl(app, toggle: false)
+  }
+
+  static func openAppToggleDirectly(_ app: String) {
+    openAppImpl(app, toggle: true)
+  }
+
   private func openApp(_ app: String) {
-    guard let resolved = Self.resolveApp(app) else {
-      debugLog("[KarabinerUserCommandReceiver] v1 open_app: cannot resolve '\(app)'")
-      return
-    }
-    DispatchQueue.main.async {
-      if let running = Self.findRunningApp(app) {
-        running.activate()
-        return
-      }
-      let config = NSWorkspace.OpenConfiguration()
-      NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
-    }
+    Self.openAppImpl(app, toggle: false)
   }
 
   private func openAppToggle(_ app: String) {
+    Self.openAppImpl(app, toggle: true)
+  }
+
+  private static func openAppImpl(_ app: String, toggle: Bool) {
     guard let resolved = Self.resolveApp(app) else {
-      debugLog("[KarabinerUserCommandReceiver] v1 open_app_toggle: cannot resolve '\(app)'")
+      let actionName = toggle ? "open_app_toggle" : "open_app"
+      debugLog("[KarabinerUserCommandReceiver] v1 \(actionName): cannot resolve '\(app)'")
       return
     }
-    DispatchQueue.main.async {
-      if let running = Self.findRunningApp(app) {
-        if running.isActive {
+
+    ThreadOptimization.executeOnMain {
+      if let lookup = Self.findRunningAppLookup(app) {
+        let running = lookup.runningApp
+
+        if toggle && running.isActive {
           running.hide()
-        } else {
-          running.activate()
+          debugLog("[KarabinerUserCommandReceiver] app: hid '\(app)' mode=\(lookup.strategy)")
+          return
         }
-      } else {
-        let config = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
+
+        if Self.activateRunningApp(running) {
+          let action = toggle ? "open_app_toggle" : "open_app"
+          debugLog("[KarabinerUserCommandReceiver] \(action): activated '\(app)' mode=\(lookup.strategy)")
+          return
+        }
+
+        debugLog(
+          "[KarabinerUserCommandReceiver] app: activation failed for '\(app)' mode=\(lookup.strategy), falling back to launch"
+        )
       }
+
+      launchAppViaOpen(resolved.url)
+      let action = toggle ? "open_app_toggle" : "open_app"
+      debugLog("[KarabinerUserCommandReceiver] \(action): launched '\(app)' via open -a")
+    }
+  }
+
+  private static func activateRunningApp(_ runningApp: NSRunningApplication) -> Bool {
+    runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+  }
+
+  private static func launchAppViaOpen(_ appURL: URL) {
+    let task = Process()
+    task.launchPath = "/usr/bin/open"
+    task.arguments = ["-a", appURL.path]
+
+    do {
+      try task.run()
+    } catch {
+      debugLog("[KarabinerUserCommandReceiver] app: failed to launch '\(appURL.path)' via open -a: \(error)")
+      let config = NSWorkspace.OpenConfiguration()
+      NSWorkspace.shared.openApplication(at: appURL, configuration: config)
     }
   }
 
@@ -624,7 +658,7 @@ final class KarabinerUserCommandReceiver {
 
   private static func activateRunningAppAsync(_ runningApp: NSRunningApplication) {
     DispatchQueue.main.async {
-      _ = runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+      _ = activateRunningApp(runningApp)
     }
   }
 

@@ -430,9 +430,7 @@ class Controller {
   func runAction(_ action: Action) {
     switch action.type {
     case .application:
-      NSWorkspace.shared.openApplication(
-        at: URL(fileURLWithPath: action.value),
-        configuration: NSWorkspace.OpenConfiguration())
+      KarabinerUserCommandReceiver.openAppDirectly(action.value)
     case .url:
       openURL(action)
     case .command:
