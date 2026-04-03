@@ -2,6 +2,59 @@ import AppKit
 import Darwin
 import Foundation
 
+enum URLPlaceholderExpander {
+  private static let frontmostBundleIdPlaceholder = "{frontmostBundleId}"
+  private static let encodedFrontmostBundleIdPlaceholder = "%7BfrontmostBundleId%7D"
+  
+  enum ExpansionError: LocalizedError {
+    case unresolved(String)
+    
+    var errorDescription: String? {
+      switch self {
+      case .unresolved(let message):
+        return message
+      }
+    }
+  }
+
+  static func expand(_ rawValue: String, preferredFrontmostBundleId: String? = nil) -> Result<String, ExpansionError> {
+    guard rawValue.contains(frontmostBundleIdPlaceholder)
+        || rawValue.localizedCaseInsensitiveContains(encodedFrontmostBundleIdPlaceholder) else {
+      return .success(rawValue)
+    }
+
+    guard let bundleId = resolvedFrontmostBundleId(preferred: preferredFrontmostBundleId) else {
+      return .failure(.unresolved("Could not resolve {frontmostBundleId} for URL: \(rawValue)"))
+    }
+
+    let expanded = rawValue
+      .replacingOccurrences(of: frontmostBundleIdPlaceholder, with: bundleId)
+      .replacingOccurrences(of: encodedFrontmostBundleIdPlaceholder, with: bundleId)
+      .replacingOccurrences(of: encodedFrontmostBundleIdPlaceholder.lowercased(), with: bundleId)
+
+    return .success(expanded)
+  }
+
+  private static func resolvedFrontmostBundleId(preferred: String?) -> String? {
+    if let sanitizedPreferred = sanitizeBundleId(preferred) {
+      return sanitizedPreferred
+    }
+
+    return sanitizeBundleId(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+  }
+
+  private static func sanitizeBundleId(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !trimmed.isEmpty,
+          trimmed != "__FALLBACK__",
+          trimmed != Bundle.main.bundleIdentifier else {
+      return nil
+    }
+
+    return trimmed
+  }
+}
+
 final class KarabinerUserCommandReceiver {
   private let receiverQueue = DispatchQueue(label: "com.leaderkey.usercommand.receiver")
   private var socketHandle: Int32 = -1
@@ -149,8 +202,16 @@ final class KarabinerUserCommandReceiver {
         debugLog("[KarabinerUserCommandReceiver] v1 open missing 'target'")
         return
       }
-      guard let url = URL(string: target) else {
-        debugLog("[KarabinerUserCommandReceiver] v1 open: invalid URL '\(target)'")
+      let expandedTarget: String
+      switch URLPlaceholderExpander.expand(target) {
+      case .success(let value):
+        expandedTarget = value
+      case .failure(let error):
+        debugLog("[KarabinerUserCommandReceiver] v1 open: \(error.localizedDescription)")
+        return
+      }
+      guard let url = URL(string: expandedTarget) else {
+        debugLog("[KarabinerUserCommandReceiver] v1 open: invalid URL '\(expandedTarget)'")
         return
       }
       let background = dict["background"] as? Bool ?? false

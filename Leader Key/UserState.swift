@@ -10,6 +10,7 @@ final class UserState: ObservableObject {
   @Published var navigationPath: [Group] = []
   @Published var activeRoot: Group?  // Root group for the current context (app-specific or default)
   var activeConfigKey: String?  // The config key that was used to load activeRoot
+  var activeBundleId: String?
   @Published var isActive: Bool = false  // Track whether Leader Key is currently active
 
   var currentGroup: Group? {
@@ -35,6 +36,7 @@ final class UserState: ObservableObject {
     // Reset activeRoot to the default when clearing
     activeRoot = userConfig.root
     activeConfigKey = nil
+    activeBundleId = nil
     isActive = false
   }
 

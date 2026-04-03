@@ -296,6 +296,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate {
       case .didReload:
         self.isReloading = false
         self.refreshStateMappingsIfNeeded()
+        self.refreshActiveSequenceAfterReloadIfNeeded()
         #if DEBUG
           debugLog("[AppDelegate] Config reload completed - resuming event processing")
         #endif
@@ -1129,7 +1130,13 @@ extension AppDelegate {
       print("[AppDelegate] handleURL: Ignoring URL with incorrect scheme.")
       return
     }
-    // Always show the window when opened via URL scheme
+    if url.host == "reload-config" {
+      print("[AppDelegate] handleURL: Reloading config from external trigger.")
+      config.reloadConfig()
+      return
+    }
+
+    // Show the window for interactive URL actions
     show()
     if url.host == "navigate",  // Expecting leaderkey://navigate?keys=a,b,c
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -2774,6 +2781,54 @@ extension AppDelegate {
         self?.loadStateMappings()
       }
     }
+  }
+
+  private func refreshActiveSequenceAfterReloadIfNeeded() {
+    guard controller.userState.isActive || currentSequenceGroup != nil || activeRootGroup != nil else {
+      return
+    }
+
+    let childGroupKeys = Array(controller.userState.navigationPath.dropFirst()).compactMap(\.key)
+    let cacheId = currentBundleId ?? "global"
+
+    let refreshedRoot: Group
+    switch cacheId {
+    case "fallback":
+      refreshedRoot = config.getMarkedFallbackConfig()
+    case "global":
+      refreshedRoot = config.root
+    default:
+      refreshedRoot = config.getConfig(for: cacheId)
+    }
+
+    let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(refreshedRoot, for: cacheId)
+    currentKeyLookupCache = keyLookupCache
+
+    var refreshedNavigationPath: [Group] = [refreshedRoot]
+    var currentGroup = refreshedRoot
+
+    for key in childGroupKeys {
+      guard let nextGroup = currentGroup.actions.compactMap({ item -> Group? in
+        guard case .group(let group) = item else { return nil }
+        return group.key == key ? group : nil
+      }).first else {
+        break
+      }
+
+      refreshedNavigationPath.append(nextGroup)
+      currentGroup = nextGroup
+    }
+
+    activeRootGroup = refreshedRoot
+    currentSequenceGroup = refreshedNavigationPath.last ?? refreshedRoot
+    controller.userState.activeRoot = refreshedRoot
+    controller.userState.navigationPath = refreshedNavigationPath
+
+    var state = callbackState
+    state.stickyModeKeycodes = keyLookupCache.getValidKeycodes(forGroupId: currentGroup.id)
+    callbackState = state
+
+    debugLog("[AppDelegate] Refreshed active sequence after config reload")
   }
   
   private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {

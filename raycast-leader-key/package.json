@@ -1,0 +1,95 @@
+{
+  "name": "leader-key-raycast",
+  "version": "0.1.0",
+  "private": true,
+  "title": "Leader Key",
+  "description": "Leader Key discoverability and fast config editing for Raycast",
+  "icon": "assets/leader-key.svg",
+  "author": "arabshaptukaev",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Developer Tools",
+    "Productivity"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "ray develop",
+    "bundle": "ray build -e dev -o /tmp/leader-key-raycast-build",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@leaderkey/config-core": "0.1.0",
+    "@raycast/api": "^1.104.11",
+    "react": "^19.2.4"
+  },
+  "schemaVersion": 1,
+  "preferences": [
+    {
+      "name": "configDirectory",
+      "type": "directory",
+      "required": false,
+      "title": "Config Directory",
+      "description": "Leader Key config directory. Defaults to ~/Library/Application Support/Leader Key."
+    },
+    {
+      "name": "preferredEditor",
+      "type": "dropdown",
+      "required": false,
+      "title": "Preferred Editor",
+      "description": "Editor used by Open in Editor actions.",
+      "data": [
+        {
+          "title": "System Default",
+          "value": "system"
+        },
+        {
+          "title": "VS Code",
+          "value": "vscode"
+        },
+        {
+          "title": "Cursor",
+          "value": "cursor"
+        },
+        {
+          "title": "IntelliJ IDEA",
+          "value": "intellij"
+        },
+        {
+          "title": "Zed",
+          "value": "zed"
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "search-shortcuts",
+      "title": "Search Shortcuts",
+      "description": "Search across effective Leader Key shortcuts and jump to the source item fast.",
+      "mode": "view"
+    },
+    {
+      "name": "browse-configs",
+      "title": "Browse Configs",
+      "description": "Browse effective configs, edit items, and create overrides or siblings.",
+      "mode": "view"
+    },
+    {
+      "name": "add-edit-by-path",
+      "title": "Add/Edit by Path",
+      "description": "Type a Leader Key path like ab.c to edit or create the target fast.",
+      "mode": "view"
+    },
+    {
+      "name": "rebuild-index",
+      "title": "Rebuild Index",
+      "description": "Force a rebuild of the cached Leader Key shortcut index.",
+      "mode": "no-view"
+    }
+  ]
+}

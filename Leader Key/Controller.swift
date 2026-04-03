@@ -129,6 +129,7 @@ class Controller {
 
     userState.activeRoot = configToLoad  // Update UserState with the selected config
     userState.activeConfigKey = configKeyForSettings  // Store the config key for settings
+    userState.activeBundleId = bundleId == "__FALLBACK__" ? nil : bundleId
     userState.isActive = true  // Mark Leader Key as active
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
@@ -583,9 +584,18 @@ class Controller {
   // --- Repositioning Function --- END ---
 
   private func openURL(_ action: Action) {
-    guard let url = URL(string: action.value) else {
+    let expandedURLValue: String
+    switch URLPlaceholderExpander.expand(action.value, preferredFrontmostBundleId: userState.activeBundleId) {
+    case .success(let value):
+      expandedURLValue = value
+    case .failure(let error):
+      showAlert(title: "URL Placeholder Error", message: error.localizedDescription)
+      return
+    }
+
+    guard let url = URL(string: expandedURLValue) else {
       showAlert(
-        title: "Invalid URL", message: "Failed to parse URL: \(action.value)")
+        title: "Invalid URL", message: "Failed to parse URL: \(expandedURLValue)")
       return
     }
 
@@ -593,7 +603,7 @@ class Controller {
       showAlert(
         title: "Invalid URL",
         message:
-          "URL is missing protocol (e.g. https://, raycast://): \(action.value)"
+          "URL is missing protocol (e.g. https://, raycast://): \(expandedURLValue)"
       )
       return
     }
@@ -606,12 +616,12 @@ class Controller {
       // User explicitly set the value
       shouldActivate = explicitlySetActivates
       debugLog(
-        "[Controller] openURL: 'activates' explicitly set to \(shouldActivate) for \(action.value)")
+        "[Controller] openURL: 'activates' explicitly set to \(shouldActivate) for \(expandedURLValue)")
     } else {
       // Fallback to default behavior based on scheme if activates is nil
       shouldActivate = (scheme == "http" || scheme == "https")
       debugLog(
-        "[Controller] openURL: 'activates' not set, defaulting based on scheme ('\(scheme)') to \(shouldActivate) for \(action.value)"
+        "[Controller] openURL: 'activates' not set, defaulting based on scheme ('\(scheme)') to \(shouldActivate) for \(expandedURLValue)"
       )
     }
 

@@ -1,0 +1,22 @@
+{
+  "name": "leaderkey-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "raycast-leader-key"
+  ],
+  "scripts": {
+    "build": "npm run build -w @leaderkey/config-core && npm run build -w @leaderkey/config-cli && npm run build -w leader-key-raycast",
+    "raycast:build": "npm run bundle -w leader-key-raycast",
+    "raycast:dev": "npm run dev -w leader-key-raycast",
+    "raycast:typecheck": "npm run typecheck -w leader-key-raycast",
+    "test": "npm run test -w @leaderkey/config-core && npm run test -w leader-key-raycast",
+    "typecheck": "npm run typecheck -w @leaderkey/config-core && npm run typecheck -w @leaderkey/config-cli && npm run typecheck -w leader-key-raycast"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
