@@ -42,7 +42,7 @@ test("buildRecordDetailPresentation shows shortcut preview, raw value, and canon
 
   assert.equal(presentation.title, "Send Cmd+T");
   assert.match(presentation.markdown, /`Global → o → a`/);
-  assert.match(presentation.markdown, /## What It Does/);
+  assert.match(presentation.markdown, /\*\*What It Does\*\*/);
   assert.match(presentation.markdown, /Sends Cmd\+T to the frontmost app\./);
   assert.match(presentation.markdown, /Raw: `Ct`/);
   assert.equal(presentation.metadata[0]?.title, "Type");
@@ -115,6 +115,6 @@ test("buildRecordDetailPresentation renders url, application, group, and macro p
     valuePreview: "Open Arc • Shortcut: Cmd+T",
   }));
   assert.equal(macroPresentation.title, "Run Macro");
-  assert.match(macroPresentation.markdown, /## Steps/);
+  assert.match(macroPresentation.markdown, /\*\*Steps\*\*/);
   assert.match(macroPresentation.markdown, /- Open Arc/);
 });

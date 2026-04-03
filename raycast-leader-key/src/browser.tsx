@@ -14,7 +14,7 @@ import {
   deleteRecord,
   locateNodeInFile,
   openInEditor,
-  searchRecords,
+  searchRecordsInSubtree,
   triggerLeaderKeyConfigReload,
   type CachePayload,
   type EditorId,
@@ -50,6 +50,14 @@ function configChildren(
     record.effectiveConfigDisplayName === configDisplayName &&
     effectivePathMatches(record.parentEffectiveKeyPath, parentEffectiveKeyPath)
   );
+}
+
+function configRecords(payload: CachePayload, configDisplayName: string): FlatIndexRecord[] {
+  return payload.records.filter((record) => record.effectiveConfigDisplayName === configDisplayName);
+}
+
+function relativeKeyPath(record: FlatIndexRecord, parentEffectiveKeyPath: string[]): string[] {
+  return record.effectiveKeyPath.slice(parentEffectiveKeyPath.length);
 }
 
 function currentContextGroupRecord(
@@ -131,7 +139,10 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
   }, [initialPayload]);
 
   const children = configChildren(payload, configDisplayName, parentEffectiveKeyPath);
-  const visibleRecords = searchText ? searchRecords(children, searchText) : children;
+  const branchRecords = configRecords(payload, configDisplayName);
+  const visibleRecords = searchText
+    ? searchRecordsInSubtree(branchRecords, searchText, parentEffectiveKeyPath)
+    : children;
   const contextRecord = currentContextGroupRecord(payload, configDisplayName, parentEffectiveKeyPath);
 
   useEffect(() => {
@@ -283,12 +294,19 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
       {visibleRecords.length === 0 ? (
         <List.EmptyView
           actions={emptyStateActions()}
-          description={searchText ? "No matching items in this group." : "This group is empty. Add the first action or subgroup."}
+          description={searchText ? "No matching items in this branch." : "This group is empty. Add the first action or subgroup."}
           title={searchText ? "No Results" : "Empty Group"}
         />
       ) : null}
       {visibleRecords.map((record) => {
-        const row = buildRowPresentation(record);
+        const row = buildRowPresentation(
+          record,
+          searchText
+            ? {
+                relativeKeyPath: relativeKeyPath(record, parentEffectiveKeyPath),
+              }
+            : undefined,
+        );
         const isSelected = selectedId === record.id;
         const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
           ? { modifiers: ["cmd"], key: "return" }

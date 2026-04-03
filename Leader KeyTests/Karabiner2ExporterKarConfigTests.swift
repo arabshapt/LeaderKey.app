@@ -1,4 +1,5 @@
 import XCTest
+import KeyboardShortcuts
 @testable import Leader_Key
 
 final class Karabiner2ExporterKarConfigTests: XCTestCase {
@@ -262,5 +263,267 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
 
       return variableName == name && variableValue == value
     }
+  }
+}
+
+final class Karabiner2ExporterEDNInjectionTests: XCTestCase {
+  private var originalDefaultShortcut: KeyboardShortcuts.Shortcut?
+  private var originalAppSpecificShortcut: KeyboardShortcuts.Shortcut?
+
+  override func setUp() {
+    super.setUp()
+    originalDefaultShortcut = KeyboardShortcuts.getShortcut(for: .activateDefaultOnly)
+    originalAppSpecificShortcut = KeyboardShortcuts.getShortcut(for: .activateAppSpecific)
+  }
+
+  override func tearDown() {
+    KeyboardShortcuts.setShortcut(originalDefaultShortcut, for: .activateDefaultOnly)
+    KeyboardShortcuts.setShortcut(originalAppSpecificShortcut, for: .activateAppSpecific)
+    super.tearDown()
+  }
+
+  func testGenerateCanonicalSpecificConfigRulesUsesCanonicalActivationKeysRegardlessOfKeyboardShortcuts() throws {
+    KeyboardShortcuts.setShortcut(
+      KeyboardShortcuts.Shortcut(.f10, modifiers: [.command, .shift, .control]),
+      for: .activateDefaultOnly
+    )
+    KeyboardShortcuts.setShortcut(
+      KeyboardShortcuts.Shortcut(.f11, modifiers: [.command, .shift, .control]),
+      for: .activateAppSpecific
+    )
+
+    let specificRules = Karabiner2Exporter.generateCanonicalSpecificConfigRules(
+      appConfigs: [
+        (bundleId: "com.raycast.macos", config: UserConfig(), customName: "Raycast"),
+        (bundleId: "com.apple.MobileSMS", config: UserConfig(), customName: "iMessages"),
+      ]
+    )
+
+    XCTAssertTrue(specificRules.contains("[:semicolon"))
+    XCTAssertTrue(specificRules.contains("[:right_command"))
+    XCTAssertTrue(specificRules.contains("{:send_user_command \"activate com.raycast.macos\"}"))
+    XCTAssertTrue(specificRules.contains(":raycast"))
+    XCTAssertTrue(specificRules.contains("{:send_user_command \"activate\"}"))
+    XCTAssertTrue(specificRules.contains("{:send_user_command \"activate __FALLBACK__\"}"))
+    XCTAssertTrue(specificRules.contains("[:escape"))
+    XCTAssertTrue(specificRules.contains("{:send_user_command \"deactivate\"}"))
+    XCTAssertTrue(specificRules.contains("{:key :comma :modi :command}"))
+    XCTAssertTrue(specificRules.contains("{:send_user_command \"settings\"}"))
+    XCTAssertFalse(specificRules.contains(":f10"))
+    XCTAssertFalse(specificRules.contains(":f11"))
+  }
+
+  func testGenerateCanonicalSpecificConfigRulesOrdersLongerBundleIDsBeforeShorterAndThenAlphabetically() throws {
+    let specificRules = Karabiner2Exporter.generateCanonicalSpecificConfigRules(
+      appConfigs: [
+        (
+          bundleId: "com.google.Chrome",
+          config: UserConfig(),
+          customName: "Google Chrome"
+        ),
+        (
+          bundleId: "com.google.Chrome.dev.app.fmgjjmmmlfnkbppncabfkddbjimcfncm",
+          config: UserConfig(),
+          customName: "Email Randstad"
+        ),
+        (
+          bundleId: "com.test.aaa",
+          config: UserConfig(),
+          customName: "AAA"
+        ),
+        (
+          bundleId: "com.test.bbb",
+          config: UserConfig(),
+          customName: "BBB"
+        ),
+      ]
+    )
+
+    let longChromeRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate com.google.Chrome.dev.app.fmgjjmmmlfnkbppncabfkddbjimcfncm\"}")
+    )
+    let shortChromeRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate com.google.Chrome\"}")
+    )
+    let aaaRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate com.test.aaa\"}")
+    )
+    let bbbRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate com.test.bbb\"}")
+    )
+
+    XCTAssertLessThan(longChromeRange.lowerBound, shortChromeRange.lowerBound)
+    XCTAssertLessThan(aaaRange.lowerBound, bbbRange.lowerBound)
+  }
+
+  func testGenerateCanonicalSpecificConfigRulesAppendsTerminalRulesInFixedOrder() throws {
+    let specificRules = Karabiner2Exporter.generateCanonicalSpecificConfigRules(
+      appConfigs: [(bundleId: "com.raycast.macos", config: UserConfig(), customName: "Raycast")]
+    )
+
+    let raycastRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate com.raycast.macos\"}")
+    )
+    let globalRange = try XCTUnwrap(
+      specificRules.range(of: "[:right_command [[\"leaderkey_active\" 1]")
+    )
+    let fallbackRange = try XCTUnwrap(
+      specificRules.range(of: "{:send_user_command \"activate __FALLBACK__\"}")
+    )
+    let escapeRange = try XCTUnwrap(
+      specificRules.range(of: "[:escape [[\"leaderkey_active\" 0]")
+    )
+    let settingsRange = try XCTUnwrap(
+      specificRules.range(of: "[{:key :comma :modi :command} [[\"leaderkey_active\" 0]")
+    )
+
+    XCTAssertLessThan(raycastRange.lowerBound, globalRange.lowerBound)
+    XCTAssertLessThan(globalRange.lowerBound, fallbackRange.lowerBound)
+    XCTAssertLessThan(fallbackRange.lowerBound, escapeRange.lowerBound)
+    XCTAssertLessThan(escapeRange.lowerBound, settingsRange.lowerBound)
+  }
+
+  func testInjectIntoKarabinerEDNContentReplacesOnlySpecificConfigBlockInsideActivationSection() throws {
+    let content = """
+      {:main [
+         ;;; LEADERKEY_MAIN_START
+         {:des "Leader Key - Activation Shortcuts"
+          :rules [
+          ;; Manual before
+          ;;; LEADERKEY_SPECIFIC_CONFIGS_START
+          [:old_rule]
+          ;;; LEADERKEY_SPECIFIC_CONFIGS_END
+          ;; Manual after
+          ]}
+         {:des "Custom old rule"
+          :rules [[:c :d]]}
+         ;;; LEADERKEY_MAIN_END
+       ]}
+      """
+
+    let generatedSpecificRules = """
+         [:semicolon [{:send_user_command "activate com.raycast.macos"}] :raycast]
+         [:right_command [{:send_user_command "activate"}]]
+      """
+
+    let generatedMainRules = [
+      """
+        {:des "Leader Key - Global Mode"
+         :rules [
+         [:a :b]
+         ]}
+      """
+    ]
+
+    let injection = Karabiner2Exporter.injectIntoKarabinerEDNContent(
+      content: content,
+      applications: "",
+      mainRules: generatedMainRules,
+      specificConfigRules: generatedSpecificRules,
+      preserveActivationShortcuts: true
+    )
+
+    guard case .success = injection.result else {
+      return XCTFail("Expected injection to succeed, got \(injection.result)")
+    }
+
+    let updatedContent = try XCTUnwrap(injection.updatedContent)
+    XCTAssertTrue(updatedContent.contains(";; Manual before"))
+    XCTAssertTrue(updatedContent.contains(";; Manual after"))
+    XCTAssertTrue(updatedContent.contains(generatedSpecificRules))
+    XCTAssertFalse(updatedContent.contains("[:old_rule]"))
+    XCTAssertTrue(updatedContent.contains("Leader Key - Global Mode"))
+    XCTAssertFalse(updatedContent.contains("Custom old rule"))
+  }
+
+  func testInjectIntoKarabinerEDNContentSupportsSpecificMarkersWithoutAppOrMainMarkers() throws {
+    let content = """
+      {:main [
+         {:des "Leader Key - Activation Shortcuts"
+          :rules [
+          ;;; LEADERKEY_SPECIFIC_CONFIGS_START
+          [:old_rule]
+          ;;; LEADERKEY_SPECIFIC_CONFIGS_END
+          ]}
+       ]}
+      """
+
+    let injection = Karabiner2Exporter.injectIntoKarabinerEDNContent(
+      content: content,
+      applications: "",
+      mainRules: [],
+      specificConfigRules: "   [:escape [{:send_user_command \"deactivate\"}] :leaderkey_active]"
+    )
+
+    guard case .success = injection.result else {
+      return XCTFail("Expected injection to succeed, got \(injection.result)")
+    }
+
+    let updatedContent = try XCTUnwrap(injection.updatedContent)
+    XCTAssertTrue(updatedContent.contains("[:escape"))
+    XCTAssertFalse(updatedContent.contains("[:old_rule]"))
+  }
+
+  func testInjectIntoKarabinerEDNContentReturnsPartialMarkersForSpecificConfigBlock() {
+    let content = """
+      {:main [
+         {:des "Leader Key - Activation Shortcuts"
+          :rules [
+          ;;; LEADERKEY_SPECIFIC_CONFIGS_START
+          [:old_rule]
+          ]}
+       ]}
+      """
+
+    let injection = Karabiner2Exporter.injectIntoKarabinerEDNContent(
+      content: content,
+      applications: "",
+      mainRules: [],
+      specificConfigRules: "   [:escape [{:send_user_command \"deactivate\"}] :leaderkey_active]"
+    )
+
+    switch injection.result {
+    case .partialMarkersFound(let missing):
+      XCTAssertEqual(missing, [";;; LEADERKEY_SPECIFIC_CONFIGS_END"])
+    default:
+      XCTFail("Expected partial marker failure, got \(injection.result)")
+    }
+  }
+
+  func testInjectIntoKarabinerEDNContentStillUpdatesApplicationsAndMainWithoutSpecificMarkers() throws {
+    let content = """
+      {:applications {
+         ;;; LEADERKEY_APPLICATIONS_START
+         ;; placeholder
+         ;;; LEADERKEY_APPLICATIONS_END
+       }
+       :main [
+         ;;; LEADERKEY_MAIN_START
+         ;; placeholder
+         ;;; LEADERKEY_MAIN_END
+       ]}
+      """
+
+    let injection = Karabiner2Exporter.injectIntoKarabinerEDNContent(
+      content: content,
+      applications: "   :raycast [\"com.raycast.macos\"]",
+      mainRules: [
+        """
+          {:des "Leader Key - Global Mode"
+           :rules [
+           [:a :b]
+           ]}
+        """
+      ]
+    )
+
+    guard case .success = injection.result else {
+      return XCTFail("Expected injection to succeed, got \(injection.result)")
+    }
+
+    let updatedContent = try XCTUnwrap(injection.updatedContent)
+    XCTAssertTrue(updatedContent.contains(":raycast [\"com.raycast.macos\"]"))
+    XCTAssertTrue(updatedContent.contains("Leader Key - Global Mode"))
+    XCTAssertFalse(updatedContent.contains("LEADERKEY_SPECIFIC_CONFIGS"))
   }
 }

@@ -22,7 +22,7 @@ export {
 } from "./mutations.js";
 export { normalizeLabelsInConfigDirectory } from "./normalize.js";
 export { analyzePathInConfig, parsePathInput } from "./path-navigation.js";
-export { searchRecords } from "./search.js";
+export { searchRecords, searchRecordsInSubtree } from "./search.js";
 export { actionValuePreview, generateActionLabel, generateGroupLabel, macroStepSummary } from "./labels.js";
 export type { InstalledApp } from "./apps.js";
 export type { AppConfigTemplateSource, CreateAppConfigOptions } from "./app-configs.js";

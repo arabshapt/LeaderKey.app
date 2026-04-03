@@ -11,39 +11,40 @@ final class GokuCompilerService {
 
   private init() {}
 
+  /// Finder/Xcode launches often do not inherit the interactive shell PATH,
+  /// so include common install locations when resolving/running goku.
+  private func enrichedEnvironment() -> [String: String] {
+    var env = ProcessInfo.processInfo.environment
+    let home = NSHomeDirectory()
+    let extraPaths = [
+      "/opt/homebrew/bin",
+      "/opt/homebrew/sbin",
+      "/usr/local/bin",
+      "\(home)/.bun/bin",
+      "\(home)/.deno/bin",
+      "\(home)/.cargo/bin",
+      "\(home)/bin",
+      "\(home)/.local/bin",
+    ]
+    let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+    return env
+  }
+
   func validateGokuBinary() -> GokuCompilerResult {
-    let resolved = resolvedGokuBinaryPath()
-    if resolved != "goku" {
-      if isExecutable(path: resolved) {
-        return GokuCompilerResult(success: true, message: "goku is available at \(resolved)")
+    let configured = configuredGokuBinaryPath()
+    if let configured {
+      if isExecutable(path: configured) {
+        return GokuCompilerResult(success: true, message: "goku is available at \(configured)")
       }
-      return GokuCompilerResult(success: false, message: "goku not executable at \(resolved)")
+      return GokuCompilerResult(success: false, message: "goku not executable at \(configured)")
     }
 
-    let process = Process()
-    process.launchPath = "/usr/bin/which"
-    process.arguments = ["goku"]
-
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.standardOutput = stdout
-    process.standardError = stderr
-
-    do {
-      try process.run()
-      process.waitUntilExit()
-    } catch {
-      return GokuCompilerResult(success: false, message: "goku not found: \(error)")
+    if let discovered = discoverGokuBinaryPath() {
+      return GokuCompilerResult(success: true, message: "goku is available at \(discovered)")
     }
 
-    guard process.terminationStatus == 0 else {
-      let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      return GokuCompilerResult(success: false, message: "goku not found: \(errorOutput)")
-    }
-
-    let path = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? "goku"
-    return GokuCompilerResult(success: true, message: "goku is available at \(path)")
+    return GokuCompilerResult(success: false, message: "goku not found on PATH")
   }
 
   func compileAndApply(configPath: String) -> GokuCompilerResult {
@@ -51,6 +52,7 @@ final class GokuCompilerService {
     let process = Process()
     process.launchPath = resolved
     process.arguments = ["-c", configPath]
+    process.environment = enrichedEnvironment()
 
     let stdout = Pipe()
     let stderr = Pipe()
@@ -75,9 +77,50 @@ final class GokuCompilerService {
     return GokuCompilerResult(success: true, message: message)
   }
 
-  private func resolvedGokuBinaryPath() -> String {
+  private func configuredGokuBinaryPath() -> String? {
     let configured = Defaults[.gokuBinaryPath].trimmingCharacters(in: .whitespacesAndNewlines)
-    return configured.isEmpty ? "goku" : configured
+    return configured.isEmpty ? nil : configured
+  }
+
+  private func discoverGokuBinaryPath() -> String? {
+    let process = Process()
+    process.launchPath = "/usr/bin/which"
+    process.arguments = ["goku"]
+    process.environment = enrichedEnvironment()
+
+    let stdout = Pipe()
+    let stderr = Pipe()
+    process.standardOutput = stdout
+    process.standardError = stderr
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+
+    let path = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let path, !path.isEmpty else {
+      return nil
+    }
+
+    return path
+  }
+
+  private func resolvedGokuBinaryPath() -> String {
+    if let configured = configuredGokuBinaryPath() {
+      if isExecutable(path: configured) {
+        return configured
+      }
+    }
+
+    return discoverGokuBinaryPath() ?? "goku"
   }
 
   private func isExecutable(path: String) -> Bool {

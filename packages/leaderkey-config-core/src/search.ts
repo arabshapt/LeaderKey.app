@@ -6,6 +6,12 @@ interface PreparedField {
   weight: number;
 }
 
+interface SearchContext {
+  depth: number;
+  relativeBreadcrumbDisplay: string;
+  relativeKeySequence: string;
+}
+
 function normalizeText(value: string): string {
   return value
     .toLowerCase()
@@ -24,8 +30,22 @@ function compactPath(value: string): string {
     .replace(/\s+/g, "");
 }
 
-function prepareFields(record: FlatIndexRecord): PreparedField[] {
-  return [
+function prepareFields(record: FlatIndexRecord, context?: SearchContext): PreparedField[] {
+  const fields: PreparedField[] = [
+    ...(context?.relativeKeySequence
+      ? [{
+          compact: compactPath(context.relativeKeySequence),
+          value: normalizeText(context.relativeKeySequence),
+          weight: 860,
+        }]
+      : []),
+    ...(context?.relativeBreadcrumbDisplay
+      ? [{
+          compact: compactPath(context.relativeBreadcrumbDisplay),
+          value: normalizeText(context.relativeBreadcrumbDisplay),
+          weight: 780,
+        }]
+      : []),
     {
       compact: compactPath(record.keySequence),
       value: normalizeText(record.keySequence),
@@ -56,7 +76,9 @@ function prepareFields(record: FlatIndexRecord): PreparedField[] {
       value: normalizeText(record.rawValue),
       weight: 220,
     },
-  ].filter((field) => field.value || field.compact);
+  ];
+
+  return fields.filter((field) => field.value || field.compact);
 }
 
 function substringScore(haystack: string, needle: string, weight: number): number | undefined {
@@ -111,7 +133,56 @@ function subsequenceScore(haystack: string, needle: string, weight: number): num
   return score;
 }
 
-export function searchRecords(records: FlatIndexRecord[], query: string): FlatIndexRecord[] {
+function scoreRecord(
+  record: FlatIndexRecord,
+  normalizedQuery: string,
+  compactQuery: string,
+  context?: SearchContext,
+): number | undefined {
+  const fields = prepareFields(record, context);
+  let bestFieldScore = Number.NEGATIVE_INFINITY;
+
+  for (const field of fields) {
+    const exactCompactScore = substringScore(field.compact, compactQuery, field.weight + 300);
+    if (exactCompactScore !== undefined) {
+      bestFieldScore = Math.max(bestFieldScore, exactCompactScore);
+    }
+
+    const exactTextScore = substringScore(field.value, normalizedQuery, field.weight);
+    if (exactTextScore !== undefined) {
+      bestFieldScore = Math.max(bestFieldScore, exactTextScore);
+    }
+
+    if (compactQuery.length >= 2) {
+      const fuzzyCompactScore = subsequenceScore(field.compact, compactQuery, Math.max(80, field.weight - 140));
+      if (fuzzyCompactScore !== undefined) {
+        bestFieldScore = Math.max(bestFieldScore, fuzzyCompactScore);
+      }
+
+      const fuzzyTextScore = subsequenceScore(
+        field.value.replace(/[^a-z0-9]+/g, ""),
+        compactQuery,
+        Math.max(40, field.weight - 220),
+      );
+      if (fuzzyTextScore !== undefined) {
+        bestFieldScore = Math.max(bestFieldScore, fuzzyTextScore);
+      }
+    }
+  }
+
+  if (!Number.isFinite(bestFieldScore)) {
+    return undefined;
+  }
+
+  const depthBonus = context ? Math.max(0, 24 - Math.max(0, context.depth - 1) * 6) : 0;
+  return bestFieldScore + depthBonus;
+}
+
+function searchWithContext(
+  records: FlatIndexRecord[],
+  query: string,
+  contextForRecord?: (record: FlatIndexRecord) => SearchContext | undefined,
+): FlatIndexRecord[] {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
     return [...records].sort((left, right) => left.breadcrumbDisplay.localeCompare(right.breadcrumbDisplay));
@@ -122,44 +193,48 @@ export function searchRecords(records: FlatIndexRecord[], query: string): FlatIn
 
   return records
     .map((record) => {
-      const fields = prepareFields(record);
-      let bestFieldScore = Number.NEGATIVE_INFINITY;
-
-      for (const field of fields) {
-        const exactCompactScore = substringScore(field.compact, compactQuery, field.weight + 300);
-        if (exactCompactScore !== undefined) {
-          bestFieldScore = Math.max(bestFieldScore, exactCompactScore);
-        }
-
-        const exactTextScore = substringScore(field.value, normalizedQuery, field.weight);
-        if (exactTextScore !== undefined) {
-          bestFieldScore = Math.max(bestFieldScore, exactTextScore);
-        }
-
-        if (compactQuery.length >= 2) {
-          const fuzzyCompactScore = subsequenceScore(field.compact, compactQuery, Math.max(80, field.weight - 140));
-          if (fuzzyCompactScore !== undefined) {
-            bestFieldScore = Math.max(bestFieldScore, fuzzyCompactScore);
-          }
-
-          const fuzzyTextScore = subsequenceScore(
-            field.value.replace(/[^a-z0-9]+/g, ""),
-            compactQuery,
-            Math.max(40, field.weight - 220),
-          );
-          if (fuzzyTextScore !== undefined) {
-            bestFieldScore = Math.max(bestFieldScore, fuzzyTextScore);
-          }
-        }
-      }
-
-      if (!Number.isFinite(bestFieldScore)) {
+      const score = scoreRecord(record, normalizedQuery, compactQuery, contextForRecord?.(record));
+      if (score === undefined) {
         return undefined;
       }
 
-      return { record, score: bestFieldScore };
+      return { record, score };
     })
     .filter((entry): entry is { record: FlatIndexRecord; score: number } => Boolean(entry))
     .sort((left, right) => right.score - left.score || left.record.breadcrumbDisplay.localeCompare(right.record.breadcrumbDisplay))
     .map((entry) => entry.record);
+}
+
+function isDescendantOf(record: FlatIndexRecord, parentEffectiveKeyPath: string[]): boolean {
+  return (
+    record.effectiveKeyPath.length > parentEffectiveKeyPath.length &&
+    parentEffectiveKeyPath.every((segment, index) => record.effectiveKeyPath[index] === segment)
+  );
+}
+
+function relativePathText(record: FlatIndexRecord, parentEffectiveKeyPath: string[]): string {
+  return record.effectiveKeyPath.slice(parentEffectiveKeyPath.length).join(" -> ");
+}
+
+function relativeBreadcrumbText(record: FlatIndexRecord, parentEffectiveKeyPath: string[]): string {
+  const relativeBreadcrumb = record.breadcrumbPath.slice(1 + parentEffectiveKeyPath.length);
+  return relativeBreadcrumb.join(" -> ");
+}
+
+export function searchRecords(records: FlatIndexRecord[], query: string): FlatIndexRecord[] {
+  return searchWithContext(records, query);
+}
+
+export function searchRecordsInSubtree(
+  records: FlatIndexRecord[],
+  query: string,
+  parentEffectiveKeyPath: string[],
+): FlatIndexRecord[] {
+  const descendants = records.filter((record) => isDescendantOf(record, parentEffectiveKeyPath));
+
+  return searchWithContext(descendants, query, (record) => ({
+    depth: Math.max(1, record.effectiveKeyPath.length - parentEffectiveKeyPath.length),
+    relativeBreadcrumbDisplay: relativeBreadcrumbText(record, parentEffectiveKeyPath),
+    relativeKeySequence: relativePathText(record, parentEffectiveKeyPath),
+  }));
 }

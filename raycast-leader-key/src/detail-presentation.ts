@@ -33,6 +33,10 @@ function codeBlock(value: string, language = "text"): string {
   return [`\`\`\`${language}`, safeValue, "```"].join("\n");
 }
 
+function simpleValueLine(label: string, value: string): string[] {
+  return ["**Value**", "", `${label}: ${value}`];
+}
+
 function humanTitle(record: FlatIndexRecord): string {
   switch (record.actionType) {
     case "application":
@@ -143,18 +147,22 @@ function valueSection(record: FlatIndexRecord): string[] {
   }
 
   switch (record.actionType) {
+    case "application":
+      return simpleValueLine("App", record.rawValue);
     case "command":
-      return ["## Value", "", codeBlock(record.rawValue, "sh")];
+      return ["**Value**", "", codeBlock(record.rawValue, "sh")];
+    case "folder":
+      return simpleValueLine("Folder", record.rawValue);
     case "url":
-      return ["## Value", "", codeBlock(record.rawValue)];
+      return simpleValueLine("URL", record.rawValue);
     case "text":
-      return ["## Value", "", codeBlock(record.rawValue)];
+      return ["**Value**", "", codeBlock(record.rawValue)];
     case "menu":
-      return ["## Value", "", codeBlock(record.rawValue)];
+      return ["**Value**", "", codeBlock(record.rawValue)];
     case "intellij": {
       const parsed = parseIntellijValue(record.rawValue);
       const lines = [
-        "## Value",
+        "**Value**",
         "",
         `Actions: \`${escapeInlineCode(parsed.actions.join(", ") || record.valuePreview)}\``,
       ];
@@ -167,7 +175,7 @@ function valueSection(record: FlatIndexRecord): string[] {
     case "keystroke": {
       const parsed = parseKeystrokeValue(record.rawValue);
       const human = record.valuePreview.split(" • ").at(-1) ?? record.valuePreview;
-      const lines = ["## Value", "", `Shortcut: \`${escapeInlineCode(human)}\``];
+      const lines = ["**Value**", "", `Shortcut: \`${escapeInlineCode(human)}\``];
       if (parsed.app) {
         lines.push(`Target: \`${escapeInlineCode(parsed.app)}\``);
       }
@@ -177,20 +185,20 @@ function valueSection(record: FlatIndexRecord): string[] {
     }
     case "shortcut":
       return [
-        "## Value",
+        "**Value**",
         "",
         `Shortcut: \`${escapeInlineCode(record.valuePreview || record.displayLabel)}\``,
         `Raw: \`${escapeInlineCode(record.rawValue)}\``,
       ];
     default:
-      return ["## Value", "", codeBlock(record.rawValue)];
+      return ["**Value**", "", codeBlock(record.rawValue)];
   }
 }
 
 function extraSection(record: FlatIndexRecord): string[] {
   if (record.actionType === "macro" && record.macroStepSummary && record.macroStepSummary.length > 0) {
     return [
-      "## Steps",
+      "**Steps**",
       "",
       ...record.macroStepSummary.map((step) => `- ${step}`),
     ];
@@ -230,11 +238,11 @@ function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
 export function buildRecordDetailPresentation(record: FlatIndexRecord): RecordDetailPresentation {
   const title = humanTitle(record);
   const markdown = [
-    `# ${title}`,
+    `## ${title}`,
     "",
     `\`${escapeInlineCode(fullPathText(record))}\``,
     "",
-    "## What It Does",
+    "**What It Does**",
     "",
     plainEnglishSummary(record),
     "",

@@ -1,6 +1,10 @@
 import { Icon, type Image, type List } from "@raycast/api";
 import type { FlatIndexRecord } from "@leaderkey/config-core";
-import { canonicalSequenceText, fullPathText, truncateText } from "./record-formatting.js";
+import { canonicalSequenceText, fullPathText, keyPathText, truncateText } from "./record-formatting.js";
+
+interface RowPresentationOptions {
+  relativeKeyPath?: string[];
+}
 
 function compactActionSummary(record: FlatIndexRecord): string {
   if (record.kind === "group") {
@@ -54,15 +58,28 @@ function subtitleTooltip(record: FlatIndexRecord): string {
   return parts.join("\n");
 }
 
-function recordStatusAccessories(record: FlatIndexRecord): List.Item.Accessory[] | undefined {
-  if (!record.inherited) {
+function recordStatusAccessories(record: FlatIndexRecord, options?: RowPresentationOptions): List.Item.Accessory[] | undefined {
+  const statusParts: string[] = [];
+  const tooltipParts: string[] = [];
+
+  if (options?.relativeKeyPath && options.relativeKeyPath.length > 1) {
+    statusParts.push(`↳${options.relativeKeyPath.length}`);
+    tooltipParts.push(`${options.relativeKeyPath.length} levels below the current group`);
+  }
+
+  if (record.inherited) {
+    statusParts.push("fb");
+    tooltipParts.push(`Inherited from ${record.sourceConfigDisplayName}`);
+  }
+
+  if (statusParts.length === 0) {
     return undefined;
   }
 
   return [
     {
-      text: "fallback",
-      tooltip: `Inherited from ${record.sourceConfigDisplayName}`,
+      text: statusParts.join(" "),
+      tooltip: tooltipParts.join("\n"),
     },
   ];
 }
@@ -99,16 +116,23 @@ export function recordIcon(record: FlatIndexRecord): Image.ImageLike {
   return Icon.Circle;
 }
 
-export function buildRowPresentation(record: FlatIndexRecord): Pick<List.Item.Props, "accessories" | "subtitle" | "title"> {
+export function buildRowPresentation(
+  record: FlatIndexRecord,
+  options?: RowPresentationOptions,
+): Pick<List.Item.Props, "accessories" | "subtitle" | "title"> {
+  const titleValue = options?.relativeKeyPath
+    ? keyPathText(options.relativeKeyPath) || canonicalSequenceText(record)
+    : canonicalSequenceText(record);
+
   return {
-    accessories: recordStatusAccessories(record),
+    accessories: recordStatusAccessories(record, options),
     subtitle: {
       tooltip: subtitleTooltip(record),
       value: truncateText(compactActionSummary(record)),
     },
     title: {
       tooltip: fullPathText(record),
-      value: canonicalSequenceText(record),
+      value: titleValue,
     },
   };
 }

@@ -195,6 +195,9 @@ final class Karabiner2InputMethod: InputMethod {
         from: ednContent,
         includeActivationShortcuts: true  // Always extract, but we'll decide whether to inject
       )
+      let specificConfigRules = Karabiner2Exporter.generateCanonicalSpecificConfigRules(
+        appConfigs: appConfigs
+      )
       
       // Prepare rules for injection
       var rulesToInject = mainRules
@@ -207,11 +210,12 @@ final class Karabiner2InputMethod: InputMethod {
         debugLog("[Karabiner2InputMethod] Preserving existing activation shortcuts")
       }
       
-      if !applications.isEmpty || !rulesToInject.isEmpty {
+      if !applications.isEmpty || !rulesToInject.isEmpty || !specificConfigRules.isEmpty {
         // Try injection with auto-add markers on first attempt
         let injectionResult = Karabiner2Exporter.injectIntoMainKarabinerEDN(
           applications: applications,
           mainRules: rulesToInject,
+          specificConfigRules: specificConfigRules,
           autoAddMarkers: true,  // Auto-add markers if missing
           preserveActivationShortcuts: hasExistingActivationShortcuts  // Preserve if they exist
         )

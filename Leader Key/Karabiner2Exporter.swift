@@ -36,6 +36,12 @@ final class Karabiner2Exporter {
   private static let globalInitialStateId: Int32 = 1
   private static let fallbackInitialStateId: Int32 = 2
   private static let inactiveStateId: Int32 = 0
+  private static let appStartMarker = ";;; LEADERKEY_APPLICATIONS_START"
+  private static let appEndMarker = ";;; LEADERKEY_APPLICATIONS_END"
+  private static let mainStartMarker = ";;; LEADERKEY_MAIN_START"
+  private static let mainEndMarker = ";;; LEADERKEY_MAIN_END"
+  private static let specificConfigsStartMarker = ";;; LEADERKEY_SPECIFIC_CONFIGS_START"
+  private static let specificConfigsEndMarker = ";;; LEADERKEY_SPECIFIC_CONFIGS_END"
   
   // Legacy constant for backward compatibility
   private static let initialStateId: Int32 = globalInitialStateId
@@ -54,6 +60,17 @@ final class Karabiner2Exporter {
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) -> (edn: String, stateMappings: [StateMapping]) {
     debugLog("[Karabiner2Exporter] generateUnifiedGokuEDNHierarchical called with \(appConfigs.count) app configs")
+
+    let globalActivationShortcut = resolveActivationShortcut(
+      name: .activateDefaultOnly,
+      fallbackKeyCode: "k",
+      fallbackModifiers: ["command", "shift"]
+    )
+    let appSpecificActivationShortcut = resolveActivationShortcut(
+      name: .activateAppSpecific,
+      fallbackKeyCode: "k",
+      fallbackModifiers: ["command", "option"]
+    )
     
     // 1. Generate app aliases
     var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
@@ -112,7 +129,10 @@ final class Karabiner2Exporter {
         from: appStateTree,
         appAlias: alias,
         bundleId: bundleId,
-        activationKey: "{:key :k :modi [:command :shift]}",
+        activationKey: gokuKeyExpression(
+          keyCode: appSpecificActivationShortcut.keyCode,
+          modifiers: appSpecificActivationShortcut.modifiers
+        ),
         initialStateId: appInitialStateId
       )
       allActivations.append(appActivation)
@@ -128,7 +148,10 @@ final class Karabiner2Exporter {
       from: globalStateTree,
       appAlias: nil,
       bundleId: nil,
-      activationKey: "{:key :k :modi :command}",
+      activationKey: gokuKeyExpression(
+        keyCode: globalActivationShortcut.keyCode,
+        modifiers: globalActivationShortcut.modifiers
+      ),
       initialStateId: globalInitialStateId
     )
     allActivations.append(globalActivation)
@@ -152,7 +175,10 @@ final class Karabiner2Exporter {
       from: fallbackStateTree,
       appAlias: nil,
       bundleId: "__FALLBACK__",
-      activationKey: "{:key :k :modi [:command :option]}",
+      activationKey: gokuKeyExpression(
+        keyCode: appSpecificActivationShortcut.keyCode,
+        modifiers: appSpecificActivationShortcut.modifiers
+      ),
       initialStateId: fallbackInitialStateId
     )
     allActivations.append(fallbackActivation)
@@ -1058,6 +1084,19 @@ final class Karabiner2Exporter {
     return (keyCode, modifiers)
   }
 
+  private static func gokuKeyExpression(keyCode: String, modifiers: [String]) -> String {
+    if modifiers.isEmpty {
+      return ":\(keyCode)"
+    }
+
+    let gokuModifiers = modifiers.map { ":\($0)" }
+    if gokuModifiers.count == 1 {
+      return "{:key :\(keyCode) :modi \(gokuModifiers[0])}"
+    }
+
+    return "{:key :\(keyCode) :modi [\(gokuModifiers.joined(separator: " "))]}"
+  }
+
   private static func karModifiers(from modifiers: NSEvent.ModifierFlags) -> [String] {
     var values: [String] = []
     if modifiers.contains(.command) { values.append("command") }
@@ -1122,6 +1161,16 @@ final class Karabiner2Exporter {
       50: "grave_accent_and_tilde",
       51: "delete_or_backspace",
       53: "escape",
+      54: "right_command",
+      55: "left_command",
+      56: "left_shift",
+      57: "caps_lock",
+      58: "left_option",
+      59: "left_control",
+      60: "right_shift",
+      61: "right_option",
+      62: "right_control",
+      63: "fn",
       122: "f1",
       120: "f2",
       99: "f3",
@@ -2930,16 +2979,88 @@ final class Karabiner2Exporter {
     case fileNotFound
     case error(String)
   }
+
+  static func generateCanonicalSpecificConfigRules(
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+  ) -> String {
+    var appAliases: [(bundleId: String, alias: String)] = []
+    var usedAliases = Set<String>()
+
+    for (bundleId, _, customName) in appConfigs {
+      if bundleId.contains(".meta") {
+        continue
+      }
+
+      var alias = generateAppAlias(from: bundleId, customName: customName)
+      let baseAlias = alias
+      var counter = 1
+
+      while usedAliases.contains(alias) {
+        alias = "\(baseAlias)_\(counter)"
+        counter += 1
+      }
+
+      usedAliases.insert(alias)
+      appAliases.append((bundleId: bundleId, alias: alias))
+    }
+
+    appAliases.sort { lhs, rhs in
+      if lhs.bundleId.count != rhs.bundleId.count {
+        return lhs.bundleId.count > rhs.bundleId.count
+      }
+
+      if lhs.bundleId != rhs.bundleId {
+        return lhs.bundleId < rhs.bundleId
+      }
+
+      return lhs.alias < rhs.alias
+    }
+
+    var rules = appAliases.map { appAlias in
+      canonicalRule(
+        generateUnifiedActivationManipulator(
+          appAlias: appAlias.alias,
+          bundleId: appAlias.bundleId,
+          activationKey: ":semicolon",
+          initialStateId: generateAppInitialStateId(appAlias: appAlias.alias)
+        ))
+    }
+
+    rules.append(
+      canonicalRule(
+        generateUnifiedActivationManipulator(
+          appAlias: nil,
+          bundleId: nil,
+          activationKey: ":right_command",
+          initialStateId: globalInitialStateId
+        )))
+    rules.append(
+      canonicalRule(
+        generateUnifiedActivationManipulator(
+          appAlias: nil,
+          bundleId: "__FALLBACK__",
+          activationKey: ":semicolon",
+          initialStateId: fallbackInitialStateId
+        )))
+    rules.append(
+      "[:escape [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] \(gokuSendUserCommand("deactivate"))] :leaderkey_active]"
+    )
+    rules.append(
+      "[{:key :comma :modi :command} [[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leaderkey_sticky\" 0] [\"leader_state\" 0] \(gokuSendUserCommand("deactivate")) \(gokuSendUserCommand("settings"))] :leaderkey_active]"
+    )
+
+    return rules.joined(separator: "\n")
+  }
   
-  static func injectIntoMainKarabinerEDN(applications: String, mainRules: [String], autoAddMarkers: Bool = false, preserveActivationShortcuts: Bool = false) -> InjectionResult {
+  static func injectIntoMainKarabinerEDN(
+    applications: String,
+    mainRules: [String],
+    specificConfigRules: String? = nil,
+    autoAddMarkers: Bool = false,
+    preserveActivationShortcuts: Bool = false
+  ) -> InjectionResult {
     let configPath = NSHomeDirectory() + "/.config/karabiner.edn"
-    
-    // Marker constants for efficient reuse
-    let appStartMarker = ";;; LEADERKEY_APPLICATIONS_START"
-    let appEndMarker = ";;; LEADERKEY_APPLICATIONS_END"
-    let mainStartMarker = ";;; LEADERKEY_MAIN_START"
-    let mainEndMarker = ";;; LEADERKEY_MAIN_END"
-    
+
     // Check if config file exists
     guard FileManager.default.fileExists(atPath: configPath) else {
       debugLog("[Karabiner2Exporter] karabiner.edn not found at \(configPath)")
@@ -2954,48 +3075,25 @@ final class Karabiner2Exporter {
       debugLog("[Karabiner2Exporter] Failed to read karabiner.edn: \(error)")
       return .error("Failed to read file: \(error.localizedDescription)")
     }
-    
-    // Check which markers exist
-    let hasAppStart = content.contains(appStartMarker)
-    let hasAppEnd = content.contains(appEndMarker)
-    let hasMainStart = content.contains(mainStartMarker)
-    let hasMainEnd = content.contains(mainEndMarker)
-    
-    let hasAppMarkers = hasAppStart && hasAppEnd
-    let hasMainMarkers = hasMainStart && hasMainEnd
-    
-    // Determine if we should proceed
-    if !hasAppMarkers && !hasMainMarkers {
-      if autoAddMarkers {
-        // Try to add markers automatically
-        debugLog("[Karabiner2Exporter] No markers found, attempting to add them automatically")
-        let contentWithMarkers = insertMarkersIfMissing(content: content)
-        if contentWithMarkers != content {
-          // Markers were added, proceed with injection
-          do {
-            try contentWithMarkers.write(toFile: configPath, atomically: true, encoding: .utf8)
-            debugLog("[Karabiner2Exporter] Added missing markers to karabiner.edn")
-            // Recursive call with the updated file
-            return injectIntoMainKarabinerEDN(applications: applications, mainRules: mainRules, autoAddMarkers: false)
-          } catch {
-            return .error("Failed to write markers: \(error.localizedDescription)")
-          }
-        }
-      }
-      debugLog("[Karabiner2Exporter] No markers found in karabiner.edn")
-      return .noMarkersFound
+
+    let injection = injectIntoKarabinerEDNContent(
+      content: content,
+      applications: applications,
+      mainRules: mainRules,
+      specificConfigRules: specificConfigRules,
+      autoAddMarkers: autoAddMarkers,
+      preserveActivationShortcuts: preserveActivationShortcuts
+    )
+
+    switch injection.result {
+    case .success:
+      break
+    default:
+      return injection.result
     }
-    
-    // Check for partial markers (incomplete pairs)
-    var missingMarkers: [String] = []
-    if hasAppStart && !hasAppEnd { missingMarkers.append(appEndMarker) }
-    if !hasAppStart && hasAppEnd { missingMarkers.append(appStartMarker) }
-    if hasMainStart && !hasMainEnd { missingMarkers.append(mainEndMarker) }
-    if !hasMainStart && hasMainEnd { missingMarkers.append(mainStartMarker) }
-    
-    if !missingMarkers.isEmpty {
-      debugLog("[Karabiner2Exporter] Partial markers found, missing: \(missingMarkers)")
-      return .partialMarkersFound(missing: missingMarkers)
+
+    guard let modifiedContent = injection.updatedContent else {
+      return .noMarkersFound
     }
     
     // Create backup only if we're going to modify the file
@@ -3007,87 +3105,133 @@ final class Karabiner2Exporter {
       debugLog("[Karabiner2Exporter] Failed to create backup: \(error)")
       // Continue anyway, backup is not critical
     }
-    
+
+    do {
+      try modifiedContent.write(toFile: configPath, atomically: true, encoding: .utf8)
+      debugLog("[Karabiner2Exporter] Successfully updated karabiner.edn")
+      return .success
+    } catch {
+      debugLog("[Karabiner2Exporter] Failed to write updated content: \(error)")
+      return .error("Failed to write file: \(error.localizedDescription)")
+    }
+  }
+
+  static func injectIntoKarabinerEDNContent(
+    content: String,
+    applications: String,
+    mainRules: [String],
+    specificConfigRules: String? = nil,
+    autoAddMarkers: Bool = false,
+    preserveActivationShortcuts: Bool = false
+  ) -> (result: InjectionResult, updatedContent: String?) {
+    let hasAppStart = content.contains(appStartMarker)
+    let hasAppEnd = content.contains(appEndMarker)
+    let hasMainStart = content.contains(mainStartMarker)
+    let hasMainEnd = content.contains(mainEndMarker)
+    let hasSpecificStart = content.contains(specificConfigsStartMarker)
+    let hasSpecificEnd = content.contains(specificConfigsEndMarker)
+
+    let hasAppMarkers = hasAppStart && hasAppEnd
+    let hasMainMarkers = hasMainStart && hasMainEnd
+    let hasSpecificMarkers = hasSpecificStart && hasSpecificEnd
+
+    var missingMarkers: [String] = []
+    if hasAppStart && !hasAppEnd { missingMarkers.append(appEndMarker) }
+    if !hasAppStart && hasAppEnd { missingMarkers.append(appStartMarker) }
+    if hasMainStart && !hasMainEnd { missingMarkers.append(mainEndMarker) }
+    if !hasMainStart && hasMainEnd { missingMarkers.append(mainStartMarker) }
+    if hasSpecificStart && !hasSpecificEnd { missingMarkers.append(specificConfigsEndMarker) }
+    if !hasSpecificStart && hasSpecificEnd { missingMarkers.append(specificConfigsStartMarker) }
+
+    if !missingMarkers.isEmpty {
+      debugLog("[Karabiner2Exporter] Partial markers found, missing: \(missingMarkers)")
+      return (.partialMarkersFound(missing: missingMarkers), nil)
+    }
+
+    if !hasAppMarkers && !hasMainMarkers && !hasSpecificMarkers {
+      if autoAddMarkers {
+        debugLog("[Karabiner2Exporter] No markers found, attempting to add them automatically")
+        let contentWithMarkers = insertMarkersIfMissing(content: content)
+        if contentWithMarkers != content {
+          debugLog("[Karabiner2Exporter] Added missing markers to karabiner.edn content")
+          return injectIntoKarabinerEDNContent(
+            content: contentWithMarkers,
+            applications: applications,
+            mainRules: mainRules,
+            specificConfigRules: specificConfigRules,
+            autoAddMarkers: false,
+            preserveActivationShortcuts: preserveActivationShortcuts
+          )
+        }
+      }
+
+      debugLog("[Karabiner2Exporter] No markers found in karabiner.edn content")
+      return (.noMarkersFound, nil)
+    }
+
     var modifiedContent = content
     var injectedSomething = false
-    
-    // Replace applications section if markers exist
+
     if hasAppMarkers {
-      if let appStartRange = modifiedContent.range(of: appStartMarker),
-         let appEndRange = modifiedContent.range(of: appEndMarker, range: appStartRange.upperBound..<modifiedContent.endIndex) {
-        let replaceRange = appStartRange.upperBound..<appEndRange.lowerBound
-        let injectedApps = "\n" + applications + "\n  "
-        modifiedContent.replaceSubrange(replaceRange, with: injectedApps)
+      if replaceContentBetweenMarkers(
+        in: &modifiedContent,
+        startMarker: appStartMarker,
+        endMarker: appEndMarker,
+        replacementContent: applications
+      ) {
         debugLog("[Karabiner2Exporter] Injected applications section")
         injectedSomething = true
       }
     }
-    
-    // Replace main section if markers exist
-    if hasMainMarkers {
-      if let mainStartRange = modifiedContent.range(of: mainStartMarker),
-         let mainEndRange = modifiedContent.range(of: mainEndMarker, range: mainStartRange.upperBound..<modifiedContent.endIndex) {
-        let replaceRange = mainStartRange.upperBound..<mainEndRange.lowerBound
-        
-        // Check if we need to preserve activation shortcuts that are inside the markers
-        var preservedActivation: String? = nil
-        if preserveActivationShortcuts {
-          let existingContent = String(modifiedContent[replaceRange])
-          // Extract existing activation shortcuts block if present
-          if let activationStart = existingContent.range(of: "{:des \"Leader Key - Activation Shortcuts\"") {
-            // Find the matching closing brace
-            var braceCount = 0
-            var foundEnd = false
-            var currentIndex = activationStart.lowerBound
-            
-            while currentIndex < existingContent.endIndex && !foundEnd {
-              let char = existingContent[currentIndex]
-              if char == "{" {
-                braceCount += 1
-              } else if char == "}" {
-                braceCount -= 1
-                if braceCount == 0 {
-                  foundEnd = true
-                  preservedActivation = String(existingContent[activationStart.lowerBound...currentIndex])
-                  debugLog("[Karabiner2Exporter] Preserving existing activation shortcuts from within markers")
-                }
-              }
-              currentIndex = existingContent.index(after: currentIndex)
-            }
-          }
+
+    if hasMainMarkers,
+       let mainStartRange = modifiedContent.range(of: mainStartMarker),
+       let mainEndRange = modifiedContent.range(
+         of: mainEndMarker,
+         range: mainStartRange.upperBound..<modifiedContent.endIndex)
+    {
+      let replaceRange = mainStartRange.upperBound..<mainEndRange.lowerBound
+      var preservedActivation: String? = nil
+
+      if preserveActivationShortcuts {
+        let existingContent = String(modifiedContent[replaceRange])
+        preservedActivation = extractActivationSection(from: existingContent)
+        if preservedActivation != nil {
+          debugLog("[Karabiner2Exporter] Preserving existing activation shortcuts from within markers")
         }
-        
-        // Build the replacement content
-        var injectedMain = "\n"
-        
-        // Add preserved activation shortcuts first if they exist
-        if let preservedActivation = preservedActivation {
-          injectedMain += "  " + preservedActivation + "\n\n"
-        }
-        
-        // Add other main rules
-        injectedMain += mainRules.joined(separator: "\n\n") + "\n  "
-        
-        modifiedContent.replaceSubrange(replaceRange, with: injectedMain)
-        debugLog("[Karabiner2Exporter] Injected main rules section")
-        injectedSomething = true
       }
+
+      var injectedMainParts: [String] = []
+      if let preservedActivation = preservedActivation {
+        injectedMainParts.append("  " + preservedActivation)
+      }
+      injectedMainParts.append(contentsOf: mainRules)
+
+      let replacementIndent = lineIndentation(at: mainEndRange.lowerBound, in: modifiedContent)
+      let injectedMain = "\n" + injectedMainParts.joined(separator: "\n\n") + "\n" + replacementIndent
+      modifiedContent.replaceSubrange(replaceRange, with: injectedMain)
+      debugLog("[Karabiner2Exporter] Injected main rules section")
+      injectedSomething = true
     }
-    
-    // Write the modified content back only if we injected something
+
+    if hasSpecificMarkers,
+       replaceContentBetweenMarkers(
+         in: &modifiedContent,
+         startMarker: specificConfigsStartMarker,
+         endMarker: specificConfigsEndMarker,
+         replacementContent: specificConfigRules ?? ""
+       )
+    {
+      debugLog("[Karabiner2Exporter] Injected specific configs activation block")
+      injectedSomething = true
+    }
+
     if injectedSomething {
-      do {
-        try modifiedContent.write(toFile: configPath, atomically: true, encoding: .utf8)
-        debugLog("[Karabiner2Exporter] Successfully updated karabiner.edn")
-        return .success
-      } catch {
-        debugLog("[Karabiner2Exporter] Failed to write updated content: \(error)")
-        return .error("Failed to write file: \(error.localizedDescription)")
-      }
-    } else {
-      debugLog("[Karabiner2Exporter] No injection performed")
-      return .noMarkersFound
+      return (.success, modifiedContent)
     }
+
+    debugLog("[Karabiner2Exporter] No injection performed")
+    return (.noMarkersFound, nil)
   }
   
   // Helper method to extract sections from unified EDN for injection
@@ -3160,11 +3304,6 @@ final class Karabiner2Exporter {
   private static func insertMarkersIfMissing(content: String) -> String {
     var modifiedContent = content
     
-    let appStartMarker = ";;; LEADERKEY_APPLICATIONS_START"
-    let appEndMarker = ";;; LEADERKEY_APPLICATIONS_END"
-    let mainStartMarker = ";;; LEADERKEY_MAIN_START"
-    let mainEndMarker = ";;; LEADERKEY_MAIN_END"
-    
     // Check if applications section exists and add markers if missing
     if !content.contains(appStartMarker) && !content.contains(appEndMarker) {
       // Find :applications section
@@ -3229,6 +3368,59 @@ final class Karabiner2Exporter {
     }
     
     return modifiedContent
+  }
+
+  private static func replaceContentBetweenMarkers(
+    in content: inout String,
+    startMarker: String,
+    endMarker: String,
+    replacementContent: String
+  ) -> Bool {
+    guard let startRange = content.range(of: startMarker),
+          let endRange = content.range(of: endMarker, range: startRange.upperBound..<content.endIndex)
+    else {
+      return false
+    }
+
+    let replaceRange = startRange.upperBound..<endRange.lowerBound
+    let indent = lineIndentation(at: endRange.lowerBound, in: content)
+    let replacement = "\n" + replacementContent + "\n" + indent
+    content.replaceSubrange(replaceRange, with: replacement)
+    return true
+  }
+
+  private static func lineIndentation(at index: String.Index, in content: String) -> String {
+    let lineStart = content[..<index].lastIndex(of: "\n").map { content.index(after: $0) } ?? content.startIndex
+    let prefix = content[lineStart..<index]
+    return String(prefix.prefix { $0 == " " || $0 == "\t" })
+  }
+
+  private static func canonicalRule(_ rule: String) -> String {
+    rule.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func extractActivationSection(from content: String) -> String? {
+    guard let activationStart = content.range(of: "{:des \"Leader Key - Activation Shortcuts\"") else {
+      return nil
+    }
+
+    var braceCount = 0
+    var currentIndex = activationStart.lowerBound
+
+    while currentIndex < content.endIndex {
+      let char = content[currentIndex]
+      if char == "{" {
+        braceCount += 1
+      } else if char == "}" {
+        braceCount -= 1
+        if braceCount == 0 {
+          return String(content[activationStart.lowerBound...currentIndex])
+        }
+      }
+      currentIndex = content.index(after: currentIndex)
+    }
+
+    return nil
   }
   
   // MARK: - Alternative Mappings

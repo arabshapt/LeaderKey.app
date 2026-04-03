@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { searchRecords, type FlatIndexRecord } from "../src/index.js";
+import { searchRecords, searchRecordsInSubtree, type FlatIndexRecord } from "../src/index.js";
 
 function makeRecord(overrides: Partial<FlatIndexRecord>): FlatIndexRecord {
   return {
@@ -78,4 +78,79 @@ test("searchRecords ranks direct path hits above loose label matches", () => {
 
   const results = searchRecords([labelOnlyRecord, pathRecord], "oa");
   assert.equal(results[0]?.id, pathRecord.id);
+});
+
+test("searchRecordsInSubtree finds deep descendants using relative path variants", () => {
+  const directChild = makeRecord({
+    breadcrumbDisplay: "Global -> g -> a",
+    breadcrumbPath: ["Global", "g", "a"],
+    displayLabel: "Direct Arc",
+    effectiveKeyPath: ["g", "a"],
+    id: "direct-child",
+    key: "a",
+    keySequence: "g -> a",
+    parentEffectiveKeyPath: ["g"],
+    valuePreview: "Arc",
+  });
+  const deepDescendant = makeRecord({
+    breadcrumbDisplay: "Global -> g -> o -> a",
+    breadcrumbPath: ["Global", "g", "o", "a"],
+    displayLabel: "Deep Arc",
+    effectiveKeyPath: ["g", "o", "a"],
+    id: "deep-descendant",
+    key: "a",
+    keySequence: "g -> o -> a",
+    parentEffectiveKeyPath: ["g", "o"],
+    valuePreview: "Arc",
+  });
+  const outsideBranch = makeRecord({
+    breadcrumbDisplay: "Global -> o -> a",
+    breadcrumbPath: ["Global", "o", "a"],
+    displayLabel: "Outside Branch",
+    effectiveKeyPath: ["o", "a"],
+    id: "outside-branch",
+    key: "a",
+    keySequence: "o -> a",
+    parentEffectiveKeyPath: ["o"],
+    valuePreview: "Arc",
+  });
+
+  for (const query of ["oa", "o a", "o->a", "o→a"]) {
+    const results = searchRecordsInSubtree([outsideBranch, directChild, deepDescendant], query, ["g"]);
+    assert.equal(results[0]?.id, deepDescendant.id, `expected ${query} to match the deep relative path first`);
+    assert.ok(results.every((record) => record.id !== outsideBranch.id), "expected subtree search to stay in branch");
+  }
+});
+
+test("searchRecordsInSubtree falls back to absolute path matching and prefers shallower results on ties", () => {
+  const directChild = makeRecord({
+    breadcrumbDisplay: "Global -> g -> a",
+    breadcrumbPath: ["Global", "g", "a"],
+    displayLabel: "Direct Match",
+    effectiveKeyPath: ["g", "a"],
+    id: "direct-child",
+    key: "a",
+    keySequence: "g -> a",
+    parentEffectiveKeyPath: ["g"],
+    rawValue: "shared-value",
+    valuePreview: "shared-value",
+  });
+  const deepDescendant = makeRecord({
+    breadcrumbDisplay: "Global -> g -> x -> a",
+    breadcrumbPath: ["Global", "g", "x", "a"],
+    displayLabel: "Deep Match",
+    effectiveKeyPath: ["g", "x", "a"],
+    id: "deep-descendant",
+    key: "a",
+    keySequence: "g -> x -> a",
+    parentEffectiveKeyPath: ["g", "x"],
+    rawValue: "shared-value",
+    valuePreview: "shared-value",
+  });
+
+  const absoluteResults = searchRecordsInSubtree([directChild, deepDescendant], "gxa", ["g"]);
+  assert.equal(absoluteResults[0]?.id, deepDescendant.id);
+
+  const tieResults = searchRecordsInSubtree([deepDescendant, directChild], "shared value", ["g"]);
+  assert.equal(tieResults[0]?.id, directChild.id);
 });
