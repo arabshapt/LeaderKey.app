@@ -263,8 +263,8 @@ class StatusItem {
   }
 
   func playReloadSuccessSoundIfNeeded() {
-    guard Defaults[.playReloadSuccessSound] else { return }
-    NSSound(named: .init("Glass"))?.play()
+    guard let soundName = Defaults[.reloadSuccessSound].soundName else { return }
+    NSSound(named: soundName)?.play()
   }
 
   func animate(

@@ -8,13 +8,21 @@ var defaultsSuite =
   ? UserDefaults(suiteName: UUID().uuidString)!
   : .standard
 
+private func defaultReloadSuccessSound() -> ReloadSuccessSound {
+  let legacySoundEnabled = defaultsSuite.object(forKey: "playReloadSuccessSound") as? Bool ?? false
+  return legacySoundEnabled ? .glass : .off
+}
+
 extension Defaults.Keys {
   static let configDir = Key<String>(
     "configDir", default: UserConfig.defaultDirectory(), suite: defaultsSuite)
   static let showMenuBarIcon = Key<Bool>(
     "showInMenubar", default: true, suite: defaultsSuite)
+  @available(*, deprecated, message: "Use reloadSuccessSound instead.")
   static let playReloadSuccessSound = Key<Bool>(
     "playReloadSuccessSound", default: false, suite: defaultsSuite)
+  static let reloadSuccessSound = Key<ReloadSuccessSound>(
+    "reloadSuccessSound", default: defaultReloadSuccessSound(), suite: defaultsSuite)
   static let forceEnglishKeyboardLayout = Key<Bool>(
     "forceEnglishKeyboardLayout", default: false, suite: defaultsSuite)
   static let modifierKeyConfiguration = Key<ModifierKeyConfig>(
@@ -113,6 +121,68 @@ enum ReactivateBehavior: String, Defaults.Serializable {
   case hide
   case reset
   case nothing
+}
+
+enum ReloadSuccessSound: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case off
+  case glass
+  case hero
+  case ping
+  case pop
+  case funk
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .off:
+      return "Off"
+    case .glass:
+      return "Glass"
+    case .hero:
+      return "Hero"
+    case .ping:
+      return "Ping"
+    case .pop:
+      return "Pop"
+    case .funk:
+      return "Funk"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .off:
+      return "Silent"
+    case .glass:
+      return "Airy crystalline chime"
+    case .hero:
+      return "Clean synthetic confirmation"
+    case .ping:
+      return "Bright minimal ping"
+    case .pop:
+      return "Soft modern pop"
+    case .funk:
+      return "Playful electronic blip"
+    }
+  }
+
+  var soundName: NSSound.Name? {
+    switch self {
+    case .off:
+      return nil
+    case .glass:
+      return .init("Glass")
+    case .hero:
+      return .init("Hero")
+    case .ping:
+      return .init("Ping")
+    case .pop:
+      return .init("Pop")
+    case .funk:
+      return .init("Funk")
+    }
+  }
 }
 
 enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable {

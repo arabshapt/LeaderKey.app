@@ -123,7 +123,7 @@ final class StatusItemTests: XCTestCase {
     super.setUp()
     defaultsSuite = UserDefaults(suiteName: name)!
     defaultsSuite.removePersistentDomain(forName: name)
-    Defaults[.playReloadSuccessSound] = false
+    Defaults[.reloadSuccessSound] = .off
 
     statusItem = TestStatusItem()
     statusItem.reloadSuccessFeedbackTiming = .init(fadeDuration: 0.005, holdDuration: 0.05)
@@ -177,6 +177,15 @@ final class StatusItemTests: XCTestCase {
 
     XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
     XCTAssertEqual(statusItem.renderedAppearance, .normal)
+  }
+
+  func testReloadSuccessSoundSelectionMapsToBuiltInSystemSounds() {
+    XCTAssertNil(ReloadSuccessSound.off.soundName)
+    XCTAssertEqual(ReloadSuccessSound.glass.soundName, "Glass")
+    XCTAssertEqual(ReloadSuccessSound.hero.soundName, "Hero")
+    XCTAssertEqual(ReloadSuccessSound.ping.soundName, "Ping")
+    XCTAssertEqual(ReloadSuccessSound.pop.soundName, "Pop")
+    XCTAssertEqual(ReloadSuccessSound.funk.soundName, "Funk")
   }
 }
 
