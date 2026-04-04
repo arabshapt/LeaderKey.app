@@ -287,27 +287,40 @@ final class Karabiner2InputMethod: InputMethod {
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) {
+    let service = KarabinerTsExportService.shared
+    var managedRules: [[String: Any]] = []
+    var ruleCount = 0
+
     do {
-      let export = Karabiner2Exporter.generateKarConfig(
-        globalConfig: globalConfig,
-        appConfigs: appConfigs
-      )
+      // Phase 1: Generate config and write repo files.
+      // The 30MB repoModuleSource is released when this autoreleasepool exits,
+      // before the heavier JSON patching in Phase 2.
+      try autoreleasepool {
+        let export = Karabiner2Exporter.generateKarConfig(
+          globalConfig: globalConfig,
+          appConfigs: appConfigs
+        )
 
-      let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
-      try FileManager.default.createDirectory(
-        atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
-      try saveStateMappings(export.stateMappings, outputDir: outputDir)
+        let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
+        try FileManager.default.createDirectory(
+          atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
+        try saveStateMappings(export.stateMappings, outputDir: outputDir)
 
-      let result = KarabinerTsExportService.shared.compileAndApply(
-        managedRules: export.managedRules,
-        repoModuleSource: export.repoModuleSource)
-      if result.success {
-        lastKarabinerTsExportError = nil
-        debugLog("[Karabiner2InputMethod] \(result.message)")
-      } else {
-        lastKarabinerTsExportError = result.message
-        debugLog("[Karabiner2InputMethod] \(result.message)")
+        try service.writeRepoFiles(repoModuleSource: export.repoModuleSource)
+        managedRules = export.managedRules
+        ruleCount = export.managedRules.count
+        // export + repoModuleSource (~30MB) freed at end of autoreleasepool
       }
+
+      // Phase 2: Patch karabiner.json with managed rules.
+      // Runs in its own autoreleasepool so JSONSerialization intermediates (~50MB) are freed.
+      try autoreleasepool {
+        try service.applyRules(managedRules)
+        managedRules = [] // explicitly release ~11MB of rule dicts
+      }
+
+      lastKarabinerTsExportError = nil
+      debugLog("[Karabiner2InputMethod] Applied \(ruleCount) LeaderKey rules via karabiner.ts")
     } catch {
       lastKarabinerTsExportError = error.localizedDescription
       debugLog("[Karabiner2InputMethod] Failed to export via karabiner.ts: \(error)")

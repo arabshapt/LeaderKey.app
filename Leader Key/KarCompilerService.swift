@@ -47,6 +47,18 @@ final class KarabinerTsExportService {
     }
   }
 
+  /// Write repo files only (Phase 1 of split export). Allows caller to release
+  /// repoModuleSource before the heavier JSON patching phase.
+  func writeRepoFiles(repoModuleSource: String, repoPath: String? = nil) throws {
+    let resolvedRepoPath = try validatedRepoPath(repoPath)
+    try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleSource: repoModuleSource)
+  }
+
+  /// Apply managed rules to karabiner.json (Phase 2 of split export).
+  func applyRules(_ managedRules: [[String: Any]], karabinerJsonPath: String? = nil) throws {
+    try applyManagedRules(managedRules, karabinerPath: karabinerJsonPath)
+  }
+
   private func writeManagedRepoFiles(repoPath: String, repoModuleSource: String) throws {
     let managedDirectory = (repoPath as NSString).appendingPathComponent(Self.generatedDirectoryRelativePath)
     try FileManager.default.createDirectory(atPath: managedDirectory, withIntermediateDirectories: true)
@@ -61,24 +73,40 @@ final class KarabinerTsExportService {
   }
 
   private func applyManagedRules(_ managedRules: [[String: Any]], karabinerPath: String? = nil) throws {
-    let resolvedKarabinerPath = karabinerPath ?? (NSHomeDirectory() + "/.config/karabiner/karabiner.json")
-    let url = URL(fileURLWithPath: resolvedKarabinerPath)
-    let data = try Data(contentsOf: url)
+    try autoreleasepool {
+      let resolvedKarabinerPath = karabinerPath ?? (NSHomeDirectory() + "/.config/karabiner/karabiner.json")
+      let url = URL(fileURLWithPath: resolvedKarabinerPath)
+      let data = try Data(contentsOf: url)
 
-    guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      throw NSError(
-        domain: "KarabinerTsExportService",
-        code: 3,
-        userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json structure"])
+      guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw NSError(
+          domain: "KarabinerTsExportService",
+          code: 3,
+          userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json structure"])
+      }
+
+      let patchedRoot = try Self.patchedKarabinerRoot(root, compiledRules: managedRules)
+
+      let backupPath = resolvedKarabinerPath + ".leaderkey.backup.\(Int(Date().timeIntervalSince1970))"
+      _ = try? FileManager.default.copyItem(atPath: resolvedKarabinerPath, toPath: backupPath)
+
+      let output = try JSONSerialization.data(withJSONObject: patchedRoot)
+      try output.write(to: url, options: .atomic)
+
+      // Rotate backups: keep only the 2 most recent
+      Self.rotateBackups(inDirectory: (resolvedKarabinerPath as NSString).deletingLastPathComponent)
     }
+  }
 
-    let patchedRoot = try Self.patchedKarabinerRoot(root, compiledRules: managedRules)
-
-    let backupPath = resolvedKarabinerPath + ".leaderkey.backup.\(Int(Date().timeIntervalSince1970))"
-    _ = try? FileManager.default.copyItem(atPath: resolvedKarabinerPath, toPath: backupPath)
-
-    let output = try JSONSerialization.data(withJSONObject: patchedRoot)
-    try output.write(to: url, options: .atomic)
+  private static func rotateBackups(inDirectory directory: String, keepCount: Int = 2) {
+    let fm = FileManager.default
+    guard let files = try? fm.contentsOfDirectory(atPath: directory) else { return }
+    let backups = files.filter { $0.contains(".leaderkey.backup.") }.sorted().reversed()
+    for (index, file) in backups.enumerated() {
+      if index >= keepCount {
+        try? fm.removeItem(atPath: (directory as NSString).appendingPathComponent(file))
+      }
+    }
   }
 
   static func patchedKarabinerRoot(
