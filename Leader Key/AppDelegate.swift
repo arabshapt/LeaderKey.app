@@ -207,6 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private let exportRefreshQueue = DispatchQueue(label: "com.leaderkey.export-refresh")
   private var isExportRefreshInFlight = false
   private var hasPendingExportRefresh = false
+  private var lastExportStartTime: CFAbsoluteTime = 0
 
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
@@ -1028,8 +1029,9 @@ extension AppDelegate {
         debugLog("[AppDelegate] Config reload completed - resuming event processing")
       #endif
     case .didSaveConfig:
-      refreshStateMappings()
-      debugLog("[AppDelegate] Config saved - state mappings refreshed")
+      // Export is NOT triggered here — save already calls reloadConfig()
+      // which sends .didReload, avoiding duplicate exports.
+      debugLog("[AppDelegate] Config saved")
     default:
       break
     }
@@ -2812,6 +2814,13 @@ extension AppDelegate {
     exportRefreshQueue.async { [weak self] in
       guard let self else { return }
 
+      // Debounce: skip if an export started within the last 2 seconds
+      let sinceLastStart = CFAbsoluteTimeGetCurrent() - self.lastExportStartTime
+      if sinceLastStart < 2.0 {
+        debugLog("[AppDelegate] Export refresh skipped (started \(String(format: "%.0f", sinceLastStart * 1000))ms ago)")
+        return
+      }
+
       if self.isExportRefreshInFlight {
         self.hasPendingExportRefresh = true
         debugLog("[AppDelegate] Export refresh already running; coalescing request")
@@ -2819,6 +2828,7 @@ extension AppDelegate {
       }
 
       self.isExportRefreshInFlight = true
+      self.lastExportStartTime = CFAbsoluteTimeGetCurrent()
       self.runExportRefresh()
     }
   }
@@ -2826,7 +2836,7 @@ extension AppDelegate {
   private func runExportRefresh() {
     debugLog("[AppDelegate] Refreshing state mappings after config change")
     let karabiner2Method = (currentInputMethod as? Karabiner2InputMethod) ?? Karabiner2InputMethod()
-    karabiner2Method.exportCurrentConfiguration()
+    karabiner2Method.exportCurrentConfiguration(caller: "refreshStateMappings")
 
     DispatchQueue.main.async { [weak self] in
       self?.loadStateMappings()
@@ -2839,9 +2849,9 @@ extension AppDelegate {
 
       if self.hasPendingExportRefresh {
         self.hasPendingExportRefresh = false
-        self.isExportRefreshInFlight = true
-        debugLog("[AppDelegate] Running coalesced export refresh")
-        self.runExportRefresh()
+        // Skip coalesced run — the export we just finished already
+        // picked up the latest config state from disk.
+        debugLog("[AppDelegate] Skipping coalesced export (just completed)")
       }
     }
   }

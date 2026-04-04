@@ -51,7 +51,7 @@ final class Karabiner2InputMethod: InputMethod {
         debugLog("[Karabiner2InputMethod] Warning: app-level control socket is not active")
       }
       DispatchQueue.global(qos: .utility).async { [weak self] in
-        self?.exportCurrentConfiguration()
+        self?.exportCurrentConfiguration(caller: "start")
       }
     } else {
       debugLog("[Karabiner2InputMethod] Failed to start")
@@ -90,7 +90,22 @@ final class Karabiner2InputMethod: InputMethod {
     currentState = state
   }
 
-  func exportCurrentConfiguration() {
+  private static let exportLock = NSLock()
+  private static var lastExportStartTime: CFAbsoluteTime = 0
+
+  func exportCurrentConfiguration(caller: String = "unknown") {
+    // Debounce: skip if an export started within the last 2 seconds (from any thread/caller)
+    Self.exportLock.lock()
+    let sinceLastStart = CFAbsoluteTimeGetCurrent() - Self.lastExportStartTime
+    if sinceLastStart < 2.0 {
+      Self.exportLock.unlock()
+      debugLog("[Benchmark] Export skipped — started \(String(format: "%.0f", sinceLastStart * 1000))ms ago (caller: \(caller))")
+      return
+    }
+    Self.lastExportStartTime = CFAbsoluteTimeGetCurrent()
+    Self.exportLock.unlock()
+
+    let pipelineStart = CFAbsoluteTimeGetCurrent()
     guard let appDelegate = NSApplication.shared.delegate as? AppDelegate,
       let userConfig = appDelegate.controller?.userConfig
     else {
@@ -151,26 +166,34 @@ final class Karabiner2InputMethod: InputMethod {
       debugLog("[Karabiner2InputMethod] Failed to list config directory: \(error)")
     }
     
+    let discoveryElapsed = CFAbsoluteTimeGetCurrent() - pipelineStart
     debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs")
-    for (bundleId, _, customName) in appConfigs {
-      debugLog("[Karabiner2InputMethod] Final appConfig: bundleId=\(bundleId), customName=\(customName ?? "nil")")
-    }
+    debugLog("[Benchmark] Config discovery: \(String(format: "%.0f", discoveryElapsed * 1000))ms")
 
     let backend = Defaults[.karabiner2Backend]
 
     if backend.requiresKar {
+      let karStart = CFAbsoluteTimeGetCurrent()
       exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs)
+      debugLog("[Benchmark] kar export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
     }
 
-    guard backend.requiresGoku else { return }
-    
+    guard backend.requiresGoku else {
+      debugLog("[Benchmark] Total pipeline: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000))ms")
+      return
+    }
+
     // 3. Generate unified EDN with hierarchical organization
+    let ednGenStart = CFAbsoluteTimeGetCurrent()
     let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
       globalConfig: globalConfig,
       appConfigs: appConfigs
     )
     
+    debugLog("[Benchmark] EDN generation: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - ednGenStart) * 1000))ms")
+
     // 4. Save to single unified file
+    let fileIOStart = CFAbsoluteTimeGetCurrent()
     let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
     let filePath = outputDir + "/leaderkey-unified.edn"
 
@@ -238,12 +261,18 @@ final class Karabiner2InputMethod: InputMethod {
         }
       }
 
+      debugLog("[Benchmark] File I/O + injection: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - fileIOStart) * 1000))ms")
+
       if FileManager.default.fileExists(atPath: configPath) {
+        let gokuStart = CFAbsoluteTimeGetCurrent()
         let gokuResult = GokuCompilerService.shared.compileAndApply(configPath: configPath)
+        debugLog("[Benchmark] Goku compilation: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - gokuStart) * 1000))ms")
         debugLog("[Karabiner2InputMethod] \(gokuResult.message)")
       } else {
         debugLog("[Karabiner2InputMethod] goku skipped: karabiner.edn not found")
       }
+
+      debugLog("[Benchmark] Total pipeline: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000))ms")
     } catch {
       debugLog("[Karabiner2InputMethod] Failed to export configuration: \(error)")
     }
