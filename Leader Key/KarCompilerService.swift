@@ -1,134 +1,83 @@
 import Defaults
 import Foundation
 
-struct KarCompilerResult {
+struct KarabinerTsExportResult {
   let success: Bool
   let message: String
 }
 
-final class KarCompilerService {
-  static let shared = KarCompilerService()
+typealias KarCompilerResult = KarabinerTsExportResult
+
+final class KarabinerTsExportService {
+  static let shared = KarabinerTsExportService()
 
   static let managedRuleDescriptionPrefix = "LeaderKeyManaged/"
-  static var generatedConfigPath: String {
-    (Defaults[.configDir] as NSString).appendingPathComponent("export/leaderkey-generated.config.ts")
-  }
+  static let legacyManagedRuleDescriptionPrefix = "Leader Key - "
+  static let generatedDirectoryRelativePath = "configs/leaderkey"
+  static let generatedModuleRelativePath = generatedDirectoryRelativePath + "/leaderkey-generated.ts"
+  static let generatedBootstrapRelativePath = generatedDirectoryRelativePath + "/index.ts"
 
   private init() {}
 
-  /// Build an environment dictionary with an enriched PATH so that
-  /// child processes (kar) can find TypeScript runtimes (deno, bun)
-  /// even when the app is launched from Finder/Launchd.
-  private func enrichedEnvironment() -> [String: String] {
-    var env = ProcessInfo.processInfo.environment
-    let home = NSHomeDirectory()
-    let extraPaths = [
-      "/opt/homebrew/bin",
-      "/opt/homebrew/sbin",
-      "/usr/local/bin",
-      "\(home)/.bun/bin",
-      "\(home)/.deno/bin",
-      "\(home)/.cargo/bin",
-      "\(home)/bin",
-      "\(home)/.local/bin",
-    ]
-    let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-    env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-    return env
-  }
-
-  func validateKarBinary() -> KarCompilerResult {
-    let karBinary = resolvedKarBinaryPath()
-    let process = Process()
-    process.launchPath = karBinary
-    process.arguments = ["--help"]
-    process.environment = enrichedEnvironment()
-
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.standardOutput = stdout
-    process.standardError = stderr
-
+  func validateKarabinerTsRepo(repoPath: String? = nil) -> KarabinerTsExportResult {
     do {
-      try process.run()
-      process.waitUntilExit()
+      let resolved = try validatedRepoPath(repoPath)
+      return KarabinerTsExportResult(success: true, message: "karabiner.ts workspace is available at \(resolved)")
     } catch {
-      return KarCompilerResult(success: false, message: "kar not found (\(karBinary)): \(error)")
+      return KarabinerTsExportResult(success: false, message: error.localizedDescription)
     }
-
-    guard process.terminationStatus == 0 else {
-      let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      return KarCompilerResult(success: false, message: "kar validation failed: \(errorOutput)")
-    }
-
-    return KarCompilerResult(success: true, message: "kar is available at \(karBinary)")
   }
 
-  func compileAndApply(configTS: String) -> KarCompilerResult {
+  func compileAndApply(
+    managedRules: [[String: Any]],
+    repoModuleSource: String,
+    repoPath: String? = nil,
+    karabinerJsonPath: String? = nil
+  ) -> KarabinerTsExportResult {
     do {
-      let configPath = try writeGeneratedConfig(configTS)
-      let compiledRules = try compileRules(configPath: configPath)
-      try applyCompiledRules(compiledRules)
-      return KarCompilerResult(success: true, message: "Applied \(compiledRules.count) LeaderKey rules via kar")
+      let resolvedRepoPath = try validatedRepoPath(repoPath)
+      try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleSource: repoModuleSource)
+      try applyManagedRules(managedRules, karabinerPath: karabinerJsonPath)
+      return KarabinerTsExportResult(
+        success: true,
+        message:
+          "Updated \(Self.generatedModuleRelativePath) and applied \(managedRules.count) LeaderKey rules via karabiner.ts")
     } catch {
-      return KarCompilerResult(success: false, message: "Failed to compile/apply kar config: \(error)")
+      return KarabinerTsExportResult(success: false, message: "Failed to export/apply karabiner.ts config: \(error.localizedDescription)")
     }
   }
 
-  private func writeGeneratedConfig(_ configTS: String) throws -> String {
-    let path = Self.generatedConfigPath
-    let directory = (path as NSString).deletingLastPathComponent
-    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-    try configTS.write(toFile: path, atomically: true, encoding: .utf8)
-    return path
-  }
+  private func writeManagedRepoFiles(repoPath: String, repoModuleSource: String) throws {
+    let managedDirectory = (repoPath as NSString).appendingPathComponent(Self.generatedDirectoryRelativePath)
+    try FileManager.default.createDirectory(atPath: managedDirectory, withIntermediateDirectories: true)
 
-  private func compileRules(configPath: String) throws -> [[String: Any]] {
-    let karBinary = resolvedKarBinaryPath()
-    let process = Process()
-    process.launchPath = karBinary
-    process.arguments = ["--dry-run", "--config", configPath]
-    process.environment = enrichedEnvironment()
+    let generatedModulePath = (repoPath as NSString).appendingPathComponent(Self.generatedModuleRelativePath)
+    try repoModuleSource.write(toFile: generatedModulePath, atomically: true, encoding: .utf8)
 
-    let stdout = Pipe()
-    let stderr = Pipe()
-    process.standardOutput = stdout
-    process.standardError = stderr
-
-    try process.run()
-    process.waitUntilExit()
-
-    let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-    let stderrString = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-
-    guard process.terminationStatus == 0 else {
-      throw NSError(
-        domain: "KarCompilerService",
-        code: Int(process.terminationStatus),
-        userInfo: [NSLocalizedDescriptionKey: "kar --dry-run failed: \(stderrString)"])
+    let bootstrapPath = (repoPath as NSString).appendingPathComponent(Self.generatedBootstrapRelativePath)
+    if !FileManager.default.fileExists(atPath: bootstrapPath) {
+      try Self.bootstrapModuleSource().write(toFile: bootstrapPath, atomically: true, encoding: .utf8)
     }
-
-    return try parseCompiledRules(stdoutData)
   }
 
-  private func applyCompiledRules(_ compiledRules: [[String: Any]]) throws {
-    let karabinerPath = NSHomeDirectory() + "/.config/karabiner/karabiner.json"
-    let url = URL(fileURLWithPath: karabinerPath)
+  private func applyManagedRules(_ managedRules: [[String: Any]], karabinerPath: String? = nil) throws {
+    let resolvedKarabinerPath = karabinerPath ?? (NSHomeDirectory() + "/.config/karabiner/karabiner.json")
+    let url = URL(fileURLWithPath: resolvedKarabinerPath)
     let data = try Data(contentsOf: url)
 
     guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       throw NSError(
-        domain: "KarCompilerService",
+        domain: "KarabinerTsExportService",
         code: 3,
         userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json structure"])
     }
 
-    let patchedRoot = try Self.patchedKarabinerRoot(root, compiledRules: compiledRules)
+    let patchedRoot = try Self.patchedKarabinerRoot(root, compiledRules: managedRules)
 
-    let backupPath = karabinerPath + ".leaderkey.backup.\(Int(Date().timeIntervalSince1970))"
-    _ = try? FileManager.default.copyItem(atPath: karabinerPath, toPath: backupPath)
+    let backupPath = resolvedKarabinerPath + ".leaderkey.backup.\(Int(Date().timeIntervalSince1970))"
+    _ = try? FileManager.default.copyItem(atPath: resolvedKarabinerPath, toPath: backupPath)
 
-    let output = try JSONSerialization.data(withJSONObject: patchedRoot, options: [.prettyPrinted])
+    let output = try JSONSerialization.data(withJSONObject: patchedRoot)
     try output.write(to: url, options: .atomic)
   }
 
@@ -138,7 +87,7 @@ final class KarCompilerService {
   ) throws -> [String: Any] {
     guard var profiles = root["profiles"] as? [[String: Any]] else {
       throw NSError(
-        domain: "KarCompilerService",
+        domain: "KarabinerTsExportService",
         code: 5,
         userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json: missing profiles"])
     }
@@ -146,7 +95,7 @@ final class KarCompilerService {
     let selectedIndex = profiles.firstIndex { ($0["selected"] as? Bool) == true } ?? 0
     guard profiles.indices.contains(selectedIndex) else {
       throw NSError(
-        domain: "KarCompilerService",
+        domain: "KarabinerTsExportService",
         code: 6,
         userInfo: [NSLocalizedDescriptionKey: "No Karabiner profile found"])
     }
@@ -159,7 +108,9 @@ final class KarCompilerService {
 
     for rule in existingRules {
       let description = rule["description"] as? String ?? ""
-      if description.hasPrefix(Self.managedRuleDescriptionPrefix) {
+      if description.hasPrefix(Self.managedRuleDescriptionPrefix)
+        || description.hasPrefix(Self.legacyManagedRuleDescriptionPrefix)
+      {
         if !insertedCompiledRules {
           patchedRules.append(contentsOf: compiledRules)
           insertedCompiledRules = true
@@ -182,25 +133,61 @@ final class KarCompilerService {
     return patched
   }
 
-  private func parseCompiledRules(_ stdoutData: Data) throws -> [[String: Any]] {
-    let parsed = try JSONSerialization.jsonObject(with: stdoutData)
-
-    if let ruleArray = parsed as? [[String: Any]] {
-      return ruleArray
+  private func validatedRepoPath(_ repoPath: String? = nil) throws -> String {
+    let configuredPath = (repoPath ?? Defaults[.karabinerTsRepoPath]).trimmingCharacters(
+      in: .whitespacesAndNewlines)
+    guard !configuredPath.isEmpty else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 10,
+        userInfo: [NSLocalizedDescriptionKey: "karabiner.ts repo path is not configured"])
     }
 
-    if let object = parsed as? [String: Any], let rules = object["rules"] as? [[String: Any]] {
-      return rules
+    let expandedPath = (configuredPath as NSString).expandingTildeInPath
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 11,
+        userInfo: [NSLocalizedDescriptionKey: "karabiner.ts repo path does not exist: \(expandedPath)"])
     }
 
-    throw NSError(
-      domain: "KarCompilerService",
-      code: 2,
-      userInfo: [NSLocalizedDescriptionKey: "kar --dry-run did not return rules array JSON"])
+    guard FileManager.default.isWritableFile(atPath: expandedPath) else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 12,
+        userInfo: [NSLocalizedDescriptionKey: "karabiner.ts repo path is not writable: \(expandedPath)"])
+    }
+
+    let workspaceMarkers = ["package.json", "tsconfig.json", "deno.json", ".git"]
+    let hasWorkspaceMarker = workspaceMarkers.contains {
+      FileManager.default.fileExists(atPath: (expandedPath as NSString).appendingPathComponent($0))
+    }
+    guard hasWorkspaceMarker else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 13,
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "karabiner.ts repo path must contain a workspace marker (package.json, tsconfig.json, deno.json, or .git)"
+        ])
+    }
+
+    return expandedPath
   }
 
-  private func resolvedKarBinaryPath() -> String {
-    let configured = Defaults[.karBinaryPath].trimmingCharacters(in: .whitespacesAndNewlines)
-    return configured.isEmpty ? "kar" : configured
+  private static func bootstrapModuleSource() -> String {
+    """
+    // Created once by Leader Key. You can import this path from your own karabiner.ts config.
+    // This file is not overwritten after creation.
+
+    export {
+      default,
+      leaderKeyDefaultProfileName,
+      leaderKeyManagedRules,
+    } from './leaderkey-generated'
+    """
   }
 }
+
+typealias KarCompilerService = KarabinerTsExportService

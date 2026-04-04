@@ -8,6 +8,7 @@ final class Karabiner2InputMethod: InputMethod {
   private let userCommandReceiver = KarabinerUserCommandReceiver()
   private var lastHealthCheck = Date()
   private var currentState: Int32 = 0
+  private var lastKarabinerTsExportError: String?
 
   var isActive: Bool {
     return socketServer.getStatistics().contains("Running: true")
@@ -17,8 +18,10 @@ final class Karabiner2InputMethod: InputMethod {
     let karabinerRunning = isKarabinerRunning()
     let socketActive = isActive
     let userCommandActive = userCommandReceiver.isRunning
+    let backend = Defaults[.karabiner2Backend]
+    let karabinerTsHealthy = !backend.requiresKarabinerTsExport || lastKarabinerTsExportError == nil
 
-    let isHealthy = karabinerRunning && socketActive && userCommandActive
+    let isHealthy = karabinerRunning && socketActive && userCommandActive && karabinerTsHealthy
     let message: String
 
     if !karabinerRunning {
@@ -27,8 +30,10 @@ final class Karabiner2InputMethod: InputMethod {
       message = "Unix socket server is not active"
     } else if !userCommandActive {
       message = "Karabiner user command receiver is not active"
+    } else if backend.requiresKarabinerTsExport, let lastKarabinerTsExportError {
+      message = "karabiner.ts export is unhealthy: \(lastKarabinerTsExportError)"
     } else {
-      let backendLabel = Defaults[.karabiner2Backend].displayName
+      let backendLabel = backend.displayName
       message = "Karabiner 2.0 state machine integration is active (socket + send_user_command + \(backendLabel))"
     }
 
@@ -172,10 +177,10 @@ final class Karabiner2InputMethod: InputMethod {
 
     let backend = Defaults[.karabiner2Backend]
 
-    if backend.requiresKar {
+    if backend.requiresKarabinerTsExport {
       let karStart = CFAbsoluteTimeGetCurrent()
       exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs)
-      debugLog("[Benchmark] kar export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
+      debugLog("[Benchmark] karabiner.ts export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
     }
 
     guard backend.requiresGoku else {
@@ -283,7 +288,7 @@ final class Karabiner2InputMethod: InputMethod {
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) {
     do {
-      let (configTS, stateMappings) = Karabiner2Exporter.generateKarConfig(
+      let export = Karabiner2Exporter.generateKarConfig(
         globalConfig: globalConfig,
         appConfigs: appConfigs
       )
@@ -291,16 +296,21 @@ final class Karabiner2InputMethod: InputMethod {
       let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
       try FileManager.default.createDirectory(
         atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
-      try saveStateMappings(stateMappings, outputDir: outputDir)
+      try saveStateMappings(export.stateMappings, outputDir: outputDir)
 
-      let result = KarCompilerService.shared.compileAndApply(configTS: configTS)
+      let result = KarabinerTsExportService.shared.compileAndApply(
+        managedRules: export.managedRules,
+        repoModuleSource: export.repoModuleSource)
       if result.success {
+        lastKarabinerTsExportError = nil
         debugLog("[Karabiner2InputMethod] \(result.message)")
       } else {
+        lastKarabinerTsExportError = result.message
         debugLog("[Karabiner2InputMethod] \(result.message)")
       }
     } catch {
-      debugLog("[Karabiner2InputMethod] Failed to export via kar: \(error)")
+      lastKarabinerTsExportError = error.localizedDescription
+      debugLog("[Karabiner2InputMethod] Failed to export via karabiner.ts: \(error)")
     }
   }
 

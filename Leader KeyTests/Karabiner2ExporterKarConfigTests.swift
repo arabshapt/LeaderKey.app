@@ -1,15 +1,24 @@
 import XCTest
 import KeyboardShortcuts
+import Defaults
 @testable import Leader_Key
 
 final class Karabiner2ExporterKarConfigTests: XCTestCase {
+  override func setUp() {
+    super.setUp()
+    Karabiner2Exporter.alternativeMappingsOverride = []
+  }
+
+  override func tearDown() {
+    Karabiner2Exporter.alternativeMappingsOverride = nil
+    super.tearDown()
+  }
+
   func testGenerateKarConfigContainsSendUserCommandRoutes() throws {
     let config = makeSampleConfig()
 
     let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
-    let parsed = try parseConfigTS(result.configTS)
-
-    let payloads = extractSendUserCommandPayloads(from: parsed)
+    let payloads = extractSendUserCommandPayloads(from: result.managedRules)
 
     XCTAssertTrue(payloads.contains("activate"))
     XCTAssertTrue(payloads.contains("deactivate"))
@@ -21,22 +30,19 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
   func testGenerateKarConfigPreservesStickyAndResetBehavior() throws {
     let config = makeSampleConfig()
     let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
-    let parsed = try parseConfigTS(result.configTS)
+    let allManipulators = flattenManipulators(from: result.managedRules)
 
-    let rules = try XCTUnwrap(parsed["rules"] as? [[String: Any]])
-    let allMappings = rules.flatMap { ($0["mappings"] as? [[String: Any]]) ?? [] }
-
-    let stickyTransition = allMappings.first(where: { mapping in
-      fromKeyCode(in: mapping) == "g"
-        && hasSendUserCommand(mapping: mapping, prefix: "stateid ")
-        && hasSetVariable(mapping: mapping, name: "leaderkey_sticky", value: 1)
+    let stickyTransition = allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "g"
+        && hasSendUserCommand(manipulator: manipulator, prefix: "stateid ")
+        && hasSetVariable(manipulator: manipulator, name: "leaderkey_sticky", value: 1)
     })
     XCTAssertNotNil(stickyTransition)
 
-    let nonStickyTerminal = allMappings.first(where: { mapping in
-      fromKeyCode(in: mapping) == "x"
-        && hasSendUserCommand(mapping: mapping, prefix: "deactivate")
-        && hasSetVariable(mapping: mapping, name: "leader_state", value: 0)
+    let nonStickyTerminal = allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "x"
+        && hasSendUserCommand(manipulator: manipulator, prefix: "deactivate")
+        && hasSetVariable(manipulator: manipulator, name: "leader_state", value: 0)
     })
     XCTAssertNotNil(nonStickyTerminal)
   }
@@ -49,6 +55,8 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
 
     let encoder = JSONEncoder()
     XCTAssertEqual(try encoder.encode(first.stateMappings), try encoder.encode(second.stateMappings))
+    XCTAssertEqual(first.repoModuleSource, second.repoModuleSource)
+    XCTAssertEqual(try serializeJSON(first.managedRules), try serializeJSON(second.managedRules))
   }
 
   func testGenerateKarConfigEncodesKeystrokePayloadsAndStickyBehavior() throws {
@@ -87,36 +95,33 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     config.root.actions = [.action(targetedAction), .action(focusedAction), .action(stickyAction)]
 
     let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
-    let parsed = try parseConfigTS(result.configTS)
+    let allManipulators = flattenManipulators(from: result.managedRules)
 
-    let rules = try XCTUnwrap(parsed["rules"] as? [[String: Any]])
-    let allMappings = rules.flatMap { ($0["mappings"] as? [[String: Any]]) ?? [] }
-
-    let targetedMapping = try XCTUnwrap(allMappings.first(where: { mapping in
-      fromKeyCode(in: mapping) == "k"
-        && structuredPayloads(mapping: mapping).contains(where: {
+    let targetedMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "k"
+        && structuredPayloads(manipulator: manipulator).contains(where: {
           ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "Ct"
         })
     }))
     let targetedPayload = try XCTUnwrap(
-      structuredPayloads(mapping: targetedMapping).first(where: {
+      structuredPayloads(manipulator: targetedMapping).first(where: {
         ($0["type"] as? String) == "keystroke"
       }))
     XCTAssertEqual(targetedPayload["v"] as? Int, 1)
     XCTAssertEqual(targetedPayload["app"] as? String, "Google Chrome")
     XCTAssertEqual(targetedPayload["spec"] as? String, "Ct")
     XCTAssertNil(targetedPayload["focus"])
-    XCTAssertTrue(hasSendUserCommand(mapping: targetedMapping, prefix: "deactivate"))
-    XCTAssertTrue(hasSetVariable(mapping: targetedMapping, name: "leader_state", value: 0))
+    XCTAssertTrue(hasSendUserCommand(manipulator: targetedMapping, prefix: "deactivate"))
+    XCTAssertTrue(hasSetVariable(manipulator: targetedMapping, name: "leader_state", value: 0))
 
-    let focusedMapping = try XCTUnwrap(allMappings.first(where: { mapping in
-      fromKeyCode(in: mapping) == "f"
-        && structuredPayloads(mapping: mapping).contains(where: {
+    let focusedMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "f"
+        && structuredPayloads(manipulator: manipulator).contains(where: {
           ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "CSf"
         })
     }))
     let focusedPayload = try XCTUnwrap(
-      structuredPayloads(mapping: focusedMapping).first(where: {
+      structuredPayloads(manipulator: focusedMapping).first(where: {
         ($0["type"] as? String) == "keystroke"
       }))
     XCTAssertEqual(focusedPayload["v"] as? Int, 1)
@@ -124,21 +129,219 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertEqual(focusedPayload["spec"] as? String, "CSf")
     XCTAssertEqual(focusedPayload["focus"] as? Bool, true)
 
-    let stickyMapping = try XCTUnwrap(allMappings.first(where: { mapping in
-      fromKeyCode(in: mapping) == "s"
-        && structuredPayloads(mapping: mapping).contains(where: {
+    let stickyMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "s"
+        && structuredPayloads(manipulator: manipulator).contains(where: {
           ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "escape"
         })
     }))
     let stickyPayload = try XCTUnwrap(
-      structuredPayloads(mapping: stickyMapping).first(where: {
+      structuredPayloads(manipulator: stickyMapping).first(where: {
         ($0["type"] as? String) == "keystroke"
       }))
     XCTAssertEqual(stickyPayload["v"] as? Int, 1)
     XCTAssertNil(stickyPayload["app"])
     XCTAssertEqual(stickyPayload["spec"] as? String, "escape")
-    XCTAssertTrue(hasSetVariable(mapping: stickyMapping, name: "leaderkey_sticky", value: 1))
-    XCTAssertFalse(hasSendUserCommand(mapping: stickyMapping, prefix: "deactivate"))
+    XCTAssertTrue(hasSetVariable(manipulator: stickyMapping, name: "leaderkey_sticky", value: 1))
+    XCTAssertFalse(hasSendUserCommand(manipulator: stickyMapping, prefix: "deactivate"))
+  }
+
+  func testGenerateKarConfigProducesDeterministicRepoModuleExports() throws {
+    let config = makeSampleConfig()
+
+    let first = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let second = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+
+    XCTAssertEqual(first.repoModuleSource, second.repoModuleSource)
+    XCTAssertTrue(first.repoModuleSource.contains("export const leaderKeyManagedRules ="))
+    XCTAssertTrue(first.repoModuleSource.contains("export default leaderKeyManagedRules"))
+  }
+
+  func testGenerateKarConfigUsesSingleAnyKeyCatchAllMappings() throws {
+    let config = makeSampleConfig()
+
+    let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let allManipulators = flattenManipulators(from: result.managedRules)
+    let shakeManipulator = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      hasSendUserCommand(manipulator: manipulator, prefix: "shake")
+    }))
+    let from = try XCTUnwrap(shakeManipulator["from"] as? [String: Any])
+    let modifiers = try XCTUnwrap(from["modifiers"] as? [String: Any])
+
+    XCTAssertEqual(from["any"] as? String, "key_code")
+    XCTAssertEqual(modifiers["mandatory"] as? [String], ["any"])
+  }
+
+  func testGenerateKarConfigCompactsModeRuleDescriptions() throws {
+    let config = makeSampleConfig()
+
+    let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let descriptions = result.managedRules.compactMap { $0["description"] as? String }
+
+    XCTAssertFalse(descriptions.contains(where: { $0.contains("/State/") || $0.contains("/CatchAll/") }))
+    XCTAssertTrue(descriptions.contains("LeaderKeyManaged/GlobalMode"))
+    XCTAssertTrue(descriptions.contains("LeaderKeyManaged/FallbackMode"))
+    XCTAssertEqual(Set(descriptions).count, descriptions.count)
+  }
+
+  func testGenerateKarConfigCompactsAppSpecificModeRules() throws {
+    let globalConfig = makeSampleConfig()
+    let appConfig = makeSampleConfig()
+
+    let result = Karabiner2Exporter.generateKarConfig(
+      globalConfig: globalConfig,
+      appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
+    )
+    let descriptions = result.managedRules.compactMap { $0["description"] as? String }
+
+    XCTAssertTrue(descriptions.contains("LeaderKeyManaged/AppMode/safari"))
+    XCTAssertFalse(descriptions.contains(where: { $0.hasPrefix("LeaderKeyManaged/AppMode/safari/") }))
+  }
+
+  func testGenerateKarConfigIncludesLegacyActivationBranches() throws {
+    let globalConfig = makeSampleConfig()
+    let appConfig = makeSampleConfig()
+
+    let result = Karabiner2Exporter.generateKarConfig(
+      globalConfig: globalConfig,
+      appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
+    )
+    let activationRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/ActivationShortcuts" }))
+    let manipulators = flattenManipulators(from: [activationRule])
+
+    XCTAssertTrue(manipulators.contains(where: { fromKeyCode(in: $0) == "semicolon" }))
+    XCTAssertTrue(manipulators.contains(where: { fromKeyCode(in: $0) == "right_command" }))
+    XCTAssertTrue(manipulators.contains(where: {
+      fromKeyCode(in: $0) == "keypad_4"
+        && mandatoryModifiers(in: $0) == ["left_command", "left_option", "left_control", "left_shift"]
+    }))
+    XCTAssertTrue(manipulators.contains(where: {
+      fromKeyCode(in: $0) == "keypad_7"
+        && mandatoryModifiers(in: $0) == ["left_command", "left_option", "left_control", "left_shift"]
+    }))
+  }
+
+  func testGenerateKarConfigIncludesModeGuards() throws {
+    let globalConfig = makeSampleConfig()
+    let appConfig = makeSampleConfig()
+
+    let result = Karabiner2Exporter.generateKarConfig(
+      globalConfig: globalConfig,
+      appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
+    )
+
+    let appRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/safari" }))
+    let appManipulator = try XCTUnwrap(flattenManipulators(from: [appRule]).first)
+    XCTAssertTrue(hasVariableCondition(appManipulator, name: "leaderkey_global", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(appManipulator, name: "leaderkey_appspecific", value: 1, type: "variable_if"))
+
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" }))
+    let globalManipulator = try XCTUnwrap(flattenManipulators(from: [globalRule]).first)
+    XCTAssertTrue(hasVariableCondition(globalManipulator, name: "leaderkey_global", value: 1, type: "variable_if"))
+
+    let fallbackRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/FallbackMode" }))
+    let fallbackManipulator = try XCTUnwrap(flattenManipulators(from: [fallbackRule]).first)
+    XCTAssertTrue(hasVariableCondition(fallbackManipulator, name: "leaderkey_global", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(fallbackManipulator, name: "leaderkey_appspecific", value: 1, type: "variable_if"))
+  }
+
+  func testGenerateKarConfigAppliesAlternativeMappingsToManagedRules() throws {
+    Karabiner2Exporter.alternativeMappingsOverride = [
+      AlternativeMapping(originalKey: "h", alternativeKey: "left_arrow", conditions: ["caps_lock-mode"])
+    ]
+
+    let config = UserConfig()
+    let stickyAction = Action(
+      key: "h",
+      type: .keystroke,
+      label: "Alt",
+      value: "escape",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+    config.root.actions = [.action(stickyAction)]
+
+    let result = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" }))
+    let manipulators = flattenManipulators(from: [globalRule])
+
+    XCTAssertTrue(manipulators.contains(where: {
+      fromKeyCode(in: $0) == "left_arrow"
+        && hasVariableCondition($0, name: "caps_lock-mode", value: 1, type: "variable_if")
+    }))
+  }
+
+  func testManualRealConfigExportSmoke() throws {
+    let environment = ProcessInfo.processInfo.environment
+    let artifactsDirectory = manualExportArtifactsDirectory()
+    let triggerFilePath =
+      environment["LEADERKEY_REAL_CONFIG_TRIGGER_PATH"]
+      ?? artifactsDirectory.appendingPathComponent("leaderkey-real-config-export.trigger").path
+    let triggerFileExists = FileManager.default.fileExists(atPath: triggerFilePath)
+    guard environment["LEADERKEY_REAL_CONFIG_EXPORT"] == "1" || triggerFileExists else {
+      throw XCTSkip("Manual smoke test. Set LEADERKEY_REAL_CONFIG_EXPORT=1 to run.")
+    }
+
+    let testAlertManager = TestAlertManager()
+    let userConfig = UserConfig(alertHandler: testAlertManager)
+    userConfig.discoverConfigFiles()
+    userConfig.loadConfig(suppressAlerts: true)
+
+    let appConfigs = try loadRealAppConfigs(using: userConfig)
+    let export = Karabiner2Exporter.generateKarConfig(
+      globalConfig: userConfig,
+      appConfigs: appConfigs
+    )
+
+    let outputPath =
+      environment["LEADERKEY_REAL_CONFIG_OUTPUT_PATH"]
+      ?? artifactsDirectory.appendingPathComponent("leaderkey-real-managed-rules.json").path
+    let outputURL = URL(fileURLWithPath: outputPath)
+    let outputDirectory = outputURL.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+    let outputData = try JSONSerialization.data(withJSONObject: export.managedRules, options: [.sortedKeys])
+    try outputData.write(to: outputURL, options: .atomic)
+
+    let activationRule = try XCTUnwrap(
+      export.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/ActivationShortcuts" }))
+    let activationManipulators = flattenManipulators(from: [activationRule])
+    let totalManipulators = flattenManipulators(from: export.managedRules).count
+    let summary: [String: Any] = [
+      "app_config_count": appConfigs.count,
+      "managed_rule_count": export.managedRules.count,
+      "managed_manipulator_count": totalManipulators,
+      "activation_manipulator_count": activationManipulators.count,
+      "output_path": outputPath,
+    ]
+    let summaryPath =
+      environment["LEADERKEY_REAL_CONFIG_SUMMARY_PATH"]
+      ?? artifactsDirectory.appendingPathComponent("leaderkey-real-managed-rules-summary.json").path
+    let summaryData = try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
+    try summaryData.write(to: URL(fileURLWithPath: summaryPath), options: .atomic)
+
+    XCTAssertGreaterThan(appConfigs.count, 0)
+    XCTAssertGreaterThan(export.managedRules.count, 0)
+    XCTAssertTrue(activationManipulators.contains(where: { fromKeyCode(in: $0) == "semicolon" }))
+    XCTAssertTrue(activationManipulators.contains(where: { fromKeyCode(in: $0) == "right_command" }))
+    XCTAssertTrue(activationManipulators.contains(where: {
+      fromKeyCode(in: $0) == "keypad_4"
+        && mandatoryModifiers(in: $0) == ["left_command", "left_option", "left_control", "left_shift"]
+    }))
+    XCTAssertTrue(activationManipulators.contains(where: {
+      fromKeyCode(in: $0) == "keypad_7"
+        && mandatoryModifiers(in: $0) == ["left_command", "left_option", "left_control", "left_shift"]
+    }))
+
+    print("[ManualRealConfigExport] wrote managed rules to \(outputPath)")
+    print("[ManualRealConfigExport] summary: \(summary)")
   }
 
   private func makeSampleConfig() -> UserConfig {
@@ -178,23 +381,67 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     return config
   }
 
-  private func parseConfigTS(_ configTS: String) throws -> [String: Any] {
-    let prefix = "export default "
-    XCTAssertTrue(configTS.hasPrefix(prefix))
-
-    let jsonPart = String(configTS.dropFirst(prefix.count))
-    let data = Data(jsonPart.utf8)
-
-    return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+  private func serializeJSON(_ object: Any) throws -> Data {
+    try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
   }
 
-  private func extractSendUserCommandPayloads(from parsedConfig: [String: Any]) -> [String] {
-    let rules = (parsedConfig["rules"] as? [[String: Any]]) ?? []
+  private func manualExportArtifactsDirectory() -> URL {
+    URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .appendingPathComponent("tmp", isDirectory: true)
+  }
+
+  private func loadRealAppConfigs(using globalConfig: UserConfig) throws -> [(bundleId: String, config: UserConfig, customName: String?)] {
+    let configDir = Defaults[.configDir]
+    let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
+    var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
+
+    for file in files.sorted() {
+      guard file.hasPrefix("app."),
+        file.hasSuffix(".json"),
+        !file.hasSuffix(".meta.json"),
+        file != "app-fallback-config.json"
+      else {
+        continue
+      }
+
+      let bundleId = String(file.dropFirst(4).dropLast(5))
+      guard bundleId != "default",
+        !bundleId.contains("Leader-Key"),
+        !bundleId.contains("leaderkey"),
+        !bundleId.contains(".meta")
+      else {
+        continue
+      }
+
+      let appConfig = UserConfig(alertHandler: TestAlertManager())
+      appConfig.root = globalConfig.getConfig(for: bundleId)
+
+      let metaFilePath = (configDir as NSString).appendingPathComponent("app.\(bundleId).meta.json")
+      let customName: String?
+      if FileManager.default.fileExists(atPath: metaFilePath) {
+        let metaData = try Data(contentsOf: URL(fileURLWithPath: metaFilePath))
+        customName = try JSONDecoder().decode(Karabiner2Exporter.AppMetadata.self, from: metaData).customName
+      } else {
+        customName = nil
+      }
+
+      appConfigs.append((bundleId: bundleId, config: appConfig, customName: customName))
+    }
+
+    return appConfigs
+  }
+
+  private func flattenManipulators(from rules: [[String: Any]]) -> [[String: Any]] {
+    rules.flatMap { ($0["manipulators"] as? [[String: Any]]) ?? [] }
+  }
+
+  private func extractSendUserCommandPayloads(from rules: [[String: Any]]) -> [String] {
     var payloads: [String] = []
 
-    for rule in rules {
-      for mapping in (rule["mappings"] as? [[String: Any]]) ?? [] {
-        for event in (mapping["to"] as? [Any]) ?? [] {
+    for manipulator in flattenManipulators(from: rules) {
+      for event in (manipulator["to"] as? [Any]) ?? [] {
           guard
             let eventObject = event as? [String: Any],
             let commandObject = eventObject["send_user_command"] as? [String: Any],
@@ -202,16 +449,15 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
           else {
             continue
           }
-          payloads.append(payload)
-        }
+        payloads.append(payload)
       }
     }
 
     return payloads
   }
 
-  private func structuredPayloads(mapping: [String: Any]) -> [[String: Any]] {
-    let events = (mapping["to"] as? [Any]) ?? []
+  private func structuredPayloads(manipulator: [String: Any]) -> [[String: Any]] {
+    let events = (manipulator["to"] as? [Any]) ?? []
     return events.compactMap { event in
       guard
         let eventObject = event as? [String: Any],
@@ -225,18 +471,33 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
   }
 
-  private func fromKeyCode(in mapping: [String: Any]) -> String? {
-    if let from = mapping["from"] as? String {
-      return from
-    }
-    if let from = mapping["from"] as? [String: Any] {
-      return from["key"] as? String
-    }
-    return nil
+  private func fromKeyCode(in manipulator: [String: Any]) -> String? {
+    let from = manipulator["from"] as? [String: Any]
+    return from?["key_code"] as? String
   }
 
-  private func hasSendUserCommand(mapping: [String: Any], prefix: String) -> Bool {
-    let events = (mapping["to"] as? [Any]) ?? []
+  private func mandatoryModifiers(in manipulator: [String: Any]) -> [String]? {
+    let from = manipulator["from"] as? [String: Any]
+    let modifiers = from?["modifiers"] as? [String: Any]
+    return modifiers?["mandatory"] as? [String]
+  }
+
+  private func hasVariableCondition(
+    _ manipulator: [String: Any],
+    name: String,
+    value: Int,
+    type: String
+  ) -> Bool {
+    let conditions = (manipulator["conditions"] as? [[String: Any]]) ?? []
+    return conditions.contains(where: {
+      ($0["name"] as? String) == name
+        && ($0["value"] as? NSNumber)?.intValue == value
+        && ($0["type"] as? String) == type
+    })
+  }
+
+  private func hasSendUserCommand(manipulator: [String: Any], prefix: String) -> Bool {
+    let events = (manipulator["to"] as? [Any]) ?? []
     return events.contains { event in
       guard
         let eventObject = event as? [String: Any],
@@ -249,19 +510,19 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
   }
 
-  private func hasSetVariable(mapping: [String: Any], name: String, value: Int) -> Bool {
-    let events = (mapping["to"] as? [Any]) ?? []
+  private func hasSetVariable(manipulator: [String: Any], name: String, value: Int) -> Bool {
+    let events = (manipulator["to"] as? [Any]) ?? []
     return events.contains { event in
       guard
         let eventObject = event as? [String: Any],
         let variableObject = eventObject["set_variable"] as? [String: Any],
         let variableName = variableObject["name"] as? String,
-        let variableValue = variableObject["value"] as? Int
+        let variableValue = variableObject["value"] as? NSNumber
       else {
         return false
       }
 
-      return variableName == name && variableValue == value
+      return variableName == name && variableValue.intValue == value
     }
   }
 }

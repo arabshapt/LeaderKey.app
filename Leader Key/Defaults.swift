@@ -13,6 +13,16 @@ private func defaultReloadSuccessSound() -> ReloadSuccessSound {
   return legacySoundEnabled ? .glass : .off
 }
 
+func defaultKarabinerTsRepoPath() -> String {
+  let candidate = (NSHomeDirectory() as NSString).appendingPathComponent(
+    "personalProjects/LeaderKeyapp/karabiner.ts")
+  var isDirectory: ObjCBool = false
+  if FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory), isDirectory.boolValue {
+    return candidate
+  }
+  return ""
+}
+
 extension Defaults.Keys {
   static let configDir = Key<String>(
     "configDir", default: UserConfig.defaultDirectory(), suite: defaultsSuite)
@@ -86,8 +96,12 @@ extension Defaults.Keys {
   /// Input method for keyboard events
   static let inputMethodPreference = Key<InputMethodPreference>(
     "inputMethodPreference", default: .karabiner2, suite: defaultsSuite)
-  /// Optional override path for kar binary (if empty, uses kar from PATH)
+  /// Legacy kar binary path. Repo-based karabiner.ts export uses karabinerTsRepoPath instead.
+  @available(*, deprecated, message: "Use karabinerTsRepoPath instead.")
   static let karBinaryPath = Key<String>("karBinaryPath", default: "", suite: defaultsSuite)
+  /// Configurable path to the karabiner.ts repo or prepared config workspace.
+  static let karabinerTsRepoPath = Key<String>(
+    "karabinerTsRepoPath", default: defaultKarabinerTsRepoPath(), suite: defaultsSuite)
   /// Optional override path for goku binary (if empty, uses goku from PATH)
   static let gokuBinaryPath = Key<String>("gokuBinaryPath", default: "", suite: defaultsSuite)
   /// Karabiner 2.0 export backend: kar, goku, or both
@@ -267,26 +281,26 @@ enum Karabiner2Backend: String, Defaults.Serializable, CaseIterable, Identifiabl
   var displayName: String {
     switch self {
     case .kar:
-      return "kar (TypeScript)"
+      return "karabiner.ts (repo export)"
     case .goku:
       return "Goku (EDN)"
     case .both:
-      return "Both (kar + Goku)"
+      return "Both (karabiner.ts + Goku)"
     }
   }
 
   var description: String {
     switch self {
     case .kar:
-      return "Generates TypeScript config, compiled by kar to karabiner.json"
+      return "Writes a generated Leader Key module into a configured karabiner.ts workspace and applies the managed rules directly"
     case .goku:
       return "Generates EDN config, injected into karabiner.edn and compiled by Goku"
     case .both:
-      return "Runs both kar and Goku pipelines"
+      return "Writes the generated karabiner.ts module first, then runs the legacy Goku EDN pipeline"
     }
   }
 
-  var requiresKar: Bool {
+  var requiresKarabinerTsExport: Bool {
     self == .kar || self == .both
   }
 

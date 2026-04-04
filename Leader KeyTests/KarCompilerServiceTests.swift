@@ -3,7 +3,103 @@ import Defaults
 import XCTest
 @testable import Leader_Key
 
-final class KarCompilerServiceTests: XCTestCase {
+final class KarabinerTsExportServiceTests: XCTestCase {
+  func testValidateKarabinerTsRepoRejectsPathWithoutWorkspaceMarkers() throws {
+    let repoURL = try makeTemporaryDirectory()
+
+    let result = KarabinerTsExportService.shared.validateKarabinerTsRepo(repoPath: repoURL.path)
+
+    XCTAssertFalse(result.success)
+    XCTAssertTrue(result.message.contains("workspace marker"))
+  }
+
+  func testCompileAndApplyWritesManagedRepoFilesAndPreservesBootstrap() throws {
+    let repoURL = try makeTemporaryDirectory()
+    let karabinerJSONURL = repoURL.appendingPathComponent("karabiner.json")
+    let bootstrapURL = repoURL.appendingPathComponent("configs/leaderkey/index.ts")
+    let unrelatedURL = repoURL.appendingPathComponent("README.md")
+
+    try "{}".write(to: repoURL.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(
+      at: bootstrapURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "export const preserved = true\n".write(to: bootstrapURL, atomically: true, encoding: .utf8)
+    try "keep me\n".write(to: unrelatedURL, atomically: true, encoding: .utf8)
+    try writeKarabinerJSON(
+      [
+        "profiles": [
+          [
+            "name": "Default",
+            "selected": true,
+            "complex_modifications": [
+              "rules": [
+                ["description": "KeepMe", "manipulators": [["type": "basic"]]]
+              ]
+            ],
+          ]
+        ]
+      ], to: karabinerJSONURL)
+
+    let result = KarabinerTsExportService.shared.compileAndApply(
+      managedRules: [
+        ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
+      ],
+      repoModuleSource: """
+        export const leaderKeyDefaultProfileName = "Default"
+        export const leaderKeyManagedRules = [] as const
+        export default leaderKeyManagedRules
+        """,
+      repoPath: repoURL.path,
+      karabinerJsonPath: karabinerJSONURL.path
+    )
+
+    XCTAssertTrue(result.success)
+    let generatedModulePath = repoURL.appendingPathComponent(KarabinerTsExportService.generatedModuleRelativePath)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: generatedModulePath.path))
+    XCTAssertEqual(try String(contentsOf: bootstrapURL), "export const preserved = true\n")
+    XCTAssertEqual(try String(contentsOf: unrelatedURL), "keep me\n")
+
+    let patchedRoot = try readKarabinerJSON(from: karabinerJSONURL)
+    let profiles = try XCTUnwrap(patchedRoot["profiles"] as? [[String: Any]])
+    let rules = try XCTUnwrap(
+      (profiles[0]["complex_modifications"] as? [String: Any])?["rules"] as? [[String: Any]])
+    XCTAssertEqual(rules.count, 2)
+    XCTAssertEqual(rules[0]["description"] as? String, "KeepMe")
+    XCTAssertEqual(rules[1]["description"] as? String, "LeaderKeyManaged/NewRule")
+  }
+
+  func testCompileAndApplyDoesNotTouchKarabinerJSONWhenRepoExportFails() throws {
+    let repoURL = try makeTemporaryDirectory()
+    let karabinerJSONURL = repoURL.appendingPathComponent("karabiner.json")
+    let originalRoot: [String: Any] = [
+      "profiles": [
+        [
+          "name": "Default",
+          "selected": true,
+          "complex_modifications": [
+            "rules": [
+              ["description": "KeepMe", "manipulators": [["type": "basic"]]]
+            ]
+          ],
+        ]
+      ]
+    ]
+    try writeKarabinerJSON(originalRoot, to: karabinerJSONURL)
+
+    let invalidRepoPath = repoURL.appendingPathComponent("missing-workspace").path
+    let result = KarabinerTsExportService.shared.compileAndApply(
+      managedRules: [
+        ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
+      ],
+      repoModuleSource: "export default []\n",
+      repoPath: invalidRepoPath,
+      karabinerJsonPath: karabinerJSONURL.path
+    )
+
+    XCTAssertFalse(result.success)
+    let currentRoot = try readKarabinerJSON(from: karabinerJSONURL)
+    XCTAssertEqual(try serializedJSON(currentRoot), try serializedJSON(originalRoot))
+  }
+
   func testPatchedKarabinerRootReplacesOnlyManagedRulesInSelectedProfile() throws {
     let unmanagedRule: [String: Any] = [
       "description": "KeepMe",
@@ -33,7 +129,47 @@ final class KarCompilerServiceTests: XCTestCase {
       ]
     ]
 
-    let patched = try KarCompilerService.patchedKarabinerRoot(root, compiledRules: compiledRules)
+    let patched = try KarabinerTsExportService.patchedKarabinerRoot(root, compiledRules: compiledRules)
+    let profiles = try XCTUnwrap(patched["profiles"] as? [[String: Any]])
+    let profile = try XCTUnwrap(profiles.first)
+    let complex = try XCTUnwrap(profile["complex_modifications"] as? [String: Any])
+    let rules = try XCTUnwrap(complex["rules"] as? [[String: Any]])
+
+    XCTAssertEqual(rules.count, 2)
+    XCTAssertEqual(rules[0]["description"] as? String, "KeepMe")
+    XCTAssertEqual(rules[1]["description"] as? String, "LeaderKeyManaged/New")
+  }
+
+  func testPatchedKarabinerRootReplacesLegacyLeaderKeyRulesDuringMigration() throws {
+    let unmanagedRule: [String: Any] = [
+      "description": "KeepMe",
+      "manipulators": [["type": "basic"]]
+    ]
+    let legacyLeaderKeyRule: [String: Any] = [
+      "description": "Leader Key - Global Mode",
+      "manipulators": [["type": "basic", "from": ["key_code": "a"]]]
+    ]
+
+    let root: [String: Any] = [
+      "profiles": [
+        [
+          "name": "Default",
+          "selected": true,
+          "complex_modifications": [
+            "rules": [unmanagedRule, legacyLeaderKeyRule]
+          ]
+        ]
+      ]
+    ]
+
+    let compiledRules: [[String: Any]] = [
+      [
+        "description": "LeaderKeyManaged/New",
+        "manipulators": [["type": "basic", "from": ["key_code": "b"]]]
+      ]
+    ]
+
+    let patched = try KarabinerTsExportService.patchedKarabinerRoot(root, compiledRules: compiledRules)
     let profiles = try XCTUnwrap(patched["profiles"] as? [[String: Any]])
     let profile = try XCTUnwrap(profiles.first)
     let complex = try XCTUnwrap(profile["complex_modifications"] as? [String: Any])
@@ -65,7 +201,7 @@ final class KarCompilerServiceTests: XCTestCase {
 
     let compiledRules: [[String: Any]] = [["description": "LeaderKeyManaged/NewRule"]]
 
-    let patched = try KarCompilerService.patchedKarabinerRoot(root, compiledRules: compiledRules)
+    let patched = try KarabinerTsExportService.patchedKarabinerRoot(root, compiledRules: compiledRules)
     let profiles = try XCTUnwrap(patched["profiles"] as? [[String: Any]])
 
     let firstProfileRules = try XCTUnwrap(
@@ -103,7 +239,7 @@ final class KarCompilerServiceTests: XCTestCase {
       ["description": "LeaderKeyManaged/NewB"]
     ]
 
-    let patched = try KarCompilerService.patchedKarabinerRoot(root, compiledRules: compiledRules)
+    let patched = try KarabinerTsExportService.patchedKarabinerRoot(root, compiledRules: compiledRules)
     let profiles = try XCTUnwrap(patched["profiles"] as? [[String: Any]])
     let profile = try XCTUnwrap(profiles.first)
     let complex = try XCTUnwrap(profile["complex_modifications"] as? [String: Any])
@@ -113,6 +249,26 @@ final class KarCompilerServiceTests: XCTestCase {
     XCTAssertEqual(
       descriptions,
       ["LeadingRule", "LeaderKeyManaged/NewA", "LeaderKeyManaged/NewB", "TrailingRule"])
+  }
+
+  private func makeTemporaryDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+  }
+
+  private func writeKarabinerJSON(_ root: [String: Any], to url: URL) throws {
+    let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: url, options: .atomic)
+  }
+
+  private func readKarabinerJSON(from url: URL) throws -> [String: Any] {
+    let data = try Data(contentsOf: url)
+    return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+  }
+
+  private func serializedJSON(_ object: Any) throws -> Data {
+    try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
   }
 }
 

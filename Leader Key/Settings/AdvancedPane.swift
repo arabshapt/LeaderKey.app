@@ -26,14 +26,14 @@ struct AdvancedPane: View {
   @Default(.loadShellRCFiles) var loadShellRCFiles
   @Default(.customShellPath) var customShellPath
   @Default(.inputMethodPreference) var inputMethodPreference
-  @Default(.karBinaryPath) var karBinaryPath
+  @Default(.karabinerTsRepoPath) var karabinerTsRepoPath
   @Default(.gokuBinaryPath) var gokuBinaryPath
   @Default(.karabiner2Backend) var karabiner2Backend
 
   @State private var isCustomShellValid = false
   @State private var showingAlternativeMappings = false
-  @State private var karValidationMessage: String?
-  @State private var karValidationSucceeded: Bool?
+  @State private var karabinerTsValidationMessage: String?
+  @State private var karabinerTsValidationSucceeded: Bool?
   @State private var gokuValidationMessage: String?
   @State private var gokuValidationSucceeded: Bool?
 
@@ -97,33 +97,49 @@ struct AdvancedPane: View {
                   .font(.caption)
                   .foregroundColor(.secondary)
 
-                if karabiner2Backend.requiresKar {
+                if karabiner2Backend.requiresKarabinerTsExport {
                   HStack(alignment: .center, spacing: 10) {
-                    Text("kar binary:")
+                    Text("Repo path:")
                       .foregroundColor(.secondary)
 
-                    TextField("PATH lookup (kar)", text: $karBinaryPath)
+                    TextField("Path to karabiner.ts repo", text: $karabinerTsRepoPath)
                       .textFieldStyle(.roundedBorder)
                       .frame(width: 320)
 
-                    Button("Validate kar") {
-                      let result = KarCompilerService.shared.validateKarBinary()
-                      karValidationSucceeded = result.success
-                      karValidationMessage = result.message
+                    Button("Choose…") {
+                      let panel = NSOpenPanel()
+                      panel.allowsMultipleSelection = false
+                      panel.canChooseDirectories = true
+                      panel.canChooseFiles = false
+                      if panel.runModal() != .OK { return }
+                      guard let selectedPath = panel.url else { return }
+                      karabinerTsRepoPath = selectedPath.path
                     }
 
-                    Button("Use PATH") {
-                      karBinaryPath = ""
+                    Button("Validate repo") {
+                      let result = KarabinerTsExportService.shared.validateKarabinerTsRepo()
+                      karabinerTsValidationSucceeded = result.success
+                      karabinerTsValidationMessage = result.message
+                    }
+
+                    Button("Reset") {
+                      karabinerTsRepoPath = defaultKarabinerTsRepoPath()
+                    }
+
+                    if !karabinerTsRepoPath.isEmpty {
+                      Button("Reveal") {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: karabinerTsRepoPath)
+                      }
                     }
 
                     Spacer()
                   }
                   .padding(.top, 6)
 
-                  if let karValidationMessage {
-                    Text(karValidationMessage)
+                  if let karabinerTsValidationMessage {
+                    Text(karabinerTsValidationMessage)
                       .font(.caption)
-                      .foregroundColor(karValidationSucceeded == true ? .green : .orange)
+                      .foregroundColor(karabinerTsValidationSucceeded == true ? .green : .orange)
                   }
                 }
 

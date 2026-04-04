@@ -32,6 +32,12 @@ final class Karabiner2Exporter {
     let actionLabel: String?     // Display label for the action
   }
 
+  struct KarabinerTSExport {
+    let managedRules: [[String: Any]]
+    let repoModuleSource: String
+    let stateMappings: [StateMapping]
+  }
+
   // Different initial states for different activation types
   private static let globalInitialStateId: Int32 = 1
   private static let fallbackInitialStateId: Int32 = 2
@@ -322,7 +328,7 @@ final class Karabiner2Exporter {
   static func generateKarConfig(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
-  ) -> (configTS: String, stateMappings: [StateMapping]) {
+  ) -> KarabinerTSExport {
     var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
     var usedAliases = Set<String>()
 
@@ -345,60 +351,92 @@ final class Karabiner2Exporter {
     var allStateMappings: [StateMapping] = []
     var rules: [[String: Any]] = []
 
-    let globalActivationShortcut = resolveActivationShortcut(
-      name: .activateDefaultOnly,
-      fallbackKeyCode: "k",
-      fallbackModifiers: ["command", "shift"]
-    )
-    let appSpecificActivationShortcut = resolveActivationShortcut(
-      name: .activateAppSpecific,
-      fallbackKeyCode: "k",
-      fallbackModifiers: ["command", "option"]
-    )
-
     // Activation, deactivation and settings shortcuts.
     var activationMappings: [[String: Any]] = []
 
     for (bundleId, alias, _) in appAliases {
       let appInitialStateId = generateAppInitialStateId(appAlias: alias)
-      if let mapping = generateKarActivationMapping(
-        keyCode: appSpecificActivationShortcut.keyCode,
-        modifiers: appSpecificActivationShortcut.modifiers,
+      if let kinesisActivation = generateKarActivationMapping(
+        keyCode: "keypad_4",
+        modifiers: ["left_command", "left_option", "left_control", "left_shift"],
         initialStateId: appInitialStateId,
         bundleId: bundleId,
-        isAppSpecificMode: true)
-      {
-        var conditionedMapping = mapping
-        conditionedMapping["condition"] = ["app": bundleRegex(for: bundleId)]
-        activationMappings.append(conditionedMapping)
+        isAppSpecificMode: true,
+        additionalConditions: [
+          ["app": bundleId],
+          kinesisDeviceCondition(),
+        ]
+      ) {
+        activationMappings.append(kinesisActivation)
+      }
+
+      if let builtInActivation = generateKarActivationMapping(
+        keyCode: "semicolon",
+        modifiers: [],
+        initialStateId: appInitialStateId,
+        bundleId: bundleId,
+        isAppSpecificMode: true,
+        additionalConditions: builtInActivationConditions(appBundleId: bundleId)
+      ) {
+        activationMappings.append(builtInActivation)
       }
     }
 
-    if let globalActivation = generateKarActivationMapping(
-      keyCode: globalActivationShortcut.keyCode,
-      modifiers: globalActivationShortcut.modifiers,
+    if let kinesisGlobalActivation = generateKarActivationMapping(
+      keyCode: "keypad_7",
+      modifiers: ["left_command", "left_option", "left_control", "left_shift"],
       initialStateId: globalInitialStateId,
       bundleId: nil,
-      isAppSpecificMode: false)
-    {
-      activationMappings.append(globalActivation)
+      isAppSpecificMode: false,
+      additionalConditions: [kinesisDeviceCondition()]
+    ) {
+      activationMappings.append(kinesisGlobalActivation)
     }
 
-    if let fallbackActivation = generateKarActivationMapping(
-      keyCode: appSpecificActivationShortcut.keyCode,
-      modifiers: appSpecificActivationShortcut.modifiers,
+    if let builtInGlobalActivation = generateKarActivationMapping(
+      keyCode: "right_command",
+      modifiers: [],
+      initialStateId: globalInitialStateId,
+      bundleId: nil,
+      isAppSpecificMode: false,
+      additionalConditions: builtInActivationConditions()
+    ) {
+      activationMappings.append(builtInGlobalActivation)
+    }
+
+    if let kinesisFallbackActivation = generateKarActivationMapping(
+      keyCode: "keypad_4",
+      modifiers: ["left_command", "left_option", "left_control", "left_shift"],
       initialStateId: fallbackInitialStateId,
       bundleId: "__FALLBACK__",
-      isAppSpecificMode: true)
-    {
-      activationMappings.append(fallbackActivation)
+      isAppSpecificMode: true,
+      additionalConditions: [kinesisDeviceCondition()]
+    ) {
+      activationMappings.append(kinesisFallbackActivation)
     }
 
-    if let escapeMapping = generateKarEscapeMapping() {
-      activationMappings.append(escapeMapping)
+    if let builtInFallbackActivation = generateKarActivationMapping(
+      keyCode: "semicolon",
+      modifiers: [],
+      initialStateId: fallbackInitialStateId,
+      bundleId: "__FALLBACK__",
+      isAppSpecificMode: true,
+      additionalConditions: builtInActivationConditions()
+    ) {
+      activationMappings.append(builtInFallbackActivation)
     }
-    if let settingsMapping = generateKarSettingsMapping() {
-      activationMappings.append(settingsMapping)
+
+    if let kinesisEscapeMapping = generateKarEscapeMapping(additionalConditions: [kinesisDeviceCondition()]) {
+      activationMappings.append(kinesisEscapeMapping)
+    }
+    if let kinesisSettingsMapping = generateKarSettingsMapping(additionalConditions: [kinesisDeviceCondition()]) {
+      activationMappings.append(kinesisSettingsMapping)
+    }
+    if let builtInEscapeMapping = generateKarEscapeMapping(additionalConditions: builtInActivationConditions()) {
+      activationMappings.append(builtInEscapeMapping)
+    }
+    if let builtInSettingsMapping = generateKarSettingsMapping(additionalConditions: builtInActivationConditions()) {
+      activationMappings.append(builtInSettingsMapping)
     }
 
     rules.append(
@@ -426,10 +464,11 @@ final class Karabiner2Exporter {
       rules.append(
         contentsOf: generateKarModeRules(
           from: appStateTree,
+          mode: .appSpecific(bundleId: bundleId),
           descriptionBase: "\(managedRuleDescriptionPrefix)AppMode/\(alias)",
           initialStateId: appInitialStateId,
           appAlias: alias,
-          appConditionRegex: bundleRegex(for: bundleId)
+          appConditionRegex: bundleId
         ))
     }
 
@@ -443,6 +482,7 @@ final class Karabiner2Exporter {
     rules.append(
       contentsOf: generateKarModeRules(
         from: globalStateTree,
+        mode: .global,
         descriptionBase: "\(managedRuleDescriptionPrefix)GlobalMode",
         initialStateId: globalInitialStateId,
         appAlias: nil,
@@ -460,50 +500,34 @@ final class Karabiner2Exporter {
     rules.append(
       contentsOf: generateKarModeRules(
         from: fallbackStateTree,
+        mode: .fallback,
         descriptionBase: "\(managedRuleDescriptionPrefix)FallbackMode",
         initialStateId: fallbackInitialStateId,
         appAlias: nil,
         appConditionRegex: nil
       ))
 
-    let configObject: [String: Any] = [
-      "rules": rules
-    ]
+    let managedRules = applyKarAlternativeMappings(to: compileKarIntermediateRules(rules))
+    let repoModuleSource = karabinerTsModuleSource(managedRules: managedRules)
 
-    let configTS: String
-    if let jsonData = try? JSONSerialization.data(
-      withJSONObject: configObject,
-      options: [.prettyPrinted, .sortedKeys]),
-      let jsonString = String(data: jsonData, encoding: .utf8)
-    {
-      configTS = "export default \(jsonString)\n"
-    } else {
-      debugLog("[Karabiner2Exporter] Failed to serialize kar config; generating empty rules")
-      configTS = "export default {\"rules\":[]}\n"
-    }
-
-    return (configTS: configTS, stateMappings: sortedStateMappings(allStateMappings))
+    return KarabinerTSExport(
+      managedRules: managedRules,
+      repoModuleSource: repoModuleSource,
+      stateMappings: sortedStateMappings(allStateMappings))
   }
 
   private static let managedRuleDescriptionPrefix = "LeaderKeyManaged/"
-
-  // A broad key set for undefined-key shake behavior in stateful mode.
-  private static let karCatchAllKeyCodes: [String] = [
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "spacebar", "return_or_enter", "tab", "delete_or_backspace", "escape",
-    "period", "comma", "semicolon", "slash", "backslash",
-    "hyphen", "equal_sign", "open_bracket", "close_bracket", "quote",
-    "grave_accent_and_tilde",
-    "up_arrow", "down_arrow", "left_arrow", "right_arrow",
-    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"
-  ]
 
   private struct KarTerminalAction {
     let terminalStateId: Int32
     let hasStickyMode: Bool
     let node: StateNode
+  }
+
+  private enum KarMode {
+    case appSpecific(bundleId: String)
+    case global
+    case fallback
   }
 
   private static func terminalActionHasStickyMode(for node: StateNode) -> Bool {
@@ -515,6 +539,7 @@ final class Karabiner2Exporter {
 
   private static func generateKarModeRules(
     from nodes: [StateNode],
+    mode: KarMode,
     descriptionBase: String,
     initialStateId: Int32,
     appAlias: String?,
@@ -596,30 +621,35 @@ final class Karabiner2Exporter {
       if !stateMappings.isEmpty {
         let conditionedStateMappings = stateMappings.map { mapping -> [String: Any] in
           var conditioned = mapping
-          conditioned["condition"] = variableCondition(name: "leader_state", value: stateId)
+          conditioned["condition"] = [variableCondition(name: "leader_state", value: stateId)]
           return conditioned
         }
 
-        var ruleCondition: [String: Any]? = nil
+        var ruleConditions = modeRuleConditions(for: mode)
         if let appConditionRegex {
-          ruleCondition = ["app": appConditionRegex]
+          ruleConditions.append(["app": appConditionRegex])
         }
 
         rules.append(
           makeKarRule(
             description: "\(descriptionBase)/State/\(stateId)",
             mappings: conditionedStateMappings,
-            condition: ruleCondition
+            condition: ruleConditions.isEmpty ? nil : ruleConditions
           ))
       }
 
       let catchAllMappings = generateKarCatchAllMappings()
       if !catchAllMappings.isEmpty {
+        var ruleConditions = modeRuleConditions(for: mode)
+        ruleConditions.append(variableCondition(name: "leader_state", value: stateId))
+        if let appConditionRegex {
+          ruleConditions.append(["app": appConditionRegex])
+        }
         rules.append(
           makeKarRule(
             description: "\(descriptionBase)/CatchAll/\(stateId)",
             mappings: catchAllMappings,
-            condition: variableCondition(name: "leader_state", value: stateId)
+            condition: ruleConditions
           ))
       }
     }
@@ -630,7 +660,7 @@ final class Karabiner2Exporter {
   private static func makeKarRule(
     description: String,
     mappings: [[String: Any]],
-    condition: [String: Any]? = nil
+    condition: Any? = nil
   ) -> [String: Any] {
     var rule: [String: Any] = [
       "description": description,
@@ -642,12 +672,274 @@ final class Karabiner2Exporter {
     return rule
   }
 
+  private static func compileKarIntermediateRules(_ rules: [[String: Any]]) -> [[String: Any]] {
+    compactCompiledRules(rules.compactMap(compileKarIntermediateRule))
+  }
+
+  private static func compactCompiledRules(_ rules: [[String: Any]]) -> [[String: Any]] {
+    var compactedRules: [[String: Any]] = []
+    var ruleIndexByDescription: [String: Int] = [:]
+
+    for rule in rules {
+      let description = compactManagedRuleDescription(
+        rule["description"] as? String ?? managedRuleDescriptionPrefix + "Unnamed")
+      let manipulators = rule["manipulators"] as? [[String: Any]] ?? []
+      guard !manipulators.isEmpty else { continue }
+
+      if let existingIndex = ruleIndexByDescription[description] {
+        var existingRule = compactedRules[existingIndex]
+        var existingManipulators = existingRule["manipulators"] as? [[String: Any]] ?? []
+        existingManipulators.append(contentsOf: manipulators)
+        existingRule["manipulators"] = existingManipulators
+        compactedRules[existingIndex] = existingRule
+        continue
+      }
+
+      var compactedRule = rule
+      compactedRule["description"] = description
+      ruleIndexByDescription[description] = compactedRules.count
+      compactedRules.append(compactedRule)
+    }
+
+    return compactedRules
+  }
+
+  static var alternativeMappingsOverride: [AlternativeMapping]?
+
+  private static func currentAlternativeMappings() -> [AlternativeMapping] {
+    alternativeMappingsOverride ?? AlternativeMappingsManager.shared.mappings
+  }
+
+  private static func applyKarAlternativeMappings(to rules: [[String: Any]]) -> [[String: Any]] {
+    let mappings = currentAlternativeMappings()
+    guard !mappings.isEmpty else { return rules }
+
+    return rules.map { rule in
+      let description = rule["description"] as? String ?? ""
+      guard description != "\(managedRuleDescriptionPrefix)ActivationShortcuts",
+        description != "\(managedRuleDescriptionPrefix)ModifierPassThrough"
+      else {
+        return rule
+      }
+
+      let manipulators = rule["manipulators"] as? [[String: Any]] ?? []
+      var manipulatorsWithAlternatives: [[String: Any]] = []
+
+      for manipulator in manipulators {
+        let from = manipulator["from"] as? [String: Any]
+        let keyCode = from?["key_code"] as? String
+        let matchingMappings = mappings.filter { mapping in
+          guard mapping.originalKey == keyCode else { return false }
+          guard let appAlias = mapping.appAlias else { return true }
+          return description.contains("/AppMode/\(appAlias)")
+        }
+
+        for mapping in matchingMappings {
+          var alternativeManipulator = manipulator
+          var alternativeFrom = from ?? [:]
+          alternativeFrom["key_code"] = mapping.alternativeKey
+          alternativeManipulator["from"] = alternativeFrom
+
+          var conditions = alternativeManipulator["conditions"] as? [[String: Any]] ?? []
+          conditions.append(contentsOf: mapping.conditions.map { [
+            "type": "variable_if",
+            "name": $0,
+            "value": 1,
+          ] })
+          alternativeManipulator["conditions"] = conditions
+          manipulatorsWithAlternatives.append(alternativeManipulator)
+        }
+
+        manipulatorsWithAlternatives.append(manipulator)
+      }
+
+      var updatedRule = rule
+      updatedRule["manipulators"] = manipulatorsWithAlternatives
+      return updatedRule
+    }
+  }
+
+  private static func compactManagedRuleDescription(_ description: String) -> String {
+    description.replacingOccurrences(
+      of: #"/(State|CatchAll)/[^/]+$"#,
+      with: "",
+      options: .regularExpression
+    )
+  }
+
+  private static func compileKarIntermediateRule(_ rule: [String: Any]) -> [String: Any]? {
+    let description = rule["description"] as? String ?? managedRuleDescriptionPrefix + "Unnamed"
+    let ruleConditions = compileKarCondition(rule["condition"])
+    let mappings = rule["mappings"] as? [[String: Any]] ?? []
+
+    let manipulators = mappings.compactMap { mapping -> [String: Any]? in
+      guard let from = compileKarFrom(mapping["from"]) else {
+        return nil
+      }
+
+      let mappingConditions = compileKarCondition(mapping["condition"])
+      let conditions = ruleConditions + mappingConditions
+
+      var manipulator: [String: Any] = [
+        "type": "basic",
+        "from": from,
+        "to": compileKarToEvents(mapping["to"]),
+      ]
+
+      if !conditions.isEmpty {
+        manipulator["conditions"] = conditions
+      }
+
+      return manipulator
+    }
+
+    guard !manipulators.isEmpty else {
+      return nil
+    }
+
+    return [
+      "description": description,
+      "manipulators": manipulators,
+    ]
+  }
+
+  private static func compileKarFrom(_ value: Any?) -> [String: Any]? {
+    if let keyCode = value as? String {
+      return ["key_code": keyCode]
+    }
+
+    guard let from = value as? [String: Any] else {
+      return nil
+    }
+
+    var compiled: [String: Any]
+    if let keyCode = from["key"] as? String {
+      compiled = ["key_code": keyCode]
+    } else if let any = from["any"] as? String {
+      compiled = ["any": any]
+    } else {
+      return nil
+    }
+
+    var modifiers: [String: Any] = [:]
+
+    if let mandatory = normalizedStringArray(from["modifiers"]), !mandatory.isEmpty {
+      modifiers["mandatory"] = mandatory
+    }
+
+    if let optional = normalizedStringArray(from["optional"]), !optional.isEmpty {
+      modifiers["optional"] = optional
+    }
+
+    if !modifiers.isEmpty {
+      compiled["modifiers"] = modifiers
+    }
+
+    return compiled
+  }
+
+  private static func compileKarToEvents(_ value: Any?) -> [[String: Any]] {
+    let rawEvents = value as? [Any] ?? []
+    return rawEvents.compactMap { event in
+      if let keyCode = event as? String {
+        return ["key_code": keyCode]
+      }
+
+      guard let eventObject = event as? [String: Any] else {
+        return nil
+      }
+
+      if let shell = eventObject["shell"] as? String {
+        return ["shell_command": shell]
+      }
+
+      return eventObject
+    }
+  }
+
+  private static func compileKarCondition(_ value: Any?) -> [[String: Any]] {
+    if let conditions = value as? [[String: Any]] {
+      return conditions.flatMap(compileKarCondition)
+    }
+
+    guard let condition = value as? [String: Any] else {
+      return []
+    }
+
+    if let app = condition["app"] as? String {
+      return [[
+        "type": "frontmost_application_if",
+        "bundle_identifiers": [app],
+      ]]
+    }
+
+    if let variable = condition["variable"] as? String, let value = condition["value"] {
+      return [[
+        "type": "variable_if",
+        "name": variable,
+        "value": value,
+      ]]
+    }
+
+    if let variable = condition["variable_unless"] as? String, let value = condition["value"] {
+      return [[
+        "type": "variable_unless",
+        "name": variable,
+        "value": value,
+      ]]
+    }
+
+    if condition["type"] != nil {
+      return [condition]
+    }
+
+    return []
+  }
+
+  private static func normalizedStringArray(_ value: Any?) -> [String]? {
+    if let stringValue = value as? String {
+      return [stringValue]
+    }
+
+    if let stringArray = value as? [String] {
+      return stringArray
+    }
+
+    return nil
+  }
+
+  private static func karabinerTsModuleSource(managedRules: [[String: Any]]) -> String {
+    let rulesJSONString: String
+    if let jsonData = try? JSONSerialization.data(
+      withJSONObject: managedRules,
+      options: [.sortedKeys]),
+      let jsonString = String(data: jsonData, encoding: .utf8)
+    {
+      rulesJSONString = jsonString
+    } else {
+      debugLog("[Karabiner2Exporter] Failed to serialize karabiner.ts managed rules; generating empty export")
+      rulesJSONString = "[]"
+    }
+
+    return """
+      // Generated by Leader Key. Do not edit this file directly.
+      // Manual repo changes should live outside configs/leaderkey/.
+
+      export const leaderKeyDefaultProfileName = "Default"
+
+      export const leaderKeyManagedRules = \(rulesJSONString) as const
+
+      export default leaderKeyManagedRules
+      """
+  }
+
   private static func generateKarActivationMapping(
     keyCode: String,
     modifiers: [String],
     initialStateId: Int32,
     bundleId: String?,
-    isAppSpecificMode: Bool
+    isAppSpecificMode: Bool,
+    additionalConditions: [[String: Any]] = []
   ) -> [String: Any]? {
     let activateCommand = bundleId.map { "activate \($0)" } ?? "activate"
     let modeVars: [[String: Any]]
@@ -666,16 +958,23 @@ final class Karabiner2Exporter {
     }
 
     var toEvents: [Any] = modeVars
+    toEvents.append(karSetVariable(name: "leaderkey_sticky", value: 0))
     toEvents.append(karSetVariable(name: "leader_state", value: initialStateId))
     toEvents.append(karSendUserCommand(activateCommand))
 
-    return [
+    var mapping: [String: Any] = [
       "from": karFrom(keyCode: keyCode, modifiers: modifiers),
       "to": toEvents
     ]
+    if !additionalConditions.isEmpty {
+      mapping["condition"] = additionalConditions
+    }
+    return mapping
   }
 
-  private static func generateKarEscapeMapping() -> [String: Any]? {
+  private static func generateKarEscapeMapping(
+    additionalConditions: [[String: Any]] = []
+  ) -> [String: Any]? {
     let toEvents: [Any] = [
       karSetVariable(name: "leaderkey_active", value: 0),
       karSetVariable(name: "leaderkey_global", value: 0),
@@ -685,14 +984,17 @@ final class Karabiner2Exporter {
       karSendUserCommand("deactivate")
     ]
 
-    return [
+    var mapping: [String: Any] = [
       "from": "escape",
       "to": toEvents,
-      "condition": variableCondition(name: "leaderkey_active", value: 1)
+      "condition": [variableCondition(name: "leaderkey_active", value: 1)] + additionalConditions
     ]
+    return mapping
   }
 
-  private static func generateKarSettingsMapping() -> [String: Any]? {
+  private static func generateKarSettingsMapping(
+    additionalConditions: [[String: Any]] = []
+  ) -> [String: Any]? {
     let toEvents: [Any] = [
       karSetVariable(name: "leaderkey_active", value: 0),
       karSetVariable(name: "leaderkey_global", value: 0),
@@ -703,11 +1005,12 @@ final class Karabiner2Exporter {
       karSendUserCommand("settings")
     ]
 
-    return [
+    var mapping: [String: Any] = [
       "from": karFrom(keyCode: "comma", modifiers: ["command"]),
       "to": toEvents,
-      "condition": variableCondition(name: "leaderkey_active", value: 1)
+      "condition": [variableCondition(name: "leaderkey_active", value: 1)] + additionalConditions
     ]
+    return mapping
   }
 
   private static func generateKarModifierPassThroughMappings() -> [[String: Any]] {
@@ -945,16 +1248,17 @@ final class Karabiner2Exporter {
   }
 
   private static func generateKarCatchAllMappings() -> [[String: Any]] {
-    karCatchAllKeyCodes.map { keyCode in
-      [
-        "from": karFrom(keyCode: keyCode, optionalAny: true),
-        "to": [
-          karSendUserCommand("shake"),
-          "vk_none"
-        ],
-        "condition": variableUnlessCondition(name: "leaderkey_sticky", value: 1)
-      ]
-    }
+    [[
+      "from": [
+        "any": "key_code",
+        "modifiers": "any"
+      ],
+      "to": [
+        karSendUserCommand("shake"),
+        "vk_none"
+      ],
+      "condition": variableUnlessCondition(name: "leaderkey_sticky", value: 1)
+    ]]
   }
 
   private static func karFrom(
@@ -1058,6 +1362,57 @@ final class Karabiner2Exporter {
 
   private static func variableUnlessCondition(name: String, value: Any) -> [String: Any] {
     ["variable_unless": name, "value": value]
+  }
+
+  private static func modeRuleConditions(for mode: KarMode) -> [[String: Any]] {
+    switch mode {
+    case .appSpecific:
+      return [
+        variableUnlessCondition(name: "leaderkey_global", value: 1),
+        variableCondition(name: "leaderkey_appspecific", value: 1),
+      ]
+    case .global:
+      return [variableCondition(name: "leaderkey_global", value: 1)]
+    case .fallback:
+      return [
+        variableUnlessCondition(name: "leaderkey_global", value: 1),
+        variableCondition(name: "leaderkey_appspecific", value: 1),
+      ]
+    }
+  }
+
+  private static func kinesisDeviceCondition() -> [String: Any] {
+    [
+      "type": "device_if",
+      "identifiers": [
+        ["product_id": 866, "vendor_id": 10730],
+        ["product_id": 24926, "vendor_id": 7504],
+        ["product_id": 10203, "vendor_id": 5824],
+        ["product_id": 45074, "vendor_id": 1133],
+      ],
+    ]
+  }
+
+  private static func appleBuiltInDeviceCondition() -> [String: Any] {
+    [
+      "type": "device_if",
+      "identifiers": [
+        ["product_id": 0, "vendor_id": 0]
+      ],
+    ]
+  }
+
+  private static func builtInActivationConditions(appBundleId: String? = nil) -> [[String: Any]] {
+    var conditions: [[String: Any]] = [
+      variableUnlessCondition(name: "caps_lock-mode", value: 1),
+      variableUnlessCondition(name: "f-mode", value: 1),
+      variableUnlessCondition(name: "tilde-mode", value: 1),
+    ]
+    if let appBundleId {
+      conditions.append(["app": appBundleId])
+    }
+    conditions.append(appleBuiltInDeviceCondition())
+    return conditions
   }
 
   private static func bundleRegex(for bundleId: String) -> String {
