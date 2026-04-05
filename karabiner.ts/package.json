@@ -28,7 +28,10 @@
   "scripts": {
     "build": "vite build",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "parity": "vitest run configs/arabshapt/src/index.test.ts",
+    "sync:arabshapt": "node scripts/generate-arabshapt-profile.mjs",
+    "extract:arabshapt": "node scripts/extract-arabshapt-rules.mjs"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.1.0",
