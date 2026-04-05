@@ -48,6 +48,7 @@ export type {
   EditorId,
   FlatIndexRecord,
   GroupNode,
+  MacroStep,
   ScopeType,
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";

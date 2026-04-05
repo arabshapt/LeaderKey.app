@@ -1,4 +1,4 @@
-import { resolveActionAiDescription, resolveActionDescription, type ConfigItem, type FlatIndexRecord } from "@leaderkey/config-core";
+import { resolveActionAiDescription, resolveActionDescription, type ConfigItem, type FlatIndexRecord, type MacroStep } from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
   ["left", "←"],
@@ -31,6 +31,17 @@ const DISPLAY_KEY_NAMES = new Map<string, string>([
   [" ", "space"],
 ]);
 
+function cloneMacroActionSteps(macroSteps?: MacroStep[]): MacroStep[] {
+  return (macroSteps ?? []).map((step) => ({
+    action: {
+      ...step.action,
+      ...(step.action.macroSteps ? { macroSteps: cloneMacroActionSteps(step.action.macroSteps) } : {}),
+    },
+    delay: step.delay,
+    enabled: step.enabled,
+  }));
+}
+
 export interface KeystrokeFields {
   app?: string;
   focusTargetApp: boolean;
@@ -48,6 +59,7 @@ export interface ItemFormState {
   intellijValue: string;
   keystroke: KeystrokeFields;
   label: string;
+  macroSteps: MacroStep[];
   menuValue: string;
   shortcutValue: string;
   stickyMode: boolean;
@@ -77,6 +89,7 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     intellijValue: "",
     keystroke: { focusTargetApp: false, spec: "" },
     label: "",
+    macroSteps: [],
     menuValue: "",
     shortcutValue: "",
     stickyMode: false,
@@ -208,6 +221,7 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
     intellijValue: record.actionType === "intellij" ? record.rawValue : "",
     keystroke,
     label: record.actionType === "group" ? record.label ?? record.displayLabel ?? "" : "",
+    macroSteps: [],
     menuValue: record.actionType === "menu" ? record.rawValue : "",
     shortcutValue: record.actionType === "shortcut" ? record.rawValue : "",
     stickyMode: record.stickyMode ?? false,
@@ -239,6 +253,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
     description: resolveActionDescription(item, { breadcrumbPath: [], configDisplayName: "", inherited: false }) ?? "",
     fullPath: item.key ? formatFullPath([item.key]) : "",
     label: "",
+    macroSteps: item.type === "macro" ? cloneMacroActionSteps(item.macroSteps) : [],
     stickyMode: item.stickyMode ?? false,
     type: item.type,
   };

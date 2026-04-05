@@ -11,6 +11,7 @@ import {
 } from "@raycast/api";
 import {
   appendChildToGroup,
+  macroStepSummary,
   createItemAtPath,
   deleteRecord,
   FALLBACK_CONFIG_FILE_NAME,
@@ -28,17 +29,19 @@ import {
 } from "@leaderkey/config-core";
 import { useEffect, useMemo, useState } from "react";
 
+import { formStateToActionNode, validateActionNode } from "./action-form.js";
+import { ActionValueFields } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
 import {
   emptyFormState,
-  encodeKeystrokeRawValue,
   formatFullPath,
-  menuAppPrefix,
+  itemToFormState,
   parseTokenizedFullPath,
   replaceMenuAppPrefix,
   recordToFormState,
   type ItemFormState,
 } from "./form-utils.js";
+import { MacroStepsEditor } from "./macro-editor.js";
 
 type EditorMode = "append-child" | "create-at-path" | "create-sibling" | "edit-source" | "override-in-effective-config";
 
@@ -83,46 +86,13 @@ function formStateToItem(state: ItemFormState, key: string, preserveItem?: Confi
     };
   }
 
-  const preservedAction = preserveItem?.type === state.type ? preserveItem : undefined;
-  const baseItem = {
-    activates: state.type === "url" ? state.activates : undefined,
-    aiDescription: state.aiDescription.trim() || undefined,
-    description: state.description.trim() || undefined,
-    iconPath: preservedAction?.iconPath,
+  const action = formStateToActionNode(state, {
+    preserveAction: preserveItem?.type === "group" ? undefined : preserveItem,
+  });
+  return {
+    ...action,
     key,
-    label: preservedAction?.label,
-    stickyMode: state.stickyMode || undefined,
-    type: state.type,
-  } as const;
-
-  switch (state.type) {
-    case "application":
-      return { ...baseItem, value: state.applicationPath.trim() };
-    case "command":
-      return { ...baseItem, value: state.commandValue.trim() };
-    case "folder":
-      return { ...baseItem, value: state.folderPath.trim() };
-    case "intellij":
-      return { ...baseItem, value: state.intellijValue.trim() };
-    case "keystroke":
-      return { ...baseItem, value: encodeKeystrokeRawValue(state.keystroke) };
-    case "macro":
-      return {
-        ...baseItem,
-        macroSteps: preservedAction?.type === "macro" ? preservedAction.macroSteps ?? [] : [],
-        value: preservedAction?.type === "macro" ? preservedAction.value : "",
-      };
-    case "menu":
-      return { ...baseItem, value: state.menuValue.trim() };
-    case "shortcut":
-      return { ...baseItem, value: state.shortcutValue.trim() };
-    case "text":
-      return { ...baseItem, value: state.textValue };
-    case "toggleStickyMode":
-      return { ...baseItem, value: "" };
-    case "url":
-      return { ...baseItem, value: state.urlValue.trim() };
-  }
+  };
 }
 
 function validateItem(item: ConfigItem): string | undefined {
@@ -135,18 +105,14 @@ function validateItem(item: ConfigItem): string | undefined {
   }
 
   if (item.type === "macro") {
-    return undefined;
+    return validateActionNode(item);
   }
 
   if (item.type === "toggleStickyMode") {
     return undefined;
   }
 
-  if (!item.value.trim()) {
-    return "A value is required for this action type.";
-  }
-
-  return undefined;
+  return validateActionNode(item);
 }
 
 function pathIsEditable(mode: EditorMode): boolean {
@@ -323,6 +289,15 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     ? formStateToItem(formState, destinationKey, preservedItem)
     : undefined;
   const valueError = tentativeItem ? validateItem(tentativeItem) : undefined;
+  const macroSummary = useMemo(
+    () => macroStepSummary({
+      key: undefined,
+      macroSteps: formState.macroSteps,
+      type: "macro",
+      value: "",
+    }),
+    [formState.macroSteps],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -339,6 +314,23 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   useEffect(() => {
     setPreservedItem(initialPreserveItem);
   }, [initialPreserveItem]);
+
+  useEffect(() => {
+    if (initialPreserveItem?.type !== "macro") {
+      return;
+    }
+
+    setFormState((current) => {
+      if (current.type !== "macro" || current.macroSteps.length > 0) {
+        return current;
+      }
+      return {
+        ...current,
+        macroSteps: itemToFormState(initialPreserveItem).macroSteps,
+      };
+    });
+  }, [initialPreserveItem]);
+
   useEffect(() => {
     setValidationPayload(getMemoryCachedPayload(configDirectory) ?? readCachedPayloadSync(configDirectory));
   }, [configDirectory]);
@@ -356,6 +348,17 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       .then((item) => {
         if (isMounted) {
           setPreservedItem(item);
+          if (item.type === "macro") {
+            setFormState((current) => {
+              if (current.type !== "macro" || current.macroSteps.length > 0) {
+                return current;
+              }
+              return {
+                ...current,
+                macroSteps: itemToFormState(item).macroSteps,
+              };
+            });
+          }
         }
       })
       .catch(() => {
@@ -526,30 +529,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
   }
 
-  const showApplicationPicker = formState.type === "application";
-  const showFolderPicker = formState.type === "folder";
-  const showShortcutField = formState.type === "shortcut";
-  const showUrlField = formState.type === "url";
-  const showCommandField = formState.type === "command";
-  const showMenuField = formState.type === "menu";
-  const showTextField = formState.type === "text";
-  const showIntellijField = formState.type === "intellij";
-  const showKeystrokeFields = formState.type === "keystroke";
   const showStickyModeField = formState.type !== "toggleStickyMode";
-  const knownMenuAppNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const app of installedApps) {
-      names.add(app.name);
-    }
-    if (defaultMenuAppName) {
-      names.add(defaultMenuAppName);
-    }
-    return Array.from(names).sort((left, right) => left.localeCompare(right));
-  }, [defaultMenuAppName, installedApps]);
-  const selectedMenuAppName = menuAppPrefix(formState.menuValue, knownMenuAppNames);
-  const selectedMenuAppValue = selectedMenuAppName
-    ? installedApps.find((app) => app.name === selectedMenuAppName)?.bundlePath ?? `__current__:${selectedMenuAppName}`
-    : "__none__";
   const fullPathInfo = pathIsEditable(mode)
     ? [
         "Use tokenized syntax like a -> left -> space.",
@@ -584,6 +564,21 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     <Form
       actions={
         <ActionPanel>
+          {formState.type === "macro" ? (
+            <Action.Push
+              icon={Icon.List}
+              target={
+                <MacroStepsEditor
+                  defaultMenuAppName={defaultMenuAppName}
+                  initialSteps={formState.macroSteps}
+                  installedApps={installedApps}
+                  onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
+                  title="Edit Macro Steps"
+                />
+              }
+              title="Edit Macro Steps"
+            />
+          ) : null}
           <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title={isSaving ? "Saving…" : "Save"} />
           {canDeleteTarget ? (
             <Action
@@ -663,178 +658,23 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>
 
-      {showApplicationPicker ? (
-        <Form.Dropdown
-          filtering
-          id="applicationPath"
-          error={valueFieldError}
-          onChange={(value) => setFormState((current) => ({ ...current, applicationPath: value }))}
-          title="Application"
-          value={formState.applicationPath}
-        >
-          {formState.applicationPath ? (
-            <Form.Dropdown.Item title={formState.applicationPath} value={formState.applicationPath} />
-          ) : null}
-          {installedApps.map((app) => (
-            <Form.Dropdown.Item key={app.bundlePath} title={app.name} value={app.bundlePath} />
-          ))}
-        </Form.Dropdown>
-      ) : null}
-
-      {showFolderPicker ? (
-        <Form.FilePicker
-          allowMultipleSelection={false}
-          canChooseDirectories
-          canChooseFiles={false}
-          error={valueFieldError}
-          id="folderPath"
-          onChange={(value) => setFormState((current) => ({ ...current, folderPath: value[0] ?? "" }))}
-          title="Folder"
-          value={formState.folderPath ? [formState.folderPath] : []}
+      {formState.type === "macro" ? (
+        <Form.Description
+          text={[
+            `Steps: ${formState.macroSteps.length}`,
+            `Enabled: ${formState.macroSteps.filter((step) => step.enabled).length}`,
+            `Preview: ${macroSummary.length > 0 ? macroSummary.join(" -> ") : "No enabled steps yet."}`,
+          ].join("\n")}
+          title="Macro Steps"
         />
       ) : null}
-
-      {showShortcutField ? (
-        <Form.TextField
-          error={valueFieldError}
-          id="shortcutValue"
-          onChange={(value) => setFormState((current) => ({ ...current, shortcutValue: value }))}
-          title="Shortcut"
-          value={formState.shortcutValue}
-        />
-      ) : null}
-
-      {showKeystrokeFields ? (
-        <>
-          <Form.Dropdown
-            filtering
-            id="keystrokeApp"
-            onChange={(value) =>
-              setFormState((current) => ({
-                ...current,
-                keystroke: {
-                  ...current.keystroke,
-                  app: value === "__none__" ? undefined : value,
-                },
-              }))}
-            title="Target App"
-            value={formState.keystroke.app ?? "__none__"}
-          >
-            <Form.Dropdown.Item title="Frontmost App" value="__none__" />
-            {installedApps.map((app) => (
-              <Form.Dropdown.Item key={app.bundlePath} title={app.name} value={app.name} />
-            ))}
-          </Form.Dropdown>
-          <Form.Checkbox
-            id="focusTargetApp"
-            label="Focus Target App After Send"
-            onChange={(value) =>
-              setFormState((current) => ({
-                ...current,
-                keystroke: { ...current.keystroke, focusTargetApp: value },
-              }))}
-            value={formState.keystroke.focusTargetApp}
-          />
-          <Form.TextField
-            error={valueFieldError}
-            id="keystrokeSpec"
-            onChange={(value) =>
-              setFormState((current) => ({
-                ...current,
-                keystroke: { ...current.keystroke, spec: value },
-              }))}
-            title="Keystroke"
-            value={formState.keystroke.spec}
-          />
-        </>
-      ) : null}
-
-      {showUrlField ? (
-        <>
-          <Form.TextField
-            error={valueFieldError}
-            id="urlValue"
-            onChange={(value) => setFormState((current) => ({ ...current, urlValue: value }))}
-            title="URL"
-            value={formState.urlValue}
-          />
-          <Form.Checkbox
-            id="activates"
-            label="Activate App"
-            onChange={(value) => setFormState((current) => ({ ...current, activates: value }))}
-            value={formState.activates}
-          />
-        </>
-      ) : null}
-
-      {showCommandField ? (
-        <Form.TextArea
-          error={valueFieldError}
-          id="commandValue"
-          onChange={(value) => setFormState((current) => ({ ...current, commandValue: value }))}
-          title="Command"
-          value={formState.commandValue}
-        />
-      ) : null}
-
-      {showMenuField ? (
-        <>
-          <Form.Dropdown
-            filtering
-            id="menuApp"
-            info="Selecting an app only rewrites the leading app prefix."
-            onChange={(value) => {
-              const nextAppName = value === "__none__"
-                ? undefined
-                : value.startsWith("__current__:")
-                  ? value.slice("__current__:".length)
-                  : installedApps.find((app) => app.bundlePath === value)?.name;
-              setFormState((current) => ({
-                ...current,
-                menuValue: replaceMenuAppPrefix(current.menuValue, nextAppName, selectedMenuAppName),
-              }));
-            }}
-            title="App"
-            value={selectedMenuAppValue}
-          >
-            <Form.Dropdown.Item title="No App Prefix" value="__none__" />
-            {selectedMenuAppName && !installedApps.some((app) => app.name === selectedMenuAppName) ? (
-              <Form.Dropdown.Item title={`${selectedMenuAppName} (Current)`} value={`__current__:${selectedMenuAppName}`} />
-            ) : null}
-            {installedApps.map((app) => (
-              <Form.Dropdown.Item key={app.bundlePath} title={app.name} value={app.bundlePath} />
-            ))}
-          </Form.Dropdown>
-          <Form.TextField
-            error={valueFieldError}
-            id="menuValue"
-            info="Stored as App > Menu > Item. Use the app picker above to set the prefix quickly."
-            onChange={(value) => setFormState((current) => ({ ...current, menuValue: value }))}
-            title="Menu Path"
-            value={formState.menuValue}
-          />
-        </>
-      ) : null}
-
-      {showTextField ? (
-        <Form.TextArea
-          error={valueFieldError}
-          id="textValue"
-          onChange={(value) => setFormState((current) => ({ ...current, textValue: value }))}
-          title="Text"
-          value={formState.textValue}
-        />
-      ) : null}
-
-      {showIntellijField ? (
-        <Form.TextField
-          error={valueFieldError}
-          id="intellijValue"
-          onChange={(value) => setFormState((current) => ({ ...current, intellijValue: value }))}
-          title="IntelliJ Actions"
-          value={formState.intellijValue}
-        />
-      ) : null}
+      <ActionValueFields
+        defaultMenuAppName={defaultMenuAppName}
+        formState={formState}
+        installedApps={installedApps}
+        setFormState={setFormState}
+        valueFieldError={valueError}
+      />
       {formState.type !== "group" ? (
         <Form.TextField
           id="description"
