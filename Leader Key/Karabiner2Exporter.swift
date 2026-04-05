@@ -3461,6 +3461,18 @@ final class Karabiner2Exporter {
       // Continue anyway, backup is not critical
     }
 
+    // Rotate backups: keep only the 2 most recent
+    let directory = (configPath as NSString).deletingLastPathComponent
+    let baseName = (configPath as NSString).lastPathComponent
+    if let files = try? FileManager.default.contentsOfDirectory(atPath: directory) {
+      let backups = files.filter { $0.hasPrefix(baseName + ".backup.") }.sorted().reversed()
+      for (index, file) in backups.enumerated() {
+        if index >= 2 {
+          try? FileManager.default.removeItem(atPath: (directory as NSString).appendingPathComponent(file))
+        }
+      }
+    }
+
     do {
       try modifiedContent.write(toFile: configPath, atomically: true, encoding: .utf8)
       debugLog("[Karabiner2Exporter] Successfully updated karabiner.edn")
