@@ -1,5 +1,20 @@
 import { type ConfigItem, type FlatIndexRecord } from "@leaderkey/config-core";
 
+const KEY_ALIASES = new Map<string, string>([
+  ["left", "←"],
+  ["left_arrow", "←"],
+  ["leftarrow", "←"],
+  ["right", "→"],
+  ["right_arrow", "→"],
+  ["rightarrow", "→"],
+  ["up", "↑"],
+  ["up_arrow", "↑"],
+  ["uparrow", "↑"],
+  ["down", "↓"],
+  ["down_arrow", "↓"],
+  ["downarrow", "↓"],
+]);
+
 export interface KeystrokeFields {
   app?: string;
   focusTargetApp: boolean;
@@ -21,6 +36,15 @@ export interface ItemFormState {
   textValue: string;
   type: ConfigItem["type"];
   urlValue: string;
+}
+
+export function normalizeConfigKey(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return KEY_ALIASES.get(trimmed.toLowerCase()) ?? trimmed;
 }
 
 export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormState {

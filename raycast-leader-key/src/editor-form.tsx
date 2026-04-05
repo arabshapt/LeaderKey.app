@@ -25,6 +25,7 @@ import { rebuildIndex } from "./cache.js";
 import {
   emptyFormState,
   encodeKeystrokeRawValue,
+  normalizeConfigKey,
   recordToFormState,
   type ItemFormState,
 } from "./form-utils.js";
@@ -61,7 +62,7 @@ function formStateToItem(state: ItemFormState, preserveItem?: ConfigItem): Confi
     return {
       actions: preservedGroup?.actions ?? [],
       iconPath: preservedGroup?.iconPath,
-      key: state.key.trim(),
+      key: normalizeConfigKey(state.key),
       label: state.label.trim() || undefined,
       stickyMode: state.stickyMode || undefined,
       type: "group",
@@ -72,7 +73,7 @@ function formStateToItem(state: ItemFormState, preserveItem?: ConfigItem): Confi
   const baseItem = {
     activates: state.type === "url" ? state.activates : undefined,
     iconPath: preservedAction?.iconPath,
-    key: state.key.trim(),
+    key: normalizeConfigKey(state.key),
     label: state.label.trim() || undefined,
     stickyMode: state.stickyMode || undefined,
     type: state.type,

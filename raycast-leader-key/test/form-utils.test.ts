@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { emptyFormState, recordToFormState } from "../src/form-utils.js";
+import { emptyFormState, normalizeConfigKey, recordToFormState } from "../src/form-utils.js";
 
 test("emptyFormState returns blank default action fields", () => {
   const state = emptyFormState();
@@ -58,4 +58,13 @@ test("recordToFormState still preserves edit-source data", () => {
   assert.equal(state.type, "command");
   assert.equal(state.commandValue, "gh pr checkout 123");
   assert.equal(state.key, "g");
+});
+
+test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
+  assert.equal(normalizeConfigKey("left"), "←");
+  assert.equal(normalizeConfigKey("left_arrow"), "←");
+  assert.equal(normalizeConfigKey("uparrow"), "↑");
+  assert.equal(normalizeConfigKey(" down "), "↓");
+  assert.equal(normalizeConfigKey("→"), "→");
+  assert.equal(normalizeConfigKey("g"), "g");
 });
