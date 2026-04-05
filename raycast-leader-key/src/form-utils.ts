@@ -127,6 +127,36 @@ export function parseTokenizedFullPath(value: string): ParsedTokenizedPath {
   return { keyPath };
 }
 
+export function menuAppPrefix(value: string, candidateAppNames?: Iterable<string>): string | undefined {
+  const match = value.match(/^\s*([^>]+?)\s*>\s*(.*)$/);
+  const prefix = match?.[1]?.trim();
+  if (!prefix) {
+    return undefined;
+  }
+
+  if (!candidateAppNames) {
+    return prefix;
+  }
+
+  return Array.from(candidateAppNames).some((candidate) => candidate === prefix) ? prefix : undefined;
+}
+
+export function replaceMenuAppPrefix(value: string, appName: string | undefined, currentAppName?: string): string {
+  const currentPrefix = currentAppName?.trim();
+  const currentPrefixPattern = currentPrefix
+    ? new RegExp(`^\\s*${currentPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*>\\s*(.*)$`)
+    : undefined;
+  const match = currentPrefixPattern ? value.match(currentPrefixPattern) : undefined;
+  const suffix = match ? match[1]!.trim() : value.trim();
+  const normalizedAppName = appName?.trim();
+
+  if (!normalizedAppName) {
+    return suffix;
+  }
+
+  return suffix ? `${normalizedAppName} > ${suffix}` : `${normalizedAppName} > `;
+}
+
 export function parseKeystrokeRawValue(rawValue: string): KeystrokeFields {
   const parts = rawValue.split(" > ").map((part) => part.trim()).filter(Boolean);
   if (parts.length === 0) {

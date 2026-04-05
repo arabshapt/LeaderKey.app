@@ -13,6 +13,8 @@ import {
   appendChildToGroup,
   createItemAtPath,
   deleteRecord,
+  FALLBACK_CONFIG_FILE_NAME,
+  GLOBAL_CONFIG_FILE_NAME,
   validateRecordPath,
   materializeRecordToConfigItem,
   type CachePayload,
@@ -31,7 +33,9 @@ import {
   emptyFormState,
   encodeKeystrokeRawValue,
   formatFullPath,
+  menuAppPrefix,
   parseTokenizedFullPath,
+  replaceMenuAppPrefix,
   recordToFormState,
   type ItemFormState,
 } from "./form-utils.js";
@@ -220,6 +224,35 @@ function saveResultConfigDisplayName(
   return targetRecord?.effectiveConfigDisplayName ?? "";
 }
 
+function inferredMenuAppName(
+  mode: EditorMode,
+  createAtPath: PathCreationTarget | undefined,
+  targetRecord: FlatIndexRecord | undefined,
+): string | undefined {
+  if (mode === "create-at-path") {
+    if (!createAtPath) {
+      return undefined;
+    }
+
+    const fileName = createAtPath.configPath.split("/").at(-1);
+    if (fileName === GLOBAL_CONFIG_FILE_NAME || fileName === FALLBACK_CONFIG_FILE_NAME) {
+      return undefined;
+    }
+
+    return createAtPath.configDisplayName.trim() || undefined;
+  }
+
+  if (!targetRecord) {
+    return undefined;
+  }
+
+  if (mode === "edit-source") {
+    return targetRecord.sourceScope === "app" ? targetRecord.sourceConfigDisplayName.trim() || undefined : undefined;
+  }
+
+  return targetRecord.effectiveScope === "app" ? targetRecord.effectiveConfigDisplayName.trim() || undefined : undefined;
+}
+
 export function RecordEditorForm(props: RecordEditorFormProps) {
   const { configDirectory, createAtPath, initialFormState, initialType, mode, preserveItem: initialPreserveItem, targetRecord, title } = props;
   const [formState, setFormState] = useState<ItemFormState>(() => {
@@ -256,6 +289,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
   const destinationConfigPath = editableConfigPath(mode, createAtPath, targetRecord);
   const destinationConfigDisplayName = editableConfigDisplayName(mode, createAtPath, targetRecord);
+  const defaultMenuAppName = inferredMenuAppName(mode, createAtPath, targetRecord);
   const parsedFullPath = useMemo(
     () => pathIsEditable(mode)
       ? parseTokenizedFullPath(formState.fullPath)
@@ -502,6 +536,20 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const showIntellijField = formState.type === "intellij";
   const showKeystrokeFields = formState.type === "keystroke";
   const showStickyModeField = formState.type !== "toggleStickyMode";
+  const knownMenuAppNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const app of installedApps) {
+      names.add(app.name);
+    }
+    if (defaultMenuAppName) {
+      names.add(defaultMenuAppName);
+    }
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }, [defaultMenuAppName, installedApps]);
+  const selectedMenuAppName = menuAppPrefix(formState.menuValue, knownMenuAppNames);
+  const selectedMenuAppValue = selectedMenuAppName
+    ? installedApps.find((app) => app.name === selectedMenuAppName)?.bundlePath ?? `__current__:${selectedMenuAppName}`
+    : "__none__";
   const fullPathInfo = pathIsEditable(mode)
     ? [
         "Use tokenized syntax like a -> left -> space.",
@@ -514,6 +562,23 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       ].filter(Boolean).join("\n")
     : fixedPathInfo;
   const valueFieldError = valueError;
+
+  useEffect(() => {
+    if (formState.type !== "menu" || !defaultMenuAppName) {
+      return;
+    }
+
+    setFormState((current) => {
+      if (current.type !== "menu" || current.menuValue.trim()) {
+        return current;
+      }
+
+      return {
+        ...current,
+        menuValue: replaceMenuAppPrefix("", defaultMenuAppName),
+      };
+    });
+  }, [defaultMenuAppName, formState.type]);
 
   return (
     <Form
@@ -564,7 +629,23 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       ) : null}
       <Form.Dropdown
         id="type"
-        onChange={(value) => setFormState((current) => ({ ...current, type: value as ConfigItem["type"] }))}
+        onChange={(value) =>
+          setFormState((current) => {
+            const nextType = value as ConfigItem["type"];
+            if (current.type === nextType) {
+              return current;
+            }
+
+            if (nextType === "menu" && !current.menuValue.trim() && defaultMenuAppName) {
+              return {
+                ...current,
+                menuValue: replaceMenuAppPrefix("", defaultMenuAppName),
+                type: nextType,
+              };
+            }
+
+            return { ...current, type: nextType };
+          })}
         title="Type"
         value={formState.type}
       >
@@ -697,13 +778,42 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       ) : null}
 
       {showMenuField ? (
-        <Form.TextField
-          error={valueFieldError}
-          id="menuValue"
-          onChange={(value) => setFormState((current) => ({ ...current, menuValue: value }))}
-          title="Menu Path"
-          value={formState.menuValue}
-        />
+        <>
+          <Form.Dropdown
+            filtering
+            id="menuApp"
+            info="Selecting an app only rewrites the leading app prefix."
+            onChange={(value) => {
+              const nextAppName = value === "__none__"
+                ? undefined
+                : value.startsWith("__current__:")
+                  ? value.slice("__current__:".length)
+                  : installedApps.find((app) => app.bundlePath === value)?.name;
+              setFormState((current) => ({
+                ...current,
+                menuValue: replaceMenuAppPrefix(current.menuValue, nextAppName, selectedMenuAppName),
+              }));
+            }}
+            title="App"
+            value={selectedMenuAppValue}
+          >
+            <Form.Dropdown.Item title="No App Prefix" value="__none__" />
+            {selectedMenuAppName && !installedApps.some((app) => app.name === selectedMenuAppName) ? (
+              <Form.Dropdown.Item title={`${selectedMenuAppName} (Current)`} value={`__current__:${selectedMenuAppName}`} />
+            ) : null}
+            {installedApps.map((app) => (
+              <Form.Dropdown.Item key={app.bundlePath} title={app.name} value={app.bundlePath} />
+            ))}
+          </Form.Dropdown>
+          <Form.TextField
+            error={valueFieldError}
+            id="menuValue"
+            info="Stored as App > Menu > Item. Use the app picker above to set the prefix quickly."
+            onChange={(value) => setFormState((current) => ({ ...current, menuValue: value }))}
+            title="Menu Path"
+            value={formState.menuValue}
+          />
+        </>
       ) : null}
 
       {showTextField ? (

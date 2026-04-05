@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   emptyFormState,
   formatFullPath,
+  menuAppPrefix,
   normalizeConfigKey,
   parseTokenizedFullPath,
+  replaceMenuAppPrefix,
   recordToFormState,
 } from "../src/form-utils.js";
 
@@ -97,4 +99,18 @@ test("parseTokenizedFullPath rejects multi-character literal segments", () => {
 
 test("formatFullPath renders special keys as tokenized aliases", () => {
   assert.equal(formatFullPath(["a", "←", " "]), "a -> left -> space");
+});
+
+test("menuAppPrefix extracts the leading app name from menu values", () => {
+  assert.equal(menuAppPrefix("Codex > File > Open Recent"), "Codex");
+  assert.equal(menuAppPrefix(" Google Chrome > History "), "Google Chrome");
+  assert.equal(menuAppPrefix("File > Open", ["Codex", "Google Chrome"]), undefined);
+  assert.equal(menuAppPrefix(""), undefined);
+});
+
+test("replaceMenuAppPrefix preserves the rest of the menu path", () => {
+  assert.equal(replaceMenuAppPrefix("", "Codex"), "Codex > ");
+  assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", "Arc", "Codex"), "Arc > File > Open Recent");
+  assert.equal(replaceMenuAppPrefix("File > Open Recent", "Codex"), "Codex > File > Open Recent");
+  assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", undefined, "Codex"), "File > Open Recent");
 });
