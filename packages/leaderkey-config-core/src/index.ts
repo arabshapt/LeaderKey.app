@@ -20,9 +20,11 @@ export {
   locateNodeInFile,
   materializeRecordToConfigItem,
   updateRecord,
+  updateRecordAtPath,
 } from "./mutations.js";
 export { normalizeLabelsInConfigDirectory } from "./normalize.js";
 export { analyzePathInConfig, parsePathInput } from "./path-navigation.js";
+export { validateRecordPath } from "./path-validation.js";
 export { searchRecords, searchRecordsInSubtree } from "./search.js";
 export { actionValuePreview, generateActionLabel, generateGroupLabel, macroStepSummary } from "./labels.js";
 export type { InstalledApp } from "./apps.js";
@@ -41,3 +43,4 @@ export type {
   ScopeType,
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";
+export type { RecordPathValidationResult, ValidateRecordPathOptions } from "./path-validation.js";

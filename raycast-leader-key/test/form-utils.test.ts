@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { emptyFormState, normalizeConfigKey, recordToFormState } from "../src/form-utils.js";
+import {
+  emptyFormState,
+  formatFullPath,
+  normalizeConfigKey,
+  parseTokenizedFullPath,
+  recordToFormState,
+} from "../src/form-utils.js";
 
 test("emptyFormState returns blank default action fields", () => {
   const state = emptyFormState();
 
   assert.equal(state.type, "shortcut");
-  assert.equal(state.key, "");
+  assert.equal(state.fullPath, "");
   assert.equal(state.label, "");
   assert.equal(state.shortcutValue, "");
   assert.equal(state.applicationPath, "");
@@ -18,7 +24,7 @@ test("emptyFormState can default to group without inheriting selected item value
   const state = emptyFormState("group");
 
   assert.equal(state.type, "group");
-  assert.equal(state.key, "");
+  assert.equal(state.fullPath, "");
   assert.equal(state.label, "");
   assert.equal(state.commandValue, "");
 });
@@ -57,7 +63,7 @@ test("recordToFormState still preserves edit-source data", () => {
 
   assert.equal(state.type, "command");
   assert.equal(state.commandValue, "gh pr checkout 123");
-  assert.equal(state.key, "g");
+  assert.equal(state.fullPath, "r -> g");
 });
 
 test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
@@ -71,4 +77,18 @@ test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
   assert.equal(normalizeConfigKey("spacebar"), " ");
   assert.equal(normalizeConfigKey("→"), "→");
   assert.equal(normalizeConfigKey("g"), "g");
+});
+
+test("parseTokenizedFullPath normalizes aliases per segment", () => {
+  assert.deepEqual(parseTokenizedFullPath("a -> left -> space").keyPath, ["a", "←", " "]);
+  assert.deepEqual(parseTokenizedFullPath("up → .").keyPath, ["↑", "."]);
+});
+
+test("parseTokenizedFullPath rejects multi-character literal segments", () => {
+  const parsed = parseTokenizedFullPath("leftspace");
+  assert.equal(parsed.error, 'Path segment "leftspace" must resolve to exactly one key.');
+});
+
+test("formatFullPath renders special keys as tokenized aliases", () => {
+  assert.equal(formatFullPath(["a", "←", " "]), "a -> left -> space");
 });

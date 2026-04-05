@@ -283,6 +283,10 @@ function replaceOrAppendByKey(group: GroupNode, item: ConfigItem): void {
   group.actions.push(item);
 }
 
+function keyPathMatches(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
 export async function updateRecord(
   record: FlatIndexRecord,
   nextItem: ConfigItem,
@@ -301,6 +305,50 @@ export async function updateRecord(
   const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
   const itemIndex = record.sourceNodePath.at(-1)!;
   parentGroup.actions.splice(itemIndex, 1, normalizeItemBeforeSave(nextItem));
+  await writeGroupToFile(targetPath, root);
+  return targetPath;
+}
+
+export async function updateRecordAtPath(
+  record: FlatIndexRecord,
+  nextItem: ConfigItem,
+  destinationKeyPath: string[],
+  mode: MutationMode = "edit-source",
+): Promise<string> {
+  const destinationKey = destinationKeyPath.at(-1)?.trim();
+  if (!destinationKey) {
+    throw new Error("A full path is required.");
+  }
+
+  if (mode === "override-in-effective-config") {
+    if (!keyPathMatches(record.effectiveKeyPath, destinationKeyPath)) {
+      throw new Error("Override edits cannot move the path.");
+    }
+
+    return updateRecord(record, { ...nextItem, key: destinationKey }, mode);
+  }
+
+  if (keyPathMatches(record.effectiveKeyPath, destinationKeyPath)) {
+    return updateRecord(record, { ...nextItem, key: destinationKey }, mode);
+  }
+
+  const targetPath = record.sourceConfigPath;
+  const root = await loadGroupFromFile(targetPath);
+  const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
+  const itemIndex = record.sourceNodePath.at(-1)!;
+  parentGroup.actions.splice(itemIndex, 1);
+
+  const destinationParent = ensureGroupPathByKeys(root, destinationKeyPath.slice(0, -1));
+  const normalizedItem = normalizeItemBeforeSave({
+    ...nextItem,
+    key: destinationKey,
+  });
+  const existingItem = destinationParent.actions.find((candidate) => (candidate.key ?? "") === destinationKey);
+  if (existingItem) {
+    throw new Error(`An item with key '${destinationKey}' already exists at this path.`);
+  }
+
+  destinationParent.actions.push(normalizedItem);
   await writeGroupToFile(targetPath, root);
   return targetPath;
 }

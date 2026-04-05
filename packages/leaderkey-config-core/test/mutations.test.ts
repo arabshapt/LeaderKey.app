@@ -9,6 +9,8 @@ import {
   insertSiblingAfter,
   type GroupNode,
   updateRecord,
+  updateRecordAtPath,
+  validateRecordPath,
 } from "../src/index.js";
 import { createTempConfigDirectory, expectRecord, readJsonFile, writeConfigFile } from "./helpers.js";
 
@@ -130,4 +132,176 @@ test("createItemAtPath auto-creates missing intermediate groups before appending
   assert.equal(groupB.key, "b");
   assert.equal(groupDot.key, ".");
   assert.equal(child?.key, "c");
+});
+
+test("updateRecordAtPath moves an action within the same config and auto-creates destination parents", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const globalPath = await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "c",
+            type: "shortcut",
+            value: "Ct",
+          },
+        ],
+        key: "a",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const record = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "a -> c" && candidate.kind === "action"),
+    "expected source action",
+  );
+
+  await updateRecordAtPath(record, {
+    key: "c",
+    type: "shortcut",
+    value: "Ct",
+  }, ["x", "y"]);
+
+  payload = await buildCachePayload(configDirectory);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "a -> c"), false);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "x -> y"), true);
+
+  const savedRoot = await readJsonFile<GroupNode>(globalPath);
+  assert.equal((savedRoot.actions[0] as GroupNode).key, "a");
+  const groupX = savedRoot.actions[1] as GroupNode;
+  assert.equal(groupX.key, "x");
+  assert.equal(groupX.actions[0]?.key, "y");
+});
+
+test("updateRecordAtPath moves a group and preserves its children", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "b",
+            type: "shortcut",
+            value: "Cb",
+          },
+        ],
+        key: "a",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const groupRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "a" && candidate.kind === "group"),
+    "expected source group",
+  );
+
+  await updateRecordAtPath(groupRecord, {
+    actions: [
+      {
+        key: "b",
+        type: "shortcut",
+        value: "Cb",
+      },
+    ],
+    key: "a",
+    type: "group",
+  }, ["x", "g"]);
+
+  payload = await buildCachePayload(configDirectory);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "a"), false);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "x -> g"), true);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "x -> g -> b"), true);
+});
+
+test("validateRecordPath rejects exact local collisions, blocked descendants, and descendant moves", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const globalPath = await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "b",
+            type: "shortcut",
+            value: "Cb",
+          },
+        ],
+        key: "a",
+        type: "group",
+      },
+      {
+        key: "x",
+        type: "shortcut",
+        value: "Cx",
+      },
+    ],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const groupRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "a" && candidate.kind === "group"),
+    "expected source group",
+  );
+
+  const exactCollision = validateRecordPath(payload, {
+    configFilePath: globalPath,
+    destinationKeyPath: ["a", "b"],
+  });
+  assert.equal(exactCollision.error, "An item already exists at a -> b.");
+
+  const blocked = validateRecordPath(payload, {
+    configFilePath: globalPath,
+    destinationKeyPath: ["x", "y"],
+  });
+  assert.equal(blocked.error, "Action Shortcut: Cmd+X blocks descendants under x.");
+
+  const descendantMove = validateRecordPath(payload, {
+    configFilePath: globalPath,
+    currentRecord: groupRecord,
+    destinationKeyPath: ["a", "c"],
+  });
+  assert.equal(descendantMove.error, "A group cannot be moved into its own descendant path.");
+});
+
+test("validateRecordPath allows local overrides of inherited fallback content in app configs", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  const fallbackPath = await writeConfigFile(configDirectory, "app-fallback-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "d",
+            type: "menu",
+            value: "Google Chrome > Tab > Duplicate Tab",
+          },
+        ],
+        key: "w",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+  const chromePath = await writeConfigFile(configDirectory, "app.com.google.Chrome.json", {
+    actions: [],
+    type: "group",
+  }, {
+    customName: "Chrome",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const validation = validateRecordPath(payload, {
+    configFilePath: chromePath,
+    destinationKeyPath: ["w", "d"],
+  });
+
+  assert.equal(validation.error, undefined);
+  assert.deepEqual(validation.autoCreateGroupKeys, ["w"]);
+  assert.equal(validation.overrideRecord?.sourceConfigPath, fallbackPath);
 });

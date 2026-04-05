@@ -23,6 +23,14 @@ const KEY_ALIASES = new Map<string, string>([
   ["spacebar", " "],
 ]);
 
+const DISPLAY_KEY_NAMES = new Map<string, string>([
+  ["←", "left"],
+  ["→", "right"],
+  ["↑", "up"],
+  ["↓", "down"],
+  [" ", "space"],
+]);
+
 export interface KeystrokeFields {
   app?: string;
   focusTargetApp: boolean;
@@ -33,9 +41,9 @@ export interface ItemFormState {
   activates: boolean;
   applicationPath: string;
   commandValue: string;
+  fullPath: string;
   folderPath: string;
   intellijValue: string;
-  key: string;
   keystroke: KeystrokeFields;
   label: string;
   menuValue: string;
@@ -60,9 +68,9 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     activates: false,
     applicationPath: "",
     commandValue: "",
+    fullPath: "",
     folderPath: "",
     intellijValue: "",
-    key: "",
     keystroke: { focusTargetApp: false, spec: "" },
     label: "",
     menuValue: "",
@@ -72,6 +80,47 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     type,
     urlValue: "",
   };
+}
+
+export interface ParsedTokenizedPath {
+  error?: string;
+  keyPath: string[];
+}
+
+export function formatFullPath(keyPath: string[]): string {
+  return keyPath.map((segment) => DISPLAY_KEY_NAMES.get(segment) ?? segment).join(" -> ");
+}
+
+export function parseTokenizedFullPath(value: string): ParsedTokenizedPath {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {
+      error: "A full path is required.",
+      keyPath: [],
+    };
+  }
+
+  const segments = trimmed.split(/\s*(?:->|→)\s*/g).map((segment) => segment.trim());
+  if (segments.some((segment) => segment.length === 0)) {
+    return {
+      error: "Each path segment must contain one key.",
+      keyPath: [],
+    };
+  }
+
+  const keyPath: string[] = [];
+  for (const segment of segments) {
+    const normalized = normalizeConfigKey(segment);
+    if (Array.from(normalized).length !== 1) {
+      return {
+        error: `Path segment "${segment}" must resolve to exactly one key.`,
+        keyPath: [],
+      };
+    }
+    keyPath.push(normalized);
+  }
+
+  return { keyPath };
 }
 
 export function parseKeystrokeRawValue(rawValue: string): KeystrokeFields {
@@ -118,9 +167,9 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
     activates: record.activates ?? false,
     applicationPath: record.actionType === "application" ? record.rawValue : "",
     commandValue: record.actionType === "command" ? record.rawValue : "",
+    fullPath: formatFullPath(record.effectiveKeyPath),
     folderPath: record.actionType === "folder" ? record.rawValue : "",
     intellijValue: record.actionType === "intellij" ? record.rawValue : "",
-    key: record.key ?? "",
     keystroke,
     label: record.label ?? record.displayLabel ?? "",
     menuValue: record.actionType === "menu" ? record.rawValue : "",
@@ -140,7 +189,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
   if (item.type === "group") {
     return {
       ...emptyFormState("group"),
-      key: item.key ?? "",
+      fullPath: item.key ? formatFullPath([item.key]) : "",
       label: item.label ?? "",
       stickyMode: item.stickyMode ?? false,
       type: "group",
@@ -150,7 +199,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
   const baseState: ItemFormState = {
     ...emptyFormState(item.type),
     activates: item.activates ?? false,
-    key: item.key ?? "",
+    fullPath: item.key ? formatFullPath([item.key]) : "",
     label: item.label ?? "",
     stickyMode: item.stickyMode ?? false,
     type: item.type,

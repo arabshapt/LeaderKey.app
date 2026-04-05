@@ -13,6 +13,7 @@ import {
   appendChildToGroup,
   createItemAtPath,
   deleteRecord,
+  validateRecordPath,
   materializeRecordToConfigItem,
   type CachePayload,
   findInstalledApps,
@@ -21,14 +22,16 @@ import {
   type ConfigItem,
   type FlatIndexRecord,
   updateRecord,
+  updateRecordAtPath,
 } from "@leaderkey/config-core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { rebuildIndex } from "./cache.js";
+import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
 import {
   emptyFormState,
   encodeKeystrokeRawValue,
-  normalizeConfigKey,
+  formatFullPath,
+  parseTokenizedFullPath,
   recordToFormState,
   type ItemFormState,
 } from "./form-utils.js";
@@ -59,13 +62,17 @@ interface RecordEditorFormProps {
   title: string;
 }
 
-function formStateToItem(state: ItemFormState, preserveItem?: ConfigItem): ConfigItem {
+function keyPathMatches(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function formStateToItem(state: ItemFormState, key: string, preserveItem?: ConfigItem): ConfigItem {
   if (state.type === "group") {
     const preservedGroup = preserveItem?.type === "group" ? preserveItem : undefined;
     return {
       actions: preservedGroup?.actions ?? [],
       iconPath: preservedGroup?.iconPath,
-      key: normalizeConfigKey(state.key),
+      key,
       label: state.label.trim() || undefined,
       stickyMode: state.stickyMode || undefined,
       type: "group",
@@ -76,7 +83,7 @@ function formStateToItem(state: ItemFormState, preserveItem?: ConfigItem): Confi
   const baseItem = {
     activates: state.type === "url" ? state.activates : undefined,
     iconPath: preservedAction?.iconPath,
-    key: normalizeConfigKey(state.key),
+    key,
     label: state.label.trim() || undefined,
     stickyMode: state.stickyMode || undefined,
     type: state.type,
@@ -136,13 +143,88 @@ function validateItem(item: ConfigItem): string | undefined {
   return undefined;
 }
 
+function pathIsEditable(mode: EditorMode): boolean {
+  return mode !== "override-in-effective-config";
+}
+
+function editableConfigPath(mode: EditorMode, createAtPath: PathCreationTarget | undefined, targetRecord: FlatIndexRecord | undefined): string {
+  if (mode === "create-at-path") {
+    if (!createAtPath) {
+      throw new Error("Missing create-at-path target.");
+    }
+    return createAtPath.configPath;
+  }
+
+  if (!targetRecord) {
+    throw new Error("Missing target record for path editing.");
+  }
+
+  if (mode === "edit-source") {
+    return targetRecord.sourceConfigPath;
+  }
+
+  return targetRecord.inherited ? targetRecord.effectiveConfigPath : targetRecord.sourceConfigPath;
+}
+
+function editableConfigDisplayName(
+  mode: EditorMode,
+  createAtPath: PathCreationTarget | undefined,
+  targetRecord: FlatIndexRecord | undefined,
+): string {
+  if (mode === "create-at-path") {
+    return createAtPath?.configDisplayName ?? "";
+  }
+
+  if (mode === "edit-source") {
+    return targetRecord?.sourceConfigDisplayName ?? "";
+  }
+
+  return targetRecord?.effectiveConfigDisplayName ?? "";
+}
+
+function defaultFullPath(
+  mode: EditorMode,
+  createAtPath: PathCreationTarget | undefined,
+  targetRecord: FlatIndexRecord | undefined,
+): string {
+  if (mode === "create-at-path") {
+    return createAtPath ? formatFullPath([...createAtPath.parentKeyPath, createAtPath.suggestedKey]) : "";
+  }
+
+  if (!targetRecord) {
+    return "";
+  }
+
+  if (mode === "append-child") {
+    return formatFullPath(targetRecord.effectiveKeyPath);
+  }
+
+  if (mode === "create-sibling") {
+    return formatFullPath(targetRecord.parentEffectiveKeyPath);
+  }
+
+  return formatFullPath(targetRecord.effectiveKeyPath);
+}
+
+function saveResultConfigDisplayName(
+  mode: EditorMode,
+  createAtPath: PathCreationTarget | undefined,
+  targetRecord: FlatIndexRecord | undefined,
+): string {
+  if (mode === "create-at-path") {
+    return createAtPath?.configDisplayName ?? "";
+  }
+
+  return targetRecord?.effectiveConfigDisplayName ?? "";
+}
+
 export function RecordEditorForm(props: RecordEditorFormProps) {
   const { configDirectory, createAtPath, initialFormState, initialType, mode, preserveItem: initialPreserveItem, targetRecord, title } = props;
   const [formState, setFormState] = useState<ItemFormState>(() => {
     if (initialFormState) {
       const nextState = structuredClone(initialFormState);
-      if (mode === "create-at-path" && createAtPath?.suggestedKey && !nextState.key.trim()) {
-        nextState.key = createAtPath.suggestedKey;
+      if (!nextState.fullPath.trim()) {
+        nextState.fullPath = defaultFullPath(mode, createAtPath, targetRecord);
       }
       return nextState;
     }
@@ -155,18 +237,58 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
 
     const nextState = emptyFormState(initialType ?? "shortcut");
-    if (mode === "create-at-path" && createAtPath?.suggestedKey) {
-      nextState.key = createAtPath.suggestedKey;
-    }
+    nextState.fullPath = defaultFullPath(mode, createAtPath, targetRecord);
     return nextState;
   });
   const [preservedItem, setPreservedItem] = useState<ConfigItem | undefined>(initialPreserveItem);
   const [installedApps, setInstalledApps] = useState<Array<{ bundlePath: string; name: string }>>([]);
+  const [validationPayload, setValidationPayload] = useState<CachePayload | undefined>(() =>
+    getMemoryCachedPayload(configDirectory) ?? readCachedPayloadSync(configDirectory),
+  );
   const [isSaving, setIsSaving] = useState(false);
   const { pop } = useNavigation();
   const labelFieldTitle = formState.type === "group" ? "Description" : "Label";
   const labelFieldPlaceholder = formState.type === "group" ? "Optional group description" : undefined;
   const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
+  const destinationConfigPath = editableConfigPath(mode, createAtPath, targetRecord);
+  const destinationConfigDisplayName = editableConfigDisplayName(mode, createAtPath, targetRecord);
+  const parsedFullPath = useMemo(
+    () => pathIsEditable(mode)
+      ? parseTokenizedFullPath(formState.fullPath)
+      : { keyPath: targetRecord?.effectiveKeyPath ?? [] },
+    [formState.fullPath, mode, targetRecord],
+  );
+  const destinationKeyPath = parsedFullPath.keyPath;
+  const pathValidation = useMemo(
+    () => {
+      if (!pathIsEditable(mode) || parsedFullPath.error || !validationPayload) {
+        return undefined;
+      }
+
+      return validateRecordPath(validationPayload, {
+        configFilePath: destinationConfigPath,
+        currentRecord: mode === "edit-source" ? targetRecord : undefined,
+        destinationKeyPath,
+      });
+    },
+    [destinationConfigPath, destinationKeyPath, mode, parsedFullPath.error, targetRecord, validationPayload],
+  );
+  const pathError = pathIsEditable(mode)
+    ? parsedFullPath.error ?? pathValidation?.error
+    : undefined;
+  const pathPreview = destinationKeyPath.length > 0 ? formatFullPath(destinationKeyPath) : "—";
+  const autoCreatePreview = pathValidation && pathValidation.autoCreateGroupKeys.length > 0
+    ? formatFullPath(pathValidation.autoCreateGroupKeys)
+    : "None";
+  const currentPathText = targetRecord ? formatFullPath(targetRecord.effectiveKeyPath) : defaultFullPath(mode, createAtPath, targetRecord);
+  const fixedPathInfo = !pathIsEditable(mode) && targetRecord
+    ? `Overrides stay at ${formatFullPath(targetRecord.effectiveKeyPath)}.`
+    : undefined;
+  const destinationKey = destinationKeyPath.at(-1) ?? "";
+  const tentativeItem = destinationKey
+    ? formStateToItem(formState, destinationKey, preservedItem)
+    : undefined;
+  const valueError = tentativeItem ? validateItem(tentativeItem) : undefined;
 
   useEffect(() => {
     let isMounted = true;
@@ -183,6 +305,10 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   useEffect(() => {
     setPreservedItem(initialPreserveItem);
   }, [initialPreserveItem]);
+
+  useEffect(() => {
+    setValidationPayload(getMemoryCachedPayload(configDirectory) ?? readCachedPayloadSync(configDirectory));
+  }, [configDirectory]);
 
   useEffect(() => {
     let isMounted = true;
@@ -211,10 +337,20 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   }, [initialPreserveItem, targetRecord]);
 
   async function handleSubmit(): Promise<void> {
-    const nextItem = formStateToItem(formState, preservedItem);
-    const validationError = validateItem(nextItem);
-    if (validationError) {
-      await showToast({ style: Toast.Style.Failure, title: validationError });
+    const nextPathError = pathIsEditable(mode) ? pathError : undefined;
+    if (nextPathError) {
+      await showToast({ style: Toast.Style.Failure, title: nextPathError });
+      return;
+    }
+
+    if (!destinationKey) {
+      await showToast({ style: Toast.Style.Failure, title: "A full path is required." });
+      return;
+    }
+
+    const nextItem = formStateToItem(formState, destinationKey, preservedItem);
+    if (valueError) {
+      await showToast({ style: Toast.Style.Failure, title: valueError });
       return;
     }
 
@@ -224,22 +360,34 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         if (!createAtPath) {
           throw new Error("Missing create-at-path target.");
         }
-        await createItemAtPath(createAtPath.configPath, createAtPath.parentKeyPath, nextItem);
+        await createItemAtPath(createAtPath.configPath, destinationKeyPath.slice(0, -1), nextItem);
       } else if (mode === "append-child") {
         if (!targetRecord) {
           throw new Error("Missing target record for append-child.");
         }
-        await appendChildToGroup(targetRecord, nextItem);
+        if (keyPathMatches(destinationKeyPath.slice(0, -1), targetRecord.effectiveKeyPath)) {
+          await appendChildToGroup(targetRecord, nextItem);
+        } else {
+          await createItemAtPath(destinationConfigPath, destinationKeyPath.slice(0, -1), nextItem);
+        }
       } else if (mode === "create-sibling") {
         if (!targetRecord) {
           throw new Error("Missing target record for create-sibling.");
         }
-        await insertSiblingAfter(targetRecord, nextItem);
+        if (keyPathMatches(destinationKeyPath.slice(0, -1), targetRecord.parentEffectiveKeyPath)) {
+          await insertSiblingAfter(targetRecord, nextItem);
+        } else {
+          await createItemAtPath(destinationConfigPath, destinationKeyPath.slice(0, -1), nextItem);
+        }
       } else {
         if (!targetRecord) {
           throw new Error("Missing target record for edit mode.");
         }
-        await updateRecord(targetRecord, nextItem, mode);
+        if (mode === "override-in-effective-config") {
+          await updateRecord(targetRecord, nextItem, mode);
+        } else {
+          await updateRecordAtPath(targetRecord, nextItem, destinationKeyPath, mode);
+        }
       }
 
       let syncError: unknown;
@@ -251,21 +399,11 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       }
 
       const payload = await rebuildIndex(configDirectory);
-      const savedKey = nextItem.key?.trim() ?? "";
-      const parentPath = mode === "create-at-path"
-        ? createAtPath?.parentKeyPath ?? []
-        : mode === "append-child"
-          ? targetRecord?.effectiveKeyPath ?? []
-          : mode === "create-sibling"
-            ? targetRecord?.parentEffectiveKeyPath ?? []
-            : targetRecord?.effectiveKeyPath.slice(0, -1) ?? [];
-      const configDisplayName = mode === "create-at-path"
-        ? createAtPath?.configDisplayName ?? ""
-        : targetRecord?.effectiveConfigDisplayName ?? "";
+      setValidationPayload(payload);
 
       await props.onDidSave?.(payload, {
-        configDisplayName,
-        savedKeyPath: savedKey ? [...parentPath, savedKey] : parentPath,
+        configDisplayName: saveResultConfigDisplayName(mode, createAtPath, targetRecord),
+        savedKeyPath: destinationKeyPath,
       });
 
       await showToast(
@@ -366,6 +504,10 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const showIntellijField = formState.type === "intellij";
   const showKeystrokeFields = formState.type === "keystroke";
   const showStickyModeField = formState.type !== "toggleStickyMode";
+  const fullPathInfo = pathIsEditable(mode)
+    ? "Use tokenized syntax like a -> left -> space."
+    : fixedPathInfo;
+  const valueFieldError = valueError;
 
   return (
     <Form
@@ -385,11 +527,33 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       isLoading={isSaving}
       navigationTitle={title}
     >
+      <Form.Description
+        text={`Config: ${destinationConfigDisplayName || "—"}\nCurrent Path: ${currentPathText || "—"}`}
+        title="Context"
+      />
+      <Form.Description
+        text={[
+          `Destination: ${pathPreview}`,
+          `Auto-create Groups: ${autoCreatePreview}`,
+          pathValidation?.overrideRecord
+            ? `Overrides Inherited: ${pathValidation.overrideRecord.displayLabel} at ${formatFullPath(pathValidation.overrideRecord.effectiveKeyPath)}`
+            : undefined,
+        ].filter(Boolean).join("\n")}
+        title="Path Preview"
+      />
+      <Form.Separator />
       <Form.TextField
-        id="key"
-        onChange={(value) => setFormState((current) => ({ ...current, key: value }))}
-        title="Key"
-        value={formState.key}
+        error={pathError}
+        id="fullPath"
+        info={fullPathInfo}
+        onChange={(value) => {
+          if (!pathIsEditable(mode)) {
+            return;
+          }
+          setFormState((current) => ({ ...current, fullPath: value }));
+        }}
+        title="Full Path"
+        value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
       />
       <Form.TextField
         id="label"
@@ -430,6 +594,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown
           filtering
           id="applicationPath"
+          error={valueFieldError}
           onChange={(value) => setFormState((current) => ({ ...current, applicationPath: value }))}
           title="Application"
           value={formState.applicationPath}
@@ -448,6 +613,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           allowMultipleSelection={false}
           canChooseDirectories
           canChooseFiles={false}
+          error={valueFieldError}
           id="folderPath"
           onChange={(value) => setFormState((current) => ({ ...current, folderPath: value[0] ?? "" }))}
           title="Folder"
@@ -457,6 +623,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
       {showShortcutField ? (
         <Form.TextField
+          error={valueFieldError}
           id="shortcutValue"
           onChange={(value) => setFormState((current) => ({ ...current, shortcutValue: value }))}
           title="Shortcut"
@@ -496,6 +663,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             value={formState.keystroke.focusTargetApp}
           />
           <Form.TextField
+            error={valueFieldError}
             id="keystrokeSpec"
             onChange={(value) =>
               setFormState((current) => ({
@@ -511,6 +679,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       {showUrlField ? (
         <>
           <Form.TextField
+            error={valueFieldError}
             id="urlValue"
             onChange={(value) => setFormState((current) => ({ ...current, urlValue: value }))}
             title="URL"
@@ -527,6 +696,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
       {showCommandField ? (
         <Form.TextArea
+          error={valueFieldError}
           id="commandValue"
           onChange={(value) => setFormState((current) => ({ ...current, commandValue: value }))}
           title="Command"
@@ -536,6 +706,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
       {showMenuField ? (
         <Form.TextField
+          error={valueFieldError}
           id="menuValue"
           onChange={(value) => setFormState((current) => ({ ...current, menuValue: value }))}
           title="Menu Path"
@@ -545,6 +716,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
       {showTextField ? (
         <Form.TextArea
+          error={valueFieldError}
           id="textValue"
           onChange={(value) => setFormState((current) => ({ ...current, textValue: value }))}
           title="Text"
@@ -554,6 +726,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
       {showIntellijField ? (
         <Form.TextField
+          error={valueFieldError}
           id="intellijValue"
           onChange={(value) => setFormState((current) => ({ ...current, intellijValue: value }))}
           title="IntelliJ Actions"
