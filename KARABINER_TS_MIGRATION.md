@@ -21,6 +21,44 @@ The fork also contains a parity snapshot of the current Goku-generated `Default`
 
 That snapshot is a migration baseline and regression reference. It is not the file Leader Key rewrites during normal exports.
 
+## Source Of Truth And Re-Migration
+
+For personal Karabiner rules, Goku remains the source of truth.
+
+- canonical personal config: `~/.config/karabiner.edn`
+- generated full-profile migration snapshot: `karabiner.ts/configs/arabshapt/default-profile.ts`
+- app-managed Leader Key export: `karabiner.ts/configs/leaderkey/leaderkey-generated.ts`
+
+These are different things:
+
+- Edit `karabiner.edn` when you add or change personal shortcuts outside Leader Key.
+- Let Leader Key regenerate `configs/leaderkey/leaderkey-generated.ts` when app-managed shortcuts change.
+- Do not hand-edit `configs/arabshapt/default-profile.ts`; regenerate it from Goku.
+
+If `karabiner.edn` changes and you want the forked `karabiner.ts` repo to match it again, rerun the migration snapshot:
+
+```bash
+cd /Users/arabshaptukaev/personalProjects/LeaderKeyapp/karabiner.ts
+npm run sync:arabshapt
+```
+
+That command regenerates:
+
+- `configs/arabshapt/default-profile.ts`
+- `configs/arabshapt/default-profile.test.ts`
+- `configs/arabshapt/apply-default-profile.ts`
+
+and then reruns the parity test for that snapshot.
+
+If you want to apply the regenerated full-profile snapshot to live Karabiner:
+
+```bash
+cd /Users/arabshaptukaev/personalProjects/LeaderKeyapp/karabiner.ts
+deno run --allow-env --allow-read --allow-write configs/arabshapt/apply-default-profile.ts
+```
+
+If you only want Leader Key app-managed rules refreshed, use the app export path instead. That does not regenerate the full `arabshapt` migration snapshot.
+
 ## Leader Key Export Model
 
 Leader Key now exports `karabiner.ts` content into a configurable repo/workspace path and writes only app-managed files under:

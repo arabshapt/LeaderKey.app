@@ -1,29 +1,19 @@
-# Karabiner JSON Optimization + Benchmarking
+# Fix Raycast commands showing "No Results" during async data load
 
-## Completed
-- [x] Analyze karabiner.json for strippable defaults
-- [x] Add benchmark timing to export pipeline
-- [x] Add postProcessKarabinerJSON to strip defaults + write compact
-- [x] Fix kar backend to use compact JSON instead of prettyPrinted
-- [x] Build and verify
+## Tasks
+- [x] Add `List.EmptyView` to `search-shortcuts.tsx` — shows "Loading shortcuts…" while payload loads
+- [x] Add `List.EmptyView` to `add-edit-by-path.tsx` — shows "Loading configs…" while payload loads
+- [x] Add `List.EmptyView` to `browse-configs.tsx` — shows "Loading configs…" while payload loads
 
 ## Review
 
-### Changes Made
+**Root cause**: All three Raycast commands load config data asynchronously via `loadIndex()`. During this async gap, `payload` is `undefined`, so the list renders with zero items. Raycast displays "No Results" for empty lists even when `isLoading={true}`.
 
-**`Leader Key/Karabiner2InputMethod.swift`** — Added `[Benchmark]` timing logs at each phase:
-- Config discovery, EDN generation, File I/O + injection, Goku compilation, Total pipeline
+**Why it's inconsistent**: When the cache file is valid and the fingerprint matches, `loadIndex()` returns fast enough that the UI never paints the empty state. When the cache is stale or missing, `buildCachePayload()` runs (heavier I/O), creating a visible gap where "No Results" appears.
 
-**`Leader Key/GokuCompilerService.swift`** — Added post-processing after Goku compile:
-- `postProcessKarabinerJSON()` reads karabiner.json, strips defaults, writes compact JSON
-- `stripKarabinerDefaults()` recursive helper (reused by kar backend)
+**Fix**: Added `<List.EmptyView title="Loading …" />` conditionally rendered when data is still loading and no payload exists yet. This replaces the default "No Results" empty state with an appropriate loading message. Once `payload` is set, the `EmptyView` is no longer rendered and normal list items appear.
 
-**`Leader Key/KarCompilerService.swift`** — Changed `.prettyPrinted` → `.sortedKeys` (compact) + default stripping
-
-### Key Finding
-The real bloat (3.2 MB / 53% of rules) is Leader Key's **state machine conditions** repeated on 7,561 manipulators — not Karabiner defaults (only 105 `key_up_when=any`). Significant size reduction needs architectural changes.
-
-### How to Test
-1. Launch from terminal → look for `[Benchmark]` lines
-2. Check karabiner.json size before/after export
-3. Verify Karabiner Elements still applies the config correctly
+**Files changed**:
+- `raycast-leader-key/src/search-shortcuts.tsx` — 3 lines added
+- `raycast-leader-key/src/add-edit-by-path.tsx` — 3 lines added
+- `raycast-leader-key/src/browse-configs.tsx` — 3 lines added
