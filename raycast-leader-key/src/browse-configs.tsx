@@ -12,7 +12,6 @@ import { type CachePayload, type ConfigSummary, type EditorId } from "@leaderkey
 import { useEffect, useMemo, useState } from "react";
 
 import { ConfigNodesList } from "./browser.js";
-import { loadIndex } from "./cache.js";
 import { CreateAppConfigForm } from "./create-app-config-form.js";
 import {
   FRONTMOST_BUNDLE_ID_PLACEHOLDER,
@@ -22,6 +21,7 @@ import {
   resolveConfigTarget,
 } from "./deeplinks.js";
 import { getExtensionPreferences } from "./preferences.js";
+import { useIndexPayload } from "./use-index-payload.js";
 
 type BrowseConfigsProps = LaunchProps<{
   arguments: {
@@ -60,30 +60,13 @@ function openConfigTarget(
 
 export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
-  const [payload, setPayload] = useState<CachePayload>();
-  const [isLoading, setIsLoading] = useState(true);
-  const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const requestedTarget = configTargetFromProps(props);
+  const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory, {
+    seedFromDisk: Boolean(requestedTarget),
+  });
+  const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function load(): Promise<void> {
-      const result = await loadIndex(configDirectory);
-      if (!isMounted) {
-        return;
-      }
-      setPayload(result.fresh ?? result.cached);
-      setIsLoading(false);
-    }
-
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [configDirectory]);
 
   const resolvedLaunchTarget = useMemo(() => {
     if (!payload || !requestedTarget) {
@@ -133,9 +116,26 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
     );
   }
 
+  if (!payload) {
+    return (
+      <List
+        key={`loading:${configDirectory}:${requestedTarget ?? "root"}`}
+        isLoading={isInitialLoading}
+        searchBarPlaceholder="Browse Leader Key configs"
+      >
+        <List.Item
+          id="loading-configs"
+          title="Loading configs…"
+          subtitle="Reading cached index"
+        />
+      </List>
+    );
+  }
+
   return (
     <List
-      isLoading={isLoading}
+      key={`ready:${payload.fingerprint}:${requestedTarget ?? "root"}`}
+      isLoading={isRefreshing}
       searchBarPlaceholder="Browse Leader Key configs"
     >
       <List.Section title="Deeplinks">
@@ -157,7 +157,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
       </List.Section>
 
       <List.Section title="Configs">
-        {(payload?.configs ?? []).map((config) => {
+        {payload.configs.map((config) => {
           const deeplink = buildBrowseConfigsDeeplink(
             configTargetForSummary(config),
             ownerOrAuthorName,
@@ -174,13 +174,11 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               title={config.displayName}
               actions={
                 <ActionPanel>
-                  {payload ? (
-                    <Action.Push
-                      icon={Icon.ChevronRight}
-                      target={openConfigTarget(config, configDirectory, payload, setPayload, preferredEditor)}
-                      title="Open Config"
-                    />
-                  ) : null}
+                  <Action.Push
+                    icon={Icon.ChevronRight}
+                    target={openConfigTarget(config, configDirectory, payload, setPayload, preferredEditor)}
+                    title="Open Config"
+                  />
                   <Action.CopyToClipboard
                     content={deeplink}
                     icon={Icon.Link}

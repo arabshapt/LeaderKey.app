@@ -21,7 +21,6 @@ import {
 } from "@leaderkey/config-core";
 import { useEffect, useState } from "react";
 
-import { loadIndex } from "./cache.js";
 import { rebuildIndex } from "./cache.js";
 import { ConfigNodesList } from "./browser.js";
 import { copyRecordToInternalClipboard } from "./clipboard.js";
@@ -30,6 +29,7 @@ import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js"
 import { RecordEditorForm } from "./editor-form.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
+import { useIndexPayload } from "./use-index-payload.js";
 
 const MAX_VISIBLE_RESULTS = 300;
 
@@ -39,38 +39,17 @@ function browseTargetPath(record: FlatIndexRecord): string[] {
 
 export default function SearchShortcutsCommand() {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
-  const [payload, setPayload] = useState<CachePayload>();
-  const [isLoading, setIsLoading] = useState(true);
+  const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory);
   const [searchText, setSearchText] = useState("");
   const [selectedId, setSelectedId] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function load(): Promise<void> {
-      const result = await loadIndex(configDirectory);
-      if (!isMounted) {
-        return;
-      }
-      if (result.cached) {
-        setPayload(result.cached);
-      }
-      if (result.fresh) {
-        setPayload(result.fresh);
-      }
-      setIsLoading(false);
-    }
-
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [configDirectory]);
-
   const results = payload ? searchRecords(payload.records, searchText) : [];
   const visibleResults = results.slice(0, MAX_VISIBLE_RESULTS);
+  const activeSelectedId = selectedId && visibleResults.some((record) => record.id === selectedId)
+    ? selectedId
+    : visibleResults[0]?.id;
 
   useEffect(() => {
     if (visibleResults.length === 0) {
@@ -185,17 +164,36 @@ export default function SearchShortcutsCommand() {
     );
   }
 
+  if (!payload) {
+    return (
+      <List
+        key={`loading:${configDirectory}`}
+        isLoading={isInitialLoading}
+        isShowingDetail
+        searchBarPlaceholder="Search shortcuts, apps, keys"
+      >
+        <List.Item
+          id="loading-shortcuts"
+          title="Loading shortcuts…"
+          subtitle="Reading cached index"
+        />
+      </List>
+    );
+  }
+
   return (
     <List
-      isLoading={isLoading}
+      key={`ready:${payload.fingerprint}`}
+      isLoading={isRefreshing}
       isShowingDetail
       onSearchTextChange={setSearchText}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
+      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Search shortcuts, apps, keys"
     >
       {visibleResults.map((record) => {
         const row = buildRowPresentation(record);
-        const isSelected = selectedId === record.id;
+        const isSelected = activeSelectedId === record.id;
         const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
           ? { modifiers: ["cmd"], key: "return" }
           : { modifiers: ["cmd"], key: "." };

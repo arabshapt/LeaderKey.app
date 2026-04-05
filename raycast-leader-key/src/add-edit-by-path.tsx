@@ -11,7 +11,6 @@ import {
 import { type CachePayload, type ConfigSummary, type EditorId } from "@leaderkey/config-core";
 import { useEffect, useMemo, useState } from "react";
 
-import { loadIndex } from "./cache.js";
 import { CreateAppConfigForm } from "./create-app-config-form.js";
 import {
   FRONTMOST_BUNDLE_ID_PLACEHOLDER,
@@ -21,6 +20,7 @@ import {
 } from "./deeplinks.js";
 import { PathEditorView } from "./path-editor-view.js";
 import { getExtensionPreferences } from "./preferences.js";
+import { useIndexPayload } from "./use-index-payload.js";
 
 type AddEditByPathProps = LaunchProps<{
   arguments: {
@@ -67,31 +67,14 @@ function openPathEditor(
 
 export default function AddEditByPathCommand(props: AddEditByPathProps) {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
-  const [payload, setPayload] = useState<CachePayload>();
-  const [isLoading, setIsLoading] = useState(true);
-  const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const requestedTarget = configTargetFromProps(props);
+  const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory, {
+    seedFromDisk: Boolean(requestedTarget),
+  });
+  const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const initialPath = initialPathFromProps(props);
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function load(): Promise<void> {
-      const result = await loadIndex(configDirectory);
-      if (!isMounted) {
-        return;
-      }
-      setPayload(result.fresh ?? result.cached);
-      setIsLoading(false);
-    }
-
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [configDirectory]);
 
   const resolvedLaunchTarget = useMemo(() => {
     if (!payload || !requestedTarget) {
@@ -150,9 +133,26 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
     );
   }
 
+  if (!payload) {
+    return (
+      <List
+        key={`loading:${configDirectory}:${requestedTarget ?? "root"}`}
+        isLoading={isInitialLoading}
+        searchBarPlaceholder="Choose a config for path editing"
+      >
+        <List.Item
+          id="loading-path-editor-configs"
+          title="Loading configs…"
+          subtitle="Reading cached index"
+        />
+      </List>
+    );
+  }
+
   return (
     <List
-      isLoading={isLoading}
+      key={`ready:${payload.fingerprint}:${requestedTarget ?? "root"}`}
+      isLoading={isRefreshing}
       searchBarPlaceholder="Choose a config for path editing"
     >
       <List.Section title="Deeplinks">
@@ -174,7 +174,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
       </List.Section>
 
       <List.Section title="Global And Fallback">
-        {(payload?.configs ?? [])
+        {payload.configs
           .filter((config) => config.scope === "global" || config.scope === "fallback")
           .map((config) => {
             const deeplink = buildPathEditorDeeplink(config.scope, ownerOrAuthorName, extensionName);
@@ -189,14 +189,12 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                 title={config.displayName}
                 actions={
                   <ActionPanel>
-                    {payload ? (
-                      <Action.Push
-                        icon={Icon.Pencil}
-                        shortcut={{ key: "return", modifiers: [] }}
-                        target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
-                        title="Open Path Editor"
-                      />
-                    ) : null}
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={{ key: "return", modifiers: [] }}
+                      target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
+                      title="Open Path Editor"
+                    />
                     <Action.CopyToClipboard
                       content={deeplink}
                       icon={Icon.Link}
@@ -217,7 +215,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
       </List.Section>
 
       <List.Section title="App Configs">
-        {(payload?.configs ?? [])
+        {payload.configs
           .filter((config) => config.scope === "app")
           .map((config) => {
             const deeplink = buildPathEditorDeeplink(`app:${config.bundleId}`, ownerOrAuthorName, extensionName);
@@ -232,14 +230,12 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                 title={config.displayName}
                 actions={
                   <ActionPanel>
-                    {payload ? (
-                      <Action.Push
-                        icon={Icon.Pencil}
-                        shortcut={{ key: "return", modifiers: [] }}
-                        target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
-                        title="Open Path Editor"
-                      />
-                    ) : null}
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={{ key: "return", modifiers: [] }}
+                      target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
+                      title="Open Path Editor"
+                    />
                     <Action.CopyToClipboard
                       content={deeplink}
                       icon={Icon.Link}

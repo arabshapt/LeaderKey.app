@@ -149,6 +149,9 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
     ? searchRecordsInSubtree(branchRecords, searchText, parentEffectiveKeyPath)
     : children;
   const contextRecord = currentContextGroupRecord(payload, configDisplayName, parentEffectiveKeyPath);
+  const activeSelectedId = selectedId && visibleRecords.some((record) => record.id === selectedId)
+    ? selectedId
+    : visibleRecords[0]?.id;
 
   useEffect(() => {
     if (visibleRecords.length === 0) {
@@ -403,11 +406,13 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
 
   return (
     <List
+      key={`config:${payload.fingerprint}:${configDisplayName}:${parentEffectiveKeyPath.join(".")}`}
       isShowingDetail
       isLoading={false}
       navigationTitle={configDisplayName}
       onSearchTextChange={setSearchText}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
+      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Search this config"
     >
       {visibleRecords.length === 0 ? (
@@ -426,7 +431,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
               }
             : undefined,
         );
-        const isSelected = selectedId === record.id;
+        const isSelected = activeSelectedId === record.id;
         const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
           ? { modifiers: ["cmd"], key: "return" }
           : { modifiers: ["cmd"], key: "." };

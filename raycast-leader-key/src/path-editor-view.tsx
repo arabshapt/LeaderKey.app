@@ -877,6 +877,9 @@ export function PathEditorView(props: PathEditorViewProps) {
   const topRows = outcomeRows();
   const childRows = analysis.visibleChildren;
   const combinedIds = [...topRows.map((row) => row.id), ...childRows.map((record) => record.id)];
+  const activeSelectedId = selectedId && combinedIds.includes(selectedId)
+    ? selectedId
+    : combinedIds[0];
 
   useEffect(() => {
     if (combinedIds.length === 0) {
@@ -891,18 +894,20 @@ export function PathEditorView(props: PathEditorViewProps) {
 
   return (
     <List
+      key={`path:${payload.fingerprint}:${configSummary.filePath}`}
       filtering={false}
       isShowingDetail
       navigationTitle={configSummary.displayName}
       onSearchTextChange={setPathInput}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
+      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Type shortcut path like ab.c"
       searchText={pathInput}
     >
       <List.Section title="Path Outcome">
         {topRows.map((row) => (
           <List.Item
-            detail={selectedId === row.id ? row.detail : undefined}
+            detail={activeSelectedId === row.id ? row.detail : undefined}
             icon={row.icon}
             id={row.id}
             key={row.id}
@@ -916,7 +921,7 @@ export function PathEditorView(props: PathEditorViewProps) {
       <List.Section title={analysis.state === "exact-group" ? "Group Items" : "Deepest Existing Group"}>
         {childRows.map((record) => {
           const row = buildRowPresentation(record);
-          const isSelected = selectedId === record.id;
+          const isSelected = activeSelectedId === record.id;
           const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
             ? { modifiers: ["cmd"], key: "return" }
             : { modifiers: ["cmd"], key: "." };
