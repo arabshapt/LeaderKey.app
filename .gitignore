@@ -5,3 +5,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .raycast/
+
+# karabiner.ts — ignore generated Leader Key output and personal configs
+karabiner.ts/configs/leaderkey/leaderkey-generated.ts
