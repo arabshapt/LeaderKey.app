@@ -11,7 +11,10 @@ interface UseIndexPayloadResult {
 }
 
 interface UseIndexPayloadOptions {
+  // Targeted Raycast launches need real payload on first render or the list can
+  // visually stick in an empty state even though the data arrives immediately after.
   seedFromDisk?: boolean;
+  showRefreshingIndicator?: boolean;
 }
 
 function initialCachedPayload(configDirectory: string, seedFromDisk: boolean): CachePayload | undefined {
@@ -22,7 +25,7 @@ export function useIndexPayload(
   configDirectory: string,
   options: UseIndexPayloadOptions = {},
 ): UseIndexPayloadResult {
-  const { seedFromDisk = false } = options;
+  const { seedFromDisk = false, showRefreshingIndicator = true } = options;
   const [payload, setPayloadState] = useState<CachePayload | undefined>(() => initialCachedPayload(configDirectory, seedFromDisk));
   const [isInitialLoading, setIsInitialLoading] = useState(() => initialCachedPayload(configDirectory, seedFromDisk) === undefined);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -39,7 +42,7 @@ export function useIndexPayload(
       if (memoryCached) {
         setPayloadState(memoryCached);
         setIsInitialLoading(false);
-        setIsRefreshing(true);
+        setIsRefreshing(showRefreshingIndicator);
       } else {
         setPayloadState(undefined);
         setIsInitialLoading(true);
@@ -54,7 +57,7 @@ export function useIndexPayload(
       if (cached) {
         setPayloadState(cached);
         setIsInitialLoading(false);
-        setIsRefreshing(true);
+        setIsRefreshing(showRefreshingIndicator);
       }
 
       try {
@@ -82,7 +85,7 @@ export function useIndexPayload(
     return () => {
       isMounted = false;
     };
-  }, [configDirectory, seedFromDisk]);
+  }, [configDirectory, seedFromDisk, showRefreshingIndicator]);
 
   function setPayload(nextPayload: CachePayload): void {
     generationRef.current += 1;

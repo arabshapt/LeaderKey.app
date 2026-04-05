@@ -70,6 +70,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
   const requestedTarget = configTargetFromProps(props);
   const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory, {
     seedFromDisk: Boolean(requestedTarget),
+    showRefreshingIndicator: !requestedTarget,
   });
   const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const initialPath = initialPathFromProps(props);

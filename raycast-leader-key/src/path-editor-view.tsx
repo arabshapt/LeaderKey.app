@@ -881,17 +881,6 @@ export function PathEditorView(props: PathEditorViewProps) {
     ? selectedId
     : combinedIds[0];
 
-  useEffect(() => {
-    if (combinedIds.length === 0) {
-      setSelectedId(undefined);
-      return;
-    }
-
-    if (!selectedId || !combinedIds.includes(selectedId)) {
-      setSelectedId(combinedIds[0]);
-    }
-  }, [combinedIds, selectedId]);
-
   return (
     <List
       key={`path:${payload.fingerprint}:${configSummary.filePath}`}
@@ -900,7 +889,6 @@ export function PathEditorView(props: PathEditorViewProps) {
       navigationTitle={configSummary.displayName}
       onSearchTextChange={setPathInput}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
-      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Type shortcut path like ab.c"
       searchText={pathInput}
     >

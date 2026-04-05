@@ -153,17 +153,6 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
     ? selectedId
     : visibleRecords[0]?.id;
 
-  useEffect(() => {
-    if (visibleRecords.length === 0) {
-      setSelectedId(undefined);
-      return;
-    }
-
-    if (!selectedId || !visibleRecords.some((record) => record.id === selectedId)) {
-      setSelectedId(visibleRecords[0]!.id);
-    }
-  }, [selectedId, visibleRecords]);
-
   function handleDidMutate(nextPayload: CachePayload): void {
     setPayload(nextPayload);
     onDidMutate(nextPayload);
@@ -412,7 +401,6 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
       navigationTitle={configDisplayName}
       onSearchTextChange={setSearchText}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
-      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Search this config"
     >
       {visibleRecords.length === 0 ? (

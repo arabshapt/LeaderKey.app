@@ -63,6 +63,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
   const requestedTarget = configTargetFromProps(props);
   const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory, {
     seedFromDisk: Boolean(requestedTarget),
+    showRefreshingIndicator: !requestedTarget,
   });
   const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;

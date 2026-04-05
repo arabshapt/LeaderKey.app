@@ -51,17 +51,6 @@ export default function SearchShortcutsCommand() {
     ? selectedId
     : visibleResults[0]?.id;
 
-  useEffect(() => {
-    if (visibleResults.length === 0) {
-      setSelectedId(undefined);
-      return;
-    }
-
-    if (!selectedId || !visibleResults.some((record) => record.id === selectedId)) {
-      setSelectedId(visibleResults[0]!.id);
-    }
-  }, [selectedId, visibleResults]);
-
   async function handleOpenInEditor(recordId: string): Promise<void> {
     const record = payload?.records.find((candidate) => candidate.id === recordId);
     if (!record) {
@@ -188,7 +177,6 @@ export default function SearchShortcutsCommand() {
       isShowingDetail
       onSearchTextChange={setSearchText}
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
-      selectedItemId={activeSelectedId}
       searchBarPlaceholder="Search shortcuts, apps, keys"
     >
       {visibleResults.map((record) => {
