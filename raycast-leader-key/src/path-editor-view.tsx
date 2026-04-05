@@ -926,21 +926,39 @@ export function PathEditorView(props: PathEditorViewProps) {
               actions={
                 <ActionPanel>
                   {record.kind === "group" ? (
-                    <Action.Push
-                      icon={Icon.ChevronRight}
-                      shortcut={{ key: "return", modifiers: [] }}
-                      target={
-                        <ConfigNodesList
-                          configDirectory={configDirectory}
-                          configDisplayName={configSummary.displayName}
-                          initialPayload={payload}
-                          onDidMutate={(nextPayload) => void handleDidMutate(nextPayload)}
-                          parentEffectiveKeyPath={record.effectiveKeyPath}
-                          preferredEditor={preferredEditor}
-                        />
-                      }
-                      title="Open Group"
-                    />
+                    <>
+                      <Action.Push
+                        icon={Icon.ChevronRight}
+                        shortcut={{ key: "return", modifiers: [] }}
+                        target={
+                          <ConfigNodesList
+                            configDirectory={configDirectory}
+                            configDisplayName={configSummary.displayName}
+                            initialPayload={payload}
+                            onDidMutate={(nextPayload) => void handleDidMutate(nextPayload)}
+                            parentEffectiveKeyPath={record.effectiveKeyPath}
+                            preferredEditor={preferredEditor}
+                          />
+                        }
+                        title="Open Group"
+                      />
+                      <Action.Push
+                        icon={Icon.Pencil}
+                        shortcut={Keyboard.Shortcut.Common.Edit}
+                        target={
+                          <RecordEditorForm
+                            configDirectory={configDirectory}
+                            mode="edit-source"
+                            onDidSave={async (nextPayload) => {
+                              await handleDidMutate(nextPayload);
+                            }}
+                            targetRecord={record}
+                            title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                          />
+                        }
+                        title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
+                      />
+                    </>
                   ) : (
                     <Action.Push
                       icon={Icon.Pencil}

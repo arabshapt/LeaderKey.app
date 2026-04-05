@@ -1,15 +1,18 @@
 import {
   Action,
   ActionPanel,
+  Alert,
   Form,
   Icon,
   Toast,
+  confirmAlert,
   showToast,
   useNavigation,
 } from "@raycast/api";
 import {
   appendChildToGroup,
   createItemAtPath,
+  deleteRecord,
   materializeRecordToConfigItem,
   type CachePayload,
   findInstalledApps,
@@ -161,6 +164,9 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const [installedApps, setInstalledApps] = useState<Array<{ bundlePath: string; name: string }>>([]);
   const [isSaving, setIsSaving] = useState(false);
   const { pop } = useNavigation();
+  const labelFieldTitle = formState.type === "group" ? "Description" : "Label";
+  const labelFieldPlaceholder = formState.type === "group" ? "Optional group description" : undefined;
+  const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
 
   useEffect(() => {
     let isMounted = true;
@@ -288,6 +294,68 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    if (!targetRecord || targetRecord.inherited) {
+      return;
+    }
+
+    const confirmed = await confirmAlert({
+      title: `Delete ${targetRecord.displayLabel}?`,
+      message: "This removes the item from the source config file.",
+      primaryAction: {
+        style: Alert.ActionStyle.Destructive,
+        title: "Delete",
+      },
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await deleteRecord(targetRecord);
+
+      let syncError: unknown;
+
+      try {
+        await triggerLeaderKeyConfigReload(configDirectory);
+      } catch (error) {
+        syncError = error;
+      }
+
+      const payload = await rebuildIndex(configDirectory);
+      await props.onDidSave?.(payload, {
+        configDisplayName: targetRecord.effectiveConfigDisplayName,
+        savedKeyPath: targetRecord.parentEffectiveKeyPath,
+      });
+
+      await showToast(
+        syncError
+          ? {
+              style: Toast.Style.Failure,
+              title: "Deleted item, but Leader Key sync failed",
+              message: syncError instanceof Error ? syncError.message : String(syncError),
+            }
+          : {
+              style: Toast.Style.Success,
+              title: targetRecord.kind === "group" ? "Deleted group" : "Deleted item",
+              message: "Triggered Leader Key reload",
+            },
+      );
+
+      pop();
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Delete failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const showApplicationPicker = formState.type === "application";
   const showFolderPicker = formState.type === "folder";
   const showShortcutField = formState.type === "shortcut";
@@ -304,6 +372,14 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       actions={
         <ActionPanel>
           <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title={isSaving ? "Saving…" : "Save"} />
+          {canDeleteTarget ? (
+            <Action
+              icon={Icon.Trash}
+              onAction={() => void handleDelete()}
+              style={Action.Style.Destructive}
+              title={targetRecord?.kind === "group" ? "Delete Group" : "Delete Item"}
+            />
+          ) : null}
         </ActionPanel>
       }
       isLoading={isSaving}
@@ -318,7 +394,8 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       <Form.TextField
         id="label"
         onChange={(value) => setFormState((current) => ({ ...current, label: value }))}
-        title="Label"
+        placeholder={labelFieldPlaceholder}
+        title={labelFieldTitle}
         value={formState.label}
       />
       <Form.Dropdown
