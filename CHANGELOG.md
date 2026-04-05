@@ -16,6 +16,8 @@ All notable changes to this fork are documented here.
   - recursive browse search
   - glanceable detail previews
   - internal copy/paste clipboard for actions and groups
+- Added moveable full-path editing with live path validation in the Raycast record editor, including same-config relocation, missing-parent auto-creation, and inline collision checks.
+- Added dedicated action `description` and `aiDescription` metadata so action labels can stay automatic while user notes remain editable and searchable.
 - Added managed nested `LEADERKEY_SPECIFIC_CONFIGS_START/END` support for `karabiner.edn`, so app-specific activation shortcuts can be regenerated inside the existing activation section without replacing the surrounding manual content.
 - Added a subtle menubar reload-success pulse that acknowledges completed config reloads without flashing the Leader Key hint window.
 - Added a selectable reload-success sound setting with curated built-in macOS sounds (`Glass`, `Hero`, `Ping`, `Pop`, `Funk`) and silent mode.
@@ -27,6 +29,12 @@ All notable changes to this fork are documented here.
 - `application` actions now use the stronger seq-style activation path for running apps and a more reliable launch fallback for cold launches.
 - `Browse Configs` search now searches recursively inside the current subtree and ranks relative path matches before absolute path matches.
 - Raycast list/detail presentation was tightened for small screens: denser rows, consistent path rendering, always-on detail previews, and better empty-group create flows.
+- Raycast editing now treats action labels as generated display text and uses separate editable description fields instead.
+- Raycast search now indexes action descriptions and AI descriptions in addition to generated labels, values, and key paths.
+- Raycast editor field order now prioritizes the fields most likely to be changed:
+  - actions: `Type`, value, description, AI description, `Full Path`
+  - groups: description, `Full Path`
+- The redundant Raycast `Path Preview` summary block was removed; path-specific guidance now appears inline on the `Full Path` field only when relevant.
 - `LEADERKEY_SPECIFIC_CONFIGS` generation is now canonical and independent from the current keyboard shortcut settings, preserving fixed `:semicolon` / `:right_command` activation forms for the managed nested block.
 - Successful config reload feedback is now routed through the menubar item instead of briefly reopening the main Leader Key HUD.
 
@@ -40,6 +48,10 @@ All notable changes to this fork are documented here.
 - Fixed app saves/export refreshes so managed `LEADERKEY_SPECIFIC_CONFIGS` content in `karabiner.edn` stays in sync when new app configs are created.
 - Fixed Goku execution from the app/Xcode environment by resolving Homebrew-installed `goku` binaries through an enriched `PATH`, matching terminal behavior more reliably.
 - Fixed the save/reload success acknowledgement flicker that briefly showed Leader Key hints after saving configs.
+- Fixed Raycast command startup regressions where `Browse Configs` and `Add/Edit by Path` could visually stick in an empty list until the user typed.
+- Fixed literal-vs-alias ambiguity by keeping alias-aware matches while still offering explicit literal typed-path create actions across search, browse, and path-editor flows.
+- Fixed runaway selection in Raycast detail lists by removing over-controlled list selection updates during native key-repeat.
+- Fixed saved user text like `Go to history` being hidden behind generated shortcut labels by storing it as action description metadata instead of overloading `label`.
 
 ### Removed
 - Removed the `leaderkey://` URL scheme and the URL-based reload/apply fallback. Local IPC is now the only supported external control path for config apply.

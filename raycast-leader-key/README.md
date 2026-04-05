@@ -94,6 +94,56 @@ Current edit/create coverage:
 - `Search Shortcuts` exposes add/edit actions similar to the config browser
 - `Browse Configs` exposes direct path-editor actions per config
 
+## Record Editor Model
+
+Actions and groups intentionally behave differently in the editor:
+
+- actions
+  - `label` stays automatic and is regenerated from the action type and value
+  - user-authored notes belong in `description`
+  - optional generated notes belong in `aiDescription`
+  - search indexes generated label, description, AI description, value, and key path
+- groups
+  - the existing `label` field is still the editable human description/title for the group
+
+Backward compatibility:
+
+- older configs may still contain custom action `label` values
+- normalization/mutation paths treat those as legacy custom descriptions and migrate them into `description`
+- saved action `label` values are now canonical/generated again
+
+## Record Editor Order
+
+The Raycast editor intentionally puts the most commonly changed fields first.
+
+- action order
+  - `Type`
+  - type-specific value field
+  - `Description`
+  - `AI Description`
+  - `Full Path`
+  - `Sticky Mode`
+- group order
+  - `Description`
+  - `Full Path`
+  - `Type`
+  - `Sticky Mode`
+
+`Full Path` supports tokenized syntax like `a -> left -> space`.
+
+## Path Editing UX
+
+The separate `Path Preview` summary block was removed because it duplicated the form state without adding much signal.
+
+Current behavior:
+
+- the editor still shows the current config and current path in the `Context` block
+- the `Full Path` field itself carries the useful path guidance
+- inline path help only appears when it matters:
+  - tokenized path syntax reminder
+  - missing parent groups that will be auto-created
+  - inherited items that will become local overrides
+
 ## Important Constraints
 
 - `{frontmostBundleId}` is a template placeholder, not something Raycast expands by itself.

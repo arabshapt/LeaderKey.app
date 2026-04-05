@@ -19,7 +19,11 @@ Watch the original intro videos by [@mikker](https://github.com/mikker):
 
 Recent development changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
-Raycast extension behavior and current implementation notes are documented in [raycast-leader-key/README.md](raycast-leader-key/README.md).
+Raycast extension behavior and current implementation notes are documented in [raycast-leader-key/README.md](raycast-leader-key/README.md), including:
+- command startup/loading behavior
+- alias-aware vs literal typed-path search rules
+- full-path editing and validation
+- automatic action labels vs editable action descriptions
 
 ## Fork Enhancements
 
