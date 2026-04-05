@@ -19,6 +19,8 @@ Watch the original intro videos by [@mikker](https://github.com/mikker):
 
 Recent development changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
+Raycast extension behavior and current implementation notes are documented in [raycast-leader-key/README.md](raycast-leader-key/README.md).
+
 ## Fork Enhancements
 
 This enhanced version includes several improvements over the original:
