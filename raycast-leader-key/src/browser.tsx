@@ -409,6 +409,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
 
   return (
     <List
+      filtering={false}
       key={`config:${payload.fingerprint}:${configDisplayName}:${parentEffectiveKeyPath.join(".")}`}
       isShowingDetail
       isLoading={false}

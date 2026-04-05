@@ -249,6 +249,30 @@ export function PathEditorView(props: PathEditorViewProps) {
     () => analyzePathInConfig(payload, configSummary, pathInput),
     [configSummary, pathInput, payload],
   );
+  const literalTypedPath = useMemo(() => Array.from(pathInput.trim()), [pathInput]);
+  const literalPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
+  const configRecords = useMemo(
+    () => payload.records.filter((record) => record.effectiveConfigDisplayName === configSummary.displayName),
+    [configSummary.displayName, payload.records],
+  );
+  const literalExactRecord = useMemo(
+    () => configRecords.find((record) => keyPathMatches(record.effectiveKeyPath, literalTypedPath)),
+    [configRecords, literalTypedPath],
+  );
+  const literalBlockingAction = useMemo(
+    () => configRecords.find((record) =>
+      record.kind === "action" &&
+      record.effectiveKeyPath.length < literalTypedPath.length &&
+      keyPathMatches(record.effectiveKeyPath, literalTypedPath.slice(0, record.effectiveKeyPath.length))
+    ),
+    [configRecords, literalTypedPath],
+  );
+  const shouldOfferLiteralTypedPath = Boolean(
+    literalPathTitle &&
+    !keyPathMatches(literalTypedPath, analysis.typedPath) &&
+    !literalExactRecord &&
+    !literalBlockingAction,
+  );
 
   async function handleDidMutate(nextPayload: CachePayload): Promise<void> {
     setPayload(nextPayload);
@@ -874,7 +898,129 @@ export function PathEditorView(props: PathEditorViewProps) {
     return [];
   }
 
-  const topRows = outcomeRows();
+  function literalTypedPathRows(): OutcomeRow[] {
+    if (!shouldOfferLiteralTypedPath || !literalPathTitle) {
+      return [];
+    }
+
+    const parentKeyPath = literalTypedPath.slice(0, -1);
+    const suggestedKey = literalTypedPath.at(-1);
+    if (!suggestedKey) {
+      return [];
+    }
+
+    const metadata = [
+      ...baseMetadata(analysis),
+      { title: "Literal Path", text: literalPathTitle },
+      { title: "Parent Path", text: parentKeyPath.length > 0 ? keyPathText(parentKeyPath) : "Root" },
+      { title: "Final Key", text: suggestedKey },
+    ];
+
+    return [
+      {
+        actions: (
+          <ActionPanel>
+            <Action.Push
+              icon={Icon.Plus}
+              shortcut={{ modifiers: ["cmd"], key: "n" }}
+              target={
+                <RecordEditorForm
+                  configDirectory={configDirectory}
+                  createAtPath={{
+                    configDisplayName: configSummary.displayName,
+                    configPath: configSummary.filePath,
+                    parentKeyPath,
+                    suggestedKey,
+                  }}
+                  initialType="shortcut"
+                  mode="create-at-path"
+                  onDidSave={async (nextPayload, context) => {
+                    await handleDidMutate(nextPayload);
+                    setPathInput(context.savedKeyPath.join(""));
+                  }}
+                  title={`Create Action at ${literalPathTitle}`}
+                />
+              }
+              title="Create Literal Action"
+            />
+          </ActionPanel>
+        ),
+        detail: outcomeDetail(
+          "Create Literal Action",
+          [
+            "# Create Literal Action",
+            "",
+            `Treat \`${pathInput.trim()}\` as the literal key path \`${literalPathTitle}\`, not the alias-resolved match.`,
+            "",
+            "Missing intermediate groups will be created automatically if needed.",
+          ].join("\n"),
+          metadata,
+        ),
+        icon: Icon.Plus,
+        id: `outcome:literal-create-action:${configSummary.filePath}:${pathInput}`,
+        subtitle: {
+          tooltip: `Create literal action at ${literalPathTitle}`,
+          value: "Create literal action",
+        },
+        title: {
+          tooltip: literalPathTitle,
+          value: literalPathTitle,
+        },
+      },
+      {
+        actions: (
+          <ActionPanel>
+            <Action.Push
+              icon={Icon.NewFolder}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+              target={
+                <RecordEditorForm
+                  configDirectory={configDirectory}
+                  createAtPath={{
+                    configDisplayName: configSummary.displayName,
+                    configPath: configSummary.filePath,
+                    parentKeyPath,
+                    suggestedKey,
+                  }}
+                  initialType="group"
+                  mode="create-at-path"
+                  onDidSave={async (nextPayload, context) => {
+                    await handleDidMutate(nextPayload);
+                    setPathInput(context.savedKeyPath.join(""));
+                  }}
+                  title={`Create Group at ${literalPathTitle}`}
+                />
+              }
+              title="Create Literal Group"
+            />
+          </ActionPanel>
+        ),
+        detail: outcomeDetail(
+          "Create Literal Group",
+          [
+            "# Create Literal Group",
+            "",
+            `Treat \`${pathInput.trim()}\` as the literal key path \`${literalPathTitle}\`, not the alias-resolved match.`,
+            "",
+            "Missing intermediate groups will be created automatically if needed.",
+          ].join("\n"),
+          metadata,
+        ),
+        icon: Icon.NewFolder,
+        id: `outcome:literal-create-group:${configSummary.filePath}:${pathInput}`,
+        subtitle: {
+          tooltip: `Create literal group at ${literalPathTitle}`,
+          value: "Create literal group",
+        },
+        title: {
+          tooltip: literalPathTitle,
+          value: literalPathTitle,
+        },
+      },
+    ];
+  }
+
+  const topRows = [...literalTypedPathRows(), ...outcomeRows()];
   const childRows = analysis.visibleChildren;
   const combinedIds = [...topRows.map((row) => row.id), ...childRows.map((record) => record.id)];
   const activeSelectedId = selectedId && combinedIds.includes(selectedId)

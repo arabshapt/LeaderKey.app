@@ -36,6 +36,22 @@ type BrowseConfigsProps = LaunchProps<{
   };
 }>;
 
+function matchesConfigSearch(config: ConfigSummary, query: string): boolean {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) {
+    return true;
+  }
+
+  return [
+    config.displayName,
+    config.filePath,
+    config.scope,
+    config.bundleId,
+  ]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(trimmed));
+}
+
 function quicklinkName(label: string): string {
   return `Leader Key: ${label}`;
 }
@@ -88,8 +104,10 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
   const requestedTarget = configTargetFromProps(props);
   const { payload, setPayload, isInitialLoading, isRefreshing, loadError, loadingSubtitle, reload } = useIndexPayload(configDirectory, {
-    seedFromDisk: Boolean(requestedTarget),
-    showRefreshingIndicator: !requestedTarget,
+    // Raycast can visually stick in an empty state if this command mounts a
+    // loading list first and only swaps to real config rows after async cache I/O.
+    seedFromDisk: true,
+    showRefreshingIndicator: false,
   });
   const [launchTargetErrorShown, setLaunchTargetErrorShown] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
@@ -113,6 +131,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
   const [searchText, setSearchText] = useState("");
   const literalTypedPath = Array.from(searchText.trim());
   const typedPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
+  const visibleConfigs = payload?.configs.filter((config) => matchesConfigSearch(config, searchText)) ?? [];
 
   useEffect(() => {
     if (!payload || !requestedTarget || needsCreateAppConfig) {
@@ -189,6 +208,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
 
   return (
     <List
+      filtering={false}
       key={`ready:${payload.fingerprint}:${requestedTarget ?? "root"}`}
       isLoading={isRefreshing}
       onSearchTextChange={setSearchText}
@@ -265,7 +285,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
       </List.Section>
 
       <List.Section title="Configs">
-        {payload.configs.map((config) => {
+        {visibleConfigs.map((config) => {
           const deeplink = buildBrowseConfigsDeeplink(
             configTargetForSummary(config),
             ownerOrAuthorName,

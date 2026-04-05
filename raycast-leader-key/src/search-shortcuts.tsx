@@ -223,6 +223,7 @@ export default function SearchShortcutsCommand() {
 
   return (
     <List
+      filtering={false}
       key={`ready:${payload.fingerprint}`}
       isLoading={isRefreshing}
       isShowingDetail
