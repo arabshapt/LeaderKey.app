@@ -29,6 +29,8 @@ import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js"
 import { RecordEditorForm } from "./editor-form.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
+import { keyPathText } from "./record-formatting.js";
+import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
 const MAX_VISIBLE_RESULTS = 300;
@@ -39,17 +41,21 @@ function browseTargetPath(record: FlatIndexRecord): string[] {
 
 export default function SearchShortcutsCommand() {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
-  const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory);
+  const { payload, setPayload, isInitialLoading, isRefreshing, loadError, loadingSubtitle, reload } = useIndexPayload(configDirectory);
   const [searchText, setSearchText] = useState("");
   const [selectedId, setSelectedId] = useState<string>();
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
+  const literalTypedPath = Array.from(searchText.trim());
+  const typedPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
+  const typedPathItemIds = typedPathTitle ? ["typed-path:create-action", "typed-path:create-group"] : [];
 
   const results = payload ? searchRecords(payload.records, searchText) : [];
   const visibleResults = results.slice(0, MAX_VISIBLE_RESULTS);
-  const activeSelectedId = selectedId && visibleResults.some((record) => record.id === selectedId)
+  const combinedIds = [...typedPathItemIds, ...visibleResults.map((record) => record.id)];
+  const activeSelectedId = selectedId && combinedIds.includes(selectedId)
     ? selectedId
-    : visibleResults[0]?.id;
+    : combinedIds[0];
 
   async function handleOpenInEditor(recordId: string): Promise<void> {
     const record = payload?.records.find((candidate) => candidate.id === recordId);
@@ -153,7 +159,52 @@ export default function SearchShortcutsCommand() {
     );
   }
 
+  function editorForm(
+    mode: "append-child" | "create-sibling" | "edit-source" | "override-in-effective-config",
+    record: FlatIndexRecord,
+    title: string,
+  ) {
+    return (
+      <RecordEditorForm
+        configDirectory={configDirectory}
+        initialType={mode === "append-child" || mode === "create-sibling" ? "shortcut" : undefined}
+        mode={mode}
+        onDidSave={async (nextPayload) => {
+          setPayload(nextPayload);
+        }}
+        targetRecord={record}
+        title={title}
+      />
+    );
+  }
+
   if (!payload) {
+    if (loadError) {
+      return (
+        <List
+          key={`error:${configDirectory}`}
+          isShowingDetail
+          searchBarPlaceholder="Search shortcuts, apps, keys"
+        >
+          <List.Item
+            id="shortcuts-index-load-error"
+            icon={Icon.ExclamationMark}
+            title="Couldn’t load Leader Key shortcuts"
+            subtitle={loadError}
+            actions={
+              <ActionPanel>
+                <Action
+                  icon={Icon.ArrowClockwise}
+                  onAction={reload}
+                  title="Retry Loading Index"
+                />
+              </ActionPanel>
+            }
+          />
+        </List>
+      );
+    }
+
     return (
       <List
         key={`loading:${configDirectory}`}
@@ -164,7 +215,7 @@ export default function SearchShortcutsCommand() {
         <List.Item
           id="loading-shortcuts"
           title="Loading shortcuts…"
-          subtitle="Reading cached index"
+          subtitle={loadingSubtitle}
         />
       </List>
     );
@@ -179,6 +230,80 @@ export default function SearchShortcutsCommand() {
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
       searchBarPlaceholder="Search shortcuts, apps, keys"
     >
+      {typedPathTitle ? (
+        <List.Section title="Create by Typed Path">
+          <List.Item
+            detail={activeSelectedId === "typed-path:create-action" ? (
+              <List.Item.Detail
+                markdown={[
+                  "# Create Action by Typed Path",
+                  "",
+                  `Treat \`${searchText.trim()}\` as the literal Leader Key sequence \`${typedPathTitle}\`.`,
+                  "",
+                  "Pick a config next and create an action there.",
+                ].join("\n")}
+              />
+            ) : undefined}
+            icon={Icon.Plus}
+            id="typed-path:create-action"
+            title={`Create Action at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.Plus}
+                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="shortcut"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Action"
+                />
+              </ActionPanel>
+            }
+          />
+          <List.Item
+            detail={activeSelectedId === "typed-path:create-group" ? (
+              <List.Item.Detail
+                markdown={[
+                  "# Create Group by Typed Path",
+                  "",
+                  `Treat \`${searchText.trim()}\` as the literal Leader Key sequence \`${typedPathTitle}\`.`,
+                  "",
+                  "Pick a config next and create a group there.",
+                ].join("\n")}
+              />
+            ) : undefined}
+            icon={Icon.NewFolder}
+            id="typed-path:create-group"
+            title={`Create Group at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.NewFolder}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="group"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Group"
+                />
+              </ActionPanel>
+            }
+          />
+        </List.Section>
+      ) : null}
       {visibleResults.map((record) => {
         const row = buildRowPresentation(record);
         const isSelected = activeSelectedId === record.id;
@@ -277,17 +402,13 @@ export default function SearchShortcutsCommand() {
                     icon={Icon.Pencil}
                     shortcut={Keyboard.Shortcut.Common.Edit}
                     target={
-                      <RecordEditorForm
-                        configDirectory={configDirectory}
-                        mode="edit-source"
-                        onDidSave={async (nextPayload) => {
-                          setPayload(nextPayload);
-                        }}
-                        targetRecord={record}
-                        title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
-                      />
+                      editorForm(
+                        "edit-source",
+                        record,
+                        record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`,
+                      )
                     }
-                    title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                    title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
                   />
                 ) : null}
                 {record.inherited ? (
@@ -307,6 +428,56 @@ export default function SearchShortcutsCommand() {
                     }
                     title="Create App Override"
                   />
+                ) : null}
+                <Action.Push
+                  icon={Icon.Plus}
+                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  target={editorForm("create-sibling", record, `Create Sibling After ${record.displayLabel}`)}
+                  title="Create Sibling Action"
+                />
+                <Action.Push
+                  icon={Icon.NewFolder}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  target={
+                    <RecordEditorForm
+                      configDirectory={configDirectory}
+                      initialType="group"
+                      mode="create-sibling"
+                      onDidSave={async (nextPayload) => {
+                        setPayload(nextPayload);
+                      }}
+                      targetRecord={record}
+                      title={`Create Sibling Group After ${record.displayLabel}`}
+                    />
+                  }
+                  title="Create Sibling Group"
+                />
+                {record.kind === "group" ? (
+                  <>
+                    <Action.Push
+                      icon={Icon.Plus}
+                      shortcut={{ modifiers: ["ctrl", "cmd"], key: "n" }}
+                      target={editorForm("append-child", record, `Append Child to ${record.displayLabel}`)}
+                      title="Append Child Action"
+                    />
+                    <Action.Push
+                      icon={Icon.NewFolder}
+                      shortcut={{ modifiers: ["ctrl", "cmd", "shift"], key: "n" }}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          initialType="group"
+                          mode="append-child"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={`Append Child Group to ${record.displayLabel}`}
+                        />
+                      }
+                      title="Append Child Group"
+                    />
+                  </>
                 ) : null}
                 {!record.inherited ? (
                   <Action

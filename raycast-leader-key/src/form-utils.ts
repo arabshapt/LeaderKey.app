@@ -2,17 +2,25 @@ import { type ConfigItem, type FlatIndexRecord } from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
   ["left", "←"],
+  ["left arrow", "←"],
   ["left_arrow", "←"],
   ["leftarrow", "←"],
   ["right", "→"],
+  ["right arrow", "→"],
   ["right_arrow", "→"],
   ["rightarrow", "→"],
   ["up", "↑"],
+  ["up arrow", "↑"],
   ["up_arrow", "↑"],
   ["uparrow", "↑"],
   ["down", "↓"],
+  ["down arrow", "↓"],
   ["down_arrow", "↓"],
   ["downarrow", "↓"],
+  ["space", " "],
+  ["space bar", " "],
+  ["space_bar", " "],
+  ["spacebar", " "],
 ]);
 
 export interface KeystrokeFields {

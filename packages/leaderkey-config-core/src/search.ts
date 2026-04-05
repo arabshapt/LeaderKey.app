@@ -9,8 +9,17 @@ interface PreparedField {
 interface SearchContext {
   depth: number;
   relativeBreadcrumbDisplay: string;
+  relativeKeyPath: string[];
   relativeKeySequence: string;
 }
+
+const KEY_SEARCH_ALIASES = new Map<string, string[]>([
+  ["←", ["left arrow", "left_arrow", "leftarrow", "left"]],
+  ["→", ["right arrow", "right_arrow", "rightarrow", "right"]],
+  ["↑", ["up arrow", "up_arrow", "uparrow", "up"]],
+  ["↓", ["down arrow", "down_arrow", "downarrow", "down"]],
+  [" ", ["space bar", "space_bar", "spacebar", "space"]],
+]);
 
 function normalizeText(value: string): string {
   return value
@@ -30,13 +39,72 @@ function compactPath(value: string): string {
     .replace(/\s+/g, "");
 }
 
+function aliasSequenceForKeyPath(keyPath: string[]): string | undefined {
+  let hasAlias = false;
+  const segments = keyPath
+    .map((segment) => {
+      const aliases = KEY_SEARCH_ALIASES.get(segment);
+      if (aliases) {
+        hasAlias = true;
+        return aliases[0]!;
+      }
+
+      return normalizeText(segment);
+    })
+    .filter(Boolean);
+
+  if (!hasAlias || segments.length === 0) {
+    return undefined;
+  }
+
+  return segments.join(" -> ");
+}
+
+function aliasBagForKeyPath(keyPath: string[]): string | undefined {
+  let hasAlias = false;
+  const tokens = keyPath.flatMap((segment) => {
+    const aliases = KEY_SEARCH_ALIASES.get(segment);
+    if (aliases) {
+      hasAlias = true;
+      return aliases;
+    }
+
+    const normalized = normalizeText(segment);
+    return normalized ? [normalized] : [];
+  });
+
+  if (!hasAlias || tokens.length === 0) {
+    return undefined;
+  }
+
+  return tokens.join(" ");
+}
+
 function prepareFields(record: FlatIndexRecord, context?: SearchContext): PreparedField[] {
+  const relativeAliasSequence = context?.relativeKeyPath ? aliasSequenceForKeyPath(context.relativeKeyPath) : undefined;
+  const relativeAliasBag = context?.relativeKeyPath ? aliasBagForKeyPath(context.relativeKeyPath) : undefined;
+  const absoluteAliasSequence = aliasSequenceForKeyPath(record.effectiveKeyPath);
+  const absoluteAliasBag = aliasBagForKeyPath(record.effectiveKeyPath);
   const fields: PreparedField[] = [
     ...(context?.relativeKeySequence
       ? [{
           compact: compactPath(context.relativeKeySequence),
           value: normalizeText(context.relativeKeySequence),
           weight: 860,
+        }]
+      : []),
+    ...(relativeAliasSequence
+      ? [{
+          compact: compactPath(relativeAliasSequence),
+          value: normalizeText(relativeAliasSequence),
+          weight: 840,
+        }]
+      : []),
+    ...(relativeAliasBag
+      ? [{
+          compact: compactText(relativeAliasBag),
+          value: normalizeText(relativeAliasBag),
+          weight: 820,
         }]
       : []),
     ...(context?.relativeBreadcrumbDisplay
@@ -51,6 +119,20 @@ function prepareFields(record: FlatIndexRecord, context?: SearchContext): Prepar
       value: normalizeText(record.keySequence),
       weight: 700,
     },
+    ...(absoluteAliasSequence
+      ? [{
+          compact: compactPath(absoluteAliasSequence),
+          value: normalizeText(absoluteAliasSequence),
+          weight: 680,
+        }]
+      : []),
+    ...(absoluteAliasBag
+      ? [{
+          compact: compactText(absoluteAliasBag),
+          value: normalizeText(absoluteAliasBag),
+          weight: 660,
+        }]
+      : []),
     {
       compact: compactPath(record.breadcrumbDisplay),
       value: normalizeText(record.breadcrumbDisplay),
@@ -235,6 +317,7 @@ export function searchRecordsInSubtree(
   return searchWithContext(descendants, query, (record) => ({
     depth: Math.max(1, record.effectiveKeyPath.length - parentEffectiveKeyPath.length),
     relativeBreadcrumbDisplay: relativeBreadcrumbText(record, parentEffectiveKeyPath),
+    relativeKeyPath: record.effectiveKeyPath.slice(parentEffectiveKeyPath.length),
     relativeKeySequence: relativePathText(record, parentEffectiveKeyPath),
   }));
 }

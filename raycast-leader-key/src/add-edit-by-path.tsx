@@ -20,6 +20,8 @@ import {
 } from "./deeplinks.js";
 import { PathEditorView } from "./path-editor-view.js";
 import { getExtensionPreferences } from "./preferences.js";
+import { keyPathText } from "./record-formatting.js";
+import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
 type AddEditByPathProps = LaunchProps<{
@@ -68,7 +70,8 @@ function openPathEditor(
 export default function AddEditByPathCommand(props: AddEditByPathProps) {
   const { configDirectory, preferredEditor } = getExtensionPreferences();
   const requestedTarget = configTargetFromProps(props);
-  const { payload, setPayload, isInitialLoading, isRefreshing } = useIndexPayload(configDirectory, {
+  const [searchText, setSearchText] = useState("");
+  const { payload, setPayload, isInitialLoading, isRefreshing, loadError, loadingSubtitle, reload } = useIndexPayload(configDirectory, {
     seedFromDisk: Boolean(requestedTarget),
     showRefreshingIndicator: !requestedTarget,
   });
@@ -92,6 +95,8 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
     ownerOrAuthorName,
     extensionName,
   );
+  const literalTypedPath = Array.from(searchText.trim());
+  const typedPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
 
   useEffect(() => {
     if (!payload || !requestedTarget || needsCreateAppConfig) {
@@ -135,6 +140,31 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
   }
 
   if (!payload) {
+    if (loadError) {
+      return (
+        <List
+          key={`error:${configDirectory}:${requestedTarget ?? "root"}`}
+          searchBarPlaceholder="Choose a config for path editing"
+        >
+          <List.Item
+            id="path-editor-index-load-error"
+            icon={Icon.ExclamationMark}
+            title="Couldn’t load Leader Key configs"
+            subtitle={loadError}
+            actions={
+              <ActionPanel>
+                <Action
+                  icon={Icon.ArrowClockwise}
+                  onAction={reload}
+                  title="Retry Loading Index"
+                />
+              </ActionPanel>
+            }
+          />
+        </List>
+      );
+    }
+
     return (
       <List
         key={`loading:${configDirectory}:${requestedTarget ?? "root"}`}
@@ -144,7 +174,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
         <List.Item
           id="loading-path-editor-configs"
           title="Loading configs…"
-          subtitle="Reading cached index"
+          subtitle={loadingSubtitle}
         />
       </List>
     );
@@ -154,8 +184,61 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
     <List
       key={`ready:${payload.fingerprint}:${requestedTarget ?? "root"}`}
       isLoading={isRefreshing}
+      onSearchTextChange={setSearchText}
       searchBarPlaceholder="Choose a config for path editing"
     >
+      {typedPathTitle ? (
+        <List.Section title="Create by Typed Path">
+          <List.Item
+            icon={Icon.Plus}
+            id="typed-path:create-action"
+            title={`Create Action at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.Plus}
+                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="shortcut"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Action"
+                />
+              </ActionPanel>
+            }
+          />
+          <List.Item
+            icon={Icon.NewFolder}
+            id="typed-path:create-group"
+            title={`Create Group at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.NewFolder}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="group"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Group"
+                />
+              </ActionPanel>
+            }
+          />
+        </List.Section>
+      ) : null}
       <List.Section title="Deeplinks">
         <List.Item
           icon={Icon.Link}

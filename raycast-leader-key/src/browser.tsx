@@ -31,6 +31,7 @@ import { buildPathEditorDeeplink, configTargetForSummary } from "./deeplinks.js"
 import { RecordEditorForm } from "./editor-form.js";
 import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
+import { keyPathText } from "./record-formatting.js";
 
 interface ConfigNodesListProps {
   configDirectory: string;
@@ -149,9 +150,22 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
     ? searchRecordsInSubtree(branchRecords, searchText, parentEffectiveKeyPath)
     : children;
   const contextRecord = currentContextGroupRecord(payload, configDisplayName, parentEffectiveKeyPath);
-  const activeSelectedId = selectedId && visibleRecords.some((record) => record.id === selectedId)
+  const literalTypedPath = Array.from(searchText.trim());
+  const fullLiteralPath = [...parentEffectiveKeyPath, ...literalTypedPath];
+  const literalPathTitle = literalTypedPath.length > 0 ? keyPathText(fullLiteralPath) : undefined;
+  const literalPathConflict = literalTypedPath.length > 0
+    ? payload.records.find((record) =>
+        record.effectiveConfigDisplayName === configDisplayName &&
+        effectivePathMatches(record.effectiveKeyPath, fullLiteralPath)
+      )
+    : undefined;
+  const typedPathItemIds = literalPathTitle && !literalPathConflict
+    ? ["typed-path:create-action", "typed-path:create-group"]
+    : [];
+  const combinedIds = [...typedPathItemIds, ...visibleRecords.map((record) => record.id)];
+  const activeSelectedId = selectedId && combinedIds.includes(selectedId)
     ? selectedId
-    : visibleRecords[0]?.id;
+    : combinedIds[0];
 
   function handleDidMutate(nextPayload: CachePayload): void {
     setPayload(nextPayload);
@@ -403,7 +417,97 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
       onSelectionChange={(id) => setSelectedId(id ?? undefined)}
       searchBarPlaceholder="Search this config"
     >
-      {visibleRecords.length === 0 ? (
+      {literalPathTitle && !literalPathConflict && contextRecord ? (
+        <List.Section title="Create by Typed Path">
+          <List.Item
+            detail={activeSelectedId === "typed-path:create-action" ? (
+              <List.Item.Detail
+                markdown={[
+                  "# Create Action by Typed Path",
+                  "",
+                  `Treat \`${searchText.trim()}\` as the literal path \`${literalPathTitle}\` in ${configDisplayName}.`,
+                  "",
+                  "This creates missing intermediate groups automatically if needed.",
+                ].join("\n")}
+              />
+            ) : undefined}
+            icon={Icon.Plus}
+            id="typed-path:create-action"
+            title={`Create Action at ${literalPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.Plus}
+                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  target={
+                    <RecordEditorForm
+                      configDirectory={configDirectory}
+                      createAtPath={{
+                        configDisplayName,
+                        configPath: contextRecord.effectiveConfigPath,
+                        parentKeyPath: fullLiteralPath.slice(0, -1),
+                        suggestedKey: fullLiteralPath.at(-1)!,
+                      }}
+                      initialType="shortcut"
+                      mode="create-at-path"
+                      onDidSave={async (nextPayload) => {
+                        handleDidMutate(nextPayload);
+                      }}
+                      title={`Create Action at ${literalPathTitle}`}
+                    />
+                  }
+                  title="Create Action at Typed Path"
+                />
+              </ActionPanel>
+            }
+          />
+          <List.Item
+            detail={activeSelectedId === "typed-path:create-group" ? (
+              <List.Item.Detail
+                markdown={[
+                  "# Create Group by Typed Path",
+                  "",
+                  `Treat \`${searchText.trim()}\` as the literal path \`${literalPathTitle}\` in ${configDisplayName}.`,
+                  "",
+                  "This creates missing intermediate groups automatically if needed.",
+                ].join("\n")}
+              />
+            ) : undefined}
+            icon={Icon.NewFolder}
+            id="typed-path:create-group"
+            title={`Create Group at ${literalPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.NewFolder}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  target={
+                    <RecordEditorForm
+                      configDirectory={configDirectory}
+                      createAtPath={{
+                        configDisplayName,
+                        configPath: contextRecord.effectiveConfigPath,
+                        parentKeyPath: fullLiteralPath.slice(0, -1),
+                        suggestedKey: fullLiteralPath.at(-1)!,
+                      }}
+                      initialType="group"
+                      mode="create-at-path"
+                      onDidSave={async (nextPayload) => {
+                        handleDidMutate(nextPayload);
+                      }}
+                      title={`Create Group at ${literalPathTitle}`}
+                    />
+                  }
+                  title="Create Group at Typed Path"
+                />
+              </ActionPanel>
+            }
+          />
+        </List.Section>
+      ) : null}
+      {visibleRecords.length === 0 && typedPathItemIds.length === 0 ? (
         <List.EmptyView
           actions={emptyStateActions()}
           description={searchText ? "No matching items in this branch." : "This group is empty. Add the first action or subgroup."}

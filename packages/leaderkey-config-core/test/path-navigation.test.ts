@@ -8,6 +8,82 @@ test("parsePathInput treats every typed character as a path segment", () => {
   assert.deepEqual(parsePathInput("ab.c"), ["a", "b", ".", "c"]);
 });
 
+test("analyzePathInConfig resolves arrow and space aliases in path input", async () => {
+  const configDirectory = await createTempConfigDirectory();
+
+  const globalRoot: GroupNode = {
+    actions: [
+      {
+        actions: [
+          {
+            key: " ",
+            type: "toggleStickyMode",
+            value: "",
+          },
+        ],
+        key: "←",
+        type: "group",
+      },
+    ],
+    type: "group",
+  };
+
+  await writeConfigFile(configDirectory, "global-config.json", globalRoot);
+  const payload = await buildCachePayload(configDirectory);
+  const globalConfig = expectRecord(
+    payload.configs.find((config) => config.scope === "global"),
+    "expected global config summary",
+  );
+
+  const leftAlias = analyzePathInConfig(payload, globalConfig, "left");
+  assert.equal(leftAlias.state, "exact-group");
+  assert.deepEqual(leftAlias.typedPath, ["←"]);
+  assert.equal(leftAlias.exactMatch?.key, "←");
+
+  const leftSpaceAlias = analyzePathInConfig(payload, globalConfig, "leftspace");
+  assert.equal(leftSpaceAlias.state, "exact-action");
+  assert.deepEqual(leftSpaceAlias.typedPath, ["←", " "]);
+  assert.deepEqual(leftSpaceAlias.exactMatch?.effectiveKeyPath, ["←", " "]);
+});
+
+test("analyzePathInConfig still prefers literal character paths when they match more deeply", async () => {
+  const configDirectory = await createTempConfigDirectory();
+
+  const globalRoot: GroupNode = {
+    actions: [
+      {
+        actions: [
+          {
+            key: "e",
+            type: "shortcut",
+            value: "Ce",
+          },
+        ],
+        key: "l",
+        type: "group",
+      },
+      {
+        actions: [],
+        key: "←",
+        type: "group",
+      },
+    ],
+    type: "group",
+  };
+
+  await writeConfigFile(configDirectory, "global-config.json", globalRoot);
+  const payload = await buildCachePayload(configDirectory);
+  const globalConfig = expectRecord(
+    payload.configs.find((config) => config.scope === "global"),
+    "expected global config summary",
+  );
+
+  const literalPath = analyzePathInConfig(payload, globalConfig, "le");
+  assert.equal(literalPath.state, "exact-action");
+  assert.deepEqual(literalPath.typedPath, ["l", "e"]);
+  assert.equal(literalPath.exactMatch?.keySequence, "l -> e");
+});
+
 test("analyzePathInConfig resolves exact groups, exact actions, missing tails, and terminal action collisions", async () => {
   const configDirectory = await createTempConfigDirectory();
 

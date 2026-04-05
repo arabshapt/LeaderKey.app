@@ -62,9 +62,13 @@ test("recordToFormState still preserves edit-source data", () => {
 
 test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
   assert.equal(normalizeConfigKey("left"), "←");
+  assert.equal(normalizeConfigKey("left arrow"), "←");
   assert.equal(normalizeConfigKey("left_arrow"), "←");
   assert.equal(normalizeConfigKey("uparrow"), "↑");
   assert.equal(normalizeConfigKey(" down "), "↓");
+  assert.equal(normalizeConfigKey("space"), " ");
+  assert.equal(normalizeConfigKey("space bar"), " ");
+  assert.equal(normalizeConfigKey("spacebar"), " ");
   assert.equal(normalizeConfigKey("→"), "→");
   assert.equal(normalizeConfigKey("g"), "g");
 });

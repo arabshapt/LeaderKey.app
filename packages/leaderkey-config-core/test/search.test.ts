@@ -154,3 +154,85 @@ test("searchRecordsInSubtree falls back to absolute path matching and prefers sh
   const tieResults = searchRecordsInSubtree([deepDescendant, directChild], "shared value", ["g"]);
   assert.equal(tieResults[0]?.id, directChild.id);
 });
+
+test("searchRecords matches special key aliases and keeps path hits ahead of loose label matches", () => {
+  const leftPathRecord = makeRecord({
+    breadcrumbDisplay: "Global -> ←",
+    breadcrumbPath: ["Global", "←"],
+    displayLabel: "Move pane",
+    effectiveKeyPath: ["←"],
+    id: "left-path",
+    key: "←",
+    keySequence: "←",
+    parentEffectiveKeyPath: [],
+    rawValue: "move-pane",
+    valuePreview: "move-pane",
+  });
+  const spacePathRecord = makeRecord({
+    actionType: "toggleStickyMode",
+    breadcrumbDisplay: "Global ->  ",
+    breadcrumbPath: ["Global", " "],
+    displayLabel: "Toggle sticky mode",
+    effectiveKeyPath: [" "],
+    id: "space-path",
+    key: " ",
+    keySequence: " ",
+    parentEffectiveKeyPath: [],
+    rawValue: "",
+    valuePreview: "",
+  });
+  const labelOnlyRecord = makeRecord({
+    breadcrumbDisplay: "Global -> x",
+    breadcrumbPath: ["Global", "x"],
+    displayLabel: "Left panel helper",
+    effectiveKeyPath: ["x"],
+    id: "label-only",
+    key: "x",
+    keySequence: "x",
+    parentEffectiveKeyPath: [],
+    rawValue: "helper",
+    valuePreview: "helper",
+  });
+
+  for (const query of ["left", "left arrow", "left_arrow", "leftarrow"]) {
+    const results = searchRecords([labelOnlyRecord, spacePathRecord, leftPathRecord], query);
+    assert.equal(results[0]?.id, leftPathRecord.id, `expected ${query} to rank the left-arrow path first`);
+  }
+
+  for (const query of ["space", "space bar", "space_bar", "spacebar"]) {
+    const results = searchRecords([labelOnlyRecord, leftPathRecord, spacePathRecord], query);
+    assert.equal(results[0]?.id, spacePathRecord.id, `expected ${query} to rank the space path first`);
+  }
+});
+
+test("searchRecordsInSubtree matches special key aliases in relative paths", () => {
+  const leftDescendant = makeRecord({
+    breadcrumbDisplay: "Global -> g -> ←",
+    breadcrumbPath: ["Global", "g", "←"],
+    displayLabel: "Move pane",
+    effectiveKeyPath: ["g", "←"],
+    id: "left-descendant",
+    key: "←",
+    keySequence: "g -> ←",
+    parentEffectiveKeyPath: ["g"],
+    rawValue: "move-pane",
+    valuePreview: "move-pane",
+  });
+  const siblingDescendant = makeRecord({
+    breadcrumbDisplay: "Global -> g -> x",
+    breadcrumbPath: ["Global", "g", "x"],
+    displayLabel: "Sibling item",
+    effectiveKeyPath: ["g", "x"],
+    id: "sibling-descendant",
+    key: "x",
+    keySequence: "g -> x",
+    parentEffectiveKeyPath: ["g"],
+    rawValue: "sibling-item",
+    valuePreview: "sibling-item",
+  });
+
+  for (const query of ["left", "left arrow", "left_arrow", "leftarrow"]) {
+    const results = searchRecordsInSubtree([siblingDescendant, leftDescendant], query, ["g"]);
+    assert.equal(results[0]?.id, leftDescendant.id, `expected ${query} to match the relative left-arrow path`);
+  }
+});
