@@ -7,10 +7,12 @@ function makeRecord(overrides: Record<string, unknown> = {}) {
   return {
     actionType: "shortcut",
     activates: undefined,
+    aiDescription: undefined,
     appName: undefined,
     breadcrumbDisplay: "Global -> o -> a",
     breadcrumbPath: ["Global", "o", "a"],
     childCount: undefined,
+    description: undefined,
     displayLabel: "Shortcut: Cmd+T",
     effectiveConfigDisplayName: "Global",
     effectiveConfigPath: "/tmp/global-config.json",
@@ -46,6 +48,21 @@ test("buildRecordDetailPresentation shows shortcut preview, raw value, and canon
   assert.match(presentation.markdown, /Sends Cmd\+T to the frontmost app\./);
   assert.match(presentation.markdown, /Raw: `Ct`/);
   assert.equal(presentation.metadata[0]?.title, "Type");
+});
+
+test("buildRecordDetailPresentation renders descriptions when present", () => {
+  const presentation = buildRecordDetailPresentation(makeRecord({
+    aiDescription: "Open the history pane in Google Chrome",
+    description: "Go to history",
+    displayLabel: "Shortcut: Cmd+Y",
+    rawValue: "Cy",
+    valuePreview: "Cmd+Y",
+  }));
+
+  assert.match(presentation.markdown, /\*\*Description\*\*/);
+  assert.match(presentation.markdown, /Go to history/);
+  assert.match(presentation.markdown, /\*\*AI Description\*\*/);
+  assert.match(presentation.markdown, /Open the history pane in Google Chrome/);
 });
 
 test("buildRecordDetailPresentation shows keystroke target and focus semantics", () => {

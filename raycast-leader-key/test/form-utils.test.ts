@@ -14,6 +14,7 @@ test("emptyFormState returns blank default action fields", () => {
 
   assert.equal(state.type, "shortcut");
   assert.equal(state.fullPath, "");
+  assert.equal(state.description, "");
   assert.equal(state.label, "");
   assert.equal(state.shortcutValue, "");
   assert.equal(state.applicationPath, "");
@@ -25,6 +26,7 @@ test("emptyFormState can default to group without inheriting selected item value
 
   assert.equal(state.type, "group");
   assert.equal(state.fullPath, "");
+  assert.equal(state.description, "");
   assert.equal(state.label, "");
   assert.equal(state.commandValue, "");
 });
@@ -33,10 +35,12 @@ test("recordToFormState still preserves edit-source data", () => {
   const state = recordToFormState({
     actionType: "command",
     activates: undefined,
+    aiDescription: "Run GitHub checkout for the active PR",
     appName: undefined,
     breadcrumbDisplay: "Global -> r -> g",
     breadcrumbPath: ["Global", "r", "g"],
     childCount: undefined,
+    description: "Checkout the current PR",
     displayLabel: "Run gh",
     effectiveConfigDisplayName: "Global",
     effectiveConfigPath: "/tmp/global-config.json",
@@ -63,6 +67,8 @@ test("recordToFormState still preserves edit-source data", () => {
 
   assert.equal(state.type, "command");
   assert.equal(state.commandValue, "gh pr checkout 123");
+  assert.equal(state.description, "Checkout the current PR");
+  assert.equal(state.aiDescription, "Run GitHub checkout for the active PR");
   assert.equal(state.fullPath, "r -> g");
 });
 

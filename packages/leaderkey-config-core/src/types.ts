@@ -24,6 +24,8 @@ export interface ActionNode {
   key?: string;
   type: Exclude<ActionType, "group">;
   label?: string;
+  description?: string;
+  aiDescription?: string;
   value: string;
   iconPath?: string;
   activates?: boolean;
@@ -79,6 +81,8 @@ export interface FlatIndexRecord {
   breadcrumbPath: string[];
   breadcrumbDisplay: string;
   label?: string;
+  description?: string;
+  aiDescription?: string;
   displayLabel: string;
   rawValue: string;
   valuePreview: string;

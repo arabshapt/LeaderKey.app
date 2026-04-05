@@ -192,6 +192,11 @@ function summarizeMacroSteps(macroSteps?: MacroStep[]): string[] {
     .map((step) => generateActionLabel(step.action, { breadcrumbPath: [], configDisplayName: "", inherited: false }));
 }
 
+function trimOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export function generateActionLabel(action: ActionNode, context: ItemContext): string {
   switch (action.type) {
     case "application":
@@ -245,6 +250,23 @@ export function generateActionLabel(action: ActionNode, context: ItemContext): s
     case "url":
       return humanizeGenericUrl(action.value);
   }
+}
+
+export function legacyCustomActionLabel(action: ActionNode, context: ItemContext): string | undefined {
+  const currentLabel = trimOptionalText(action.label);
+  if (!currentLabel) {
+    return undefined;
+  }
+
+  return currentLabel === generateActionLabel(action, context) ? undefined : currentLabel;
+}
+
+export function resolveActionDescription(action: ActionNode, context: ItemContext): string | undefined {
+  return trimOptionalText(action.description) ?? legacyCustomActionLabel(action, context);
+}
+
+export function resolveActionAiDescription(action: ActionNode): string | undefined {
+  return trimOptionalText(action.aiDescription);
 }
 
 export function generateGroupLabel(group: GroupNode): string | undefined {

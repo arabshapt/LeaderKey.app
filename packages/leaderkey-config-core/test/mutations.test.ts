@@ -66,8 +66,8 @@ test("creates app overrides for inherited items and preserves insertion order fo
   await updateRecord(
     inheritedRecord,
     {
+      description: "Duplicate tab here",
       key: "d",
-      label: "Duplicate Tab Here",
       type: "menu",
       value: "Google Chrome > Tab > Duplicate Tab",
     },
@@ -304,4 +304,41 @@ test("validateRecordPath allows local overrides of inherited fallback content in
   assert.equal(validation.error, undefined);
   assert.deepEqual(validation.autoCreateGroupKeys, ["w"]);
   assert.equal(validation.overrideRecord?.sourceConfigPath, fallbackPath);
+});
+
+test("updateRecordAtPath preserves explicit action descriptions while labels stay automatic", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        description: "Close tab hard",
+        key: "x",
+        type: "shortcut",
+        value: "Cx",
+      },
+    ],
+    type: "group",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const record = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "x" && candidate.kind === "action"),
+    "expected source action",
+  );
+
+  await updateRecordAtPath(record, {
+    description: "Paste over the current selection",
+    key: "x",
+    type: "shortcut",
+    value: "Cv",
+  }, ["x"]);
+
+  payload = await buildCachePayload(configDirectory);
+  const updatedRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "x" && candidate.kind === "action"),
+    "expected updated action",
+  );
+
+  assert.equal(updatedRecord.displayLabel, "Shortcut: Cmd+V");
+  assert.equal(updatedRecord.description, "Paste over the current selection");
 });

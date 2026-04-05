@@ -144,6 +144,16 @@ function prepareFields(record: FlatIndexRecord, context?: SearchContext): Prepar
       weight: 520,
     },
     {
+      compact: compactText(record.description ?? ""),
+      value: normalizeText(record.description ?? ""),
+      weight: 500,
+    },
+    {
+      compact: compactText(record.aiDescription ?? ""),
+      value: normalizeText(record.aiDescription ?? ""),
+      weight: 460,
+    },
+    {
       compact: compactText(record.effectiveConfigDisplayName),
       value: normalizeText(record.effectiveConfigDisplayName),
       weight: 360,

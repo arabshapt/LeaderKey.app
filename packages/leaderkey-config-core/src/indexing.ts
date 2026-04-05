@@ -1,6 +1,13 @@
 import { CACHE_VERSION } from "./constants.js";
 import { configFingerprint, discoverLiveConfigs, loadGroupFromFile, toConfigSummaries } from "./discovery.js";
-import { actionValuePreview, generateActionLabel, generateGroupLabel, macroStepSummary } from "./labels.js";
+import {
+  actionValuePreview,
+  generateActionLabel,
+  generateGroupLabel,
+  macroStepSummary,
+  resolveActionAiDescription,
+  resolveActionDescription,
+} from "./labels.js";
 import { stableHash } from "./utils.js";
 import type {
   ActionNode,
@@ -216,12 +223,17 @@ function buildFlatRecord(
     };
   }
 
-  const actionLabel = generateActionLabel(node.item, {
+  const itemContext = {
     breadcrumbPath,
     configDisplayName: effectiveDescriptor.displayName,
     inherited: node.inherited,
+  };
+  const actionLabel = generateActionLabel(node.item, {
+    ...itemContext,
   });
-  const displayLabel = actionLabel || node.item.label || node.item.key || node.item.type || "Action";
+  const description = resolveActionDescription(node.item, itemContext);
+  const aiDescription = resolveActionAiDescription(node.item);
+  const displayLabel = actionLabel || node.item.key || node.item.type || "Action";
   const valuePreview = actionValuePreview(node.item) || node.item.value || "";
   const appName = node.item.type === "application"
     ? valuePreview
@@ -236,6 +248,7 @@ function buildFlatRecord(
     breadcrumbDisplay: breadcrumbPath.join(" -> "),
     breadcrumbPath,
     childCount: undefined,
+    description,
     displayLabel,
     effectiveConfigDisplayName: effectiveDescriptor.displayName,
     effectiveConfigPath: effectiveDescriptor.filePath,
@@ -252,6 +265,7 @@ function buildFlatRecord(
     key: node.item.key ?? "",
     keySequence,
     kind: "action",
+    aiDescription,
     label: node.item.label,
     macroStepSummary: macroStepSummary(node.item),
     parentEffectiveKeyPath,
@@ -260,6 +274,8 @@ function buildFlatRecord(
       effectiveDescriptor.displayName,
       breadcrumbPath.join(" "),
       displayLabel,
+      description,
+      aiDescription,
       node.item.label,
       node.item.type,
       node.item.value,

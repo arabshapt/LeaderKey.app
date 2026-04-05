@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 
 import { FALLBACK_CONFIG_DISPLAY_NAME } from "./constants.js";
 import { loadGroupFromFile, writeGroupToFile } from "./discovery.js";
-import { generateActionLabel, generateGroupLabel } from "./labels.js";
+import { generateActionLabel, generateGroupLabel, resolveActionAiDescription, resolveActionDescription } from "./labels.js";
 import { cloneConfigItem } from "./utils.js";
 import type { ActionNode, ConfigItem, FlatIndexRecord, GroupNode } from "./types.js";
 
@@ -225,6 +225,14 @@ function nextActionLabel(action: ActionNode): string {
   });
 }
 
+function nextActionDescription(action: ActionNode): string | undefined {
+  return resolveActionDescription(action, {
+    breadcrumbPath: [],
+    configDisplayName: "",
+    inherited: false,
+  });
+}
+
 function normalizeItemBeforeSave(item: ConfigItem): ConfigItem {
   if (item.type === "group") {
     return {
@@ -236,6 +244,8 @@ function normalizeItemBeforeSave(item: ConfigItem): ConfigItem {
 
   return {
     ...item,
+    aiDescription: resolveActionAiDescription(item),
+    description: nextActionDescription(item),
     label: nextActionLabel(item),
   };
 }
@@ -448,6 +458,8 @@ export function cloneRecordToConfigItem(record: FlatIndexRecord): ConfigItem {
 
   return {
     activates: record.activates,
+    aiDescription: record.aiDescription,
+    description: record.description,
     key: record.key,
     label: record.label,
     stickyMode: record.stickyMode,

@@ -207,6 +207,23 @@ function extraSection(record: FlatIndexRecord): string[] {
   return [];
 }
 
+function descriptionSection(record: FlatIndexRecord): string[] {
+  const sections: string[] = [];
+
+  if (record.description) {
+    sections.push("**Description**", "", record.description);
+  }
+
+  if (record.aiDescription) {
+    if (sections.length > 0) {
+      sections.push("");
+    }
+    sections.push("**AI Description**", "", record.aiDescription);
+  }
+
+  return sections;
+}
+
 function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
   const rows: DetailMetadataRow[] = [
     { title: "Type", text: record.actionType },
@@ -232,11 +249,22 @@ function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
     rows.push({ title: "Enabled Steps", text: String(record.macroStepSummary.length) });
   }
 
+  if (record.description) {
+    rows.push({ title: "Description", text: record.description });
+  }
+
+  if (record.aiDescription) {
+    rows.push({ title: "AI Description", text: record.aiDescription });
+  }
+
   return rows;
 }
 
 export function buildRecordDetailPresentation(record: FlatIndexRecord): RecordDetailPresentation {
   const title = humanTitle(record);
+  const descriptions = descriptionSection(record);
+  const value = valueSection(record);
+  const extra = extraSection(record);
   const markdown = [
     `## ${title}`,
     "",
@@ -246,9 +274,11 @@ export function buildRecordDetailPresentation(record: FlatIndexRecord): RecordDe
     "",
     plainEnglishSummary(record),
     "",
-    ...valueSection(record),
-    ...(valueSection(record).length > 0 ? [""] : []),
-    ...extraSection(record),
+    ...descriptions,
+    ...(descriptions.length > 0 ? [""] : []),
+    ...value,
+    ...(value.length > 0 ? [""] : []),
+    ...extra,
   ]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
     .join("\n")

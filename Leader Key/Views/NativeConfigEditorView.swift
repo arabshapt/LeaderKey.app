@@ -982,6 +982,8 @@ private struct ConfigInspectorView: View {
   @State private var selectedNodeID: NodeID?
   @State private var keyValue: String = ""
   @State private var labelValue: String = ""
+  @State private var descriptionValue: String = ""
+  @State private var aiDescriptionValue: String = ""
   @State private var valueValue: String = ""
   @State private var isMenuEditorPresented: Bool = false
 
@@ -1191,18 +1193,39 @@ private struct ConfigInspectorView: View {
         Text("Macro").tag(Type.macro)
       }
 
+      valueEditor(action: action)
+
       TextField(
-        "Label",
+        "Description",
         text: Binding(
-          get: { labelValue },
+          get: { descriptionValue },
           set: { newValue in
-            labelValue = newValue
+            descriptionValue = newValue
             var updated = action
-            updated.label = newValue.isEmpty ? nil : newValue
+            updated.description = newValue.isEmpty ? nil : newValue
             session.updateSelectedAction(updated)
           }
         )
       )
+
+      TextField(
+        "AI Description",
+        text: Binding(
+          get: { aiDescriptionValue },
+          set: { newValue in
+            aiDescriptionValue = newValue
+            var updated = action
+            updated.aiDescription = newValue.isEmpty ? nil : newValue
+            session.updateSelectedAction(updated)
+          }
+        )
+      )
+
+      if action.isFromFallback {
+        Button("Make Editable") {
+          session.makeSelectedEditable()
+        }
+      }
 
       if action.type != .toggleStickyMode {
         Toggle(
@@ -1217,14 +1240,6 @@ private struct ConfigInspectorView: View {
           )
         )
         .toggleStyle(.checkbox)
-      }
-
-      valueEditor(action: action)
-
-      if action.isFromFallback {
-        Button("Make Editable") {
-          session.makeSelectedEditable()
-        }
       }
 
       HStack(spacing: 8) {
@@ -1402,6 +1417,8 @@ private struct ConfigInspectorView: View {
         selectedNodeID = nil
         keyValue = ""
         labelValue = ""
+        descriptionValue = ""
+        aiDescriptionValue = ""
         valueValue = ""
       }
       return
@@ -1412,10 +1429,14 @@ private struct ConfigInspectorView: View {
     case .group(let group):
       keyValue = group.key ?? ""
       labelValue = group.label ?? ""
+      descriptionValue = ""
+      aiDescriptionValue = ""
       valueValue = ""
     case .action(let action):
       keyValue = action.key ?? ""
-      labelValue = action.label ?? ""
+      labelValue = ""
+      descriptionValue = action.description ?? ""
+      aiDescriptionValue = action.aiDescription ?? ""
       valueValue = action.value
     }
   }

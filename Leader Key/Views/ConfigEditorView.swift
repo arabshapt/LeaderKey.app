@@ -107,7 +107,8 @@ func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
   case .action(let action):
     // Create a new Action instance, which will get a new UUID
     var newAction = Action(
-      key: action.key, type: action.type, label: action.label, value: action.value,
+      key: action.key, type: action.type, label: action.label, description: action.description,
+      aiDescription: action.aiDescription, value: action.value,
       iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode,
       macroSteps: action.macroSteps)
     // Preserve metadata properties
@@ -859,9 +860,9 @@ struct ActionRow: View {
 
         HStack(spacing: 4) {
           TextField(
-            action.bestGuessDisplayName, text: $state.labelInputValue,
+            "Description", text: $state.labelInputValue,
             onCommit: {
-              action.label = state.labelInputValue.isEmpty ? nil : state.labelInputValue
+              action.description = state.labelInputValue.isEmpty ? nil : state.labelInputValue
             }
           )
           .frame(width: action.isFromFallback ? 70 : 120)
@@ -928,12 +929,7 @@ struct ActionRow: View {
       .onAppear {
         state.keyInputValue = action.key ?? ""
         state.valueInputValue = action.value
-        if action.label == nil {
-          let guessedLabel = action.bestGuessDisplayName
-          state.labelInputValue = guessedLabel
-        } else {
-          state.labelInputValue = action.label ?? ""
-        }
+        state.labelInputValue = action.description ?? ""
         state.selectedType = action.type
       }
       // Consolidated onChange handler for better performance
@@ -944,8 +940,8 @@ struct ActionRow: View {
       }
       .onChange(of: state.labelInputValue) { newValue in
         let effectiveNewLabel = newValue.isEmpty ? nil : newValue
-        if action.label != effectiveNewLabel {
-          action.label = effectiveNewLabel
+        if action.description != effectiveNewLabel {
+          action.description = effectiveNewLabel
         }
       }
     )  // Close AnyView

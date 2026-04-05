@@ -641,6 +641,20 @@ extension UserConfig {
           matchReason = "Matched label: '\(label)'"
         }
       }
+      if matchReason == nil && (matchType == .all || matchType == .label) {
+        if case .action(let action) = actionOrGroup,
+          let description = action.description, description.lowercased().contains(query)
+        {
+          matchReason = "Matched description: '\(description)'"
+        }
+      }
+      if matchReason == nil && matchType == .all {
+        if case .action(let action) = actionOrGroup,
+          let aiDescription = action.aiDescription, aiDescription.lowercased().contains(query)
+        {
+          matchReason = "Matched AI description: '\(aiDescription)'"
+        }
+      }
       if matchReason == nil && (matchType == .all || matchType == .value) {
         if case .action(let action) = actionOrGroup, action.value.lowercased().contains(query) {
           matchReason = "Matched value: '\(action.value)'"
@@ -758,6 +772,8 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var key: String?
   var type: Type
   var label: String?
+  var description: String? = nil
+  var aiDescription: String? = nil
   var value: String
   var iconPath: String?
   var activates: Bool?
@@ -769,7 +785,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var fallbackSource: String?
 
   enum CodingKeys: String, CodingKey {
-    case key, type, label, value, iconPath, activates, stickyMode, macroSteps
+    case key, type, label, description, aiDescription, value, iconPath, activates, stickyMode, macroSteps
     // Exclude isFromFallback and fallbackSource from JSON persistence
   }
 
@@ -781,6 +797,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
 
   static func == (lhs: Action, rhs: Action) -> Bool {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
+      && lhs.description == rhs.description && lhs.aiDescription == rhs.aiDescription
       && lhs.value == rhs.value && lhs.iconPath == rhs.iconPath && lhs.activates == rhs.activates
       && lhs.stickyMode == rhs.stickyMode && lhs.macroSteps == rhs.macroSteps
     // Intentionally exclude isFromFallback and fallbackSource from equality comparison
@@ -876,7 +893,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, iconPath, activates, stickyMode, macroSteps
+    case key, type, value, actions, label, description, aiDescription, iconPath, activates, stickyMode, macroSteps
   }
 
   init(from decoder: Decoder) throws {
@@ -884,6 +901,8 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     let key = try container.decode(String?.self, forKey: .key)
     let type = try container.decode(Type.self, forKey: .type)
     let label = try container.decodeIfPresent(String.self, forKey: .label)
+    let description = try container.decodeIfPresent(String.self, forKey: .description)
+    let aiDescription = try container.decodeIfPresent(String.self, forKey: .aiDescription)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
     let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
     let stickyMode = try container.decodeIfPresent(Bool.self, forKey: .stickyMode)
@@ -898,7 +917,8 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       let macroSteps = try container.decodeIfPresent([MacroStep].self, forKey: .macroSteps)
       self = .action(
         Action(
-          key: key, type: type, label: label, value: value, iconPath: iconPath,
+          key: key, type: type, label: label, description: description, aiDescription: aiDescription,
+          value: value, iconPath: iconPath,
           activates: activates, stickyMode: stickyMode, macroSteps: macroSteps))
     }
   }
@@ -912,6 +932,12 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       try container.encode(action.value, forKey: .value)
       if action.label != nil && !action.label!.isEmpty {
         try container.encodeIfPresent(action.label, forKey: .label)
+      }
+      if action.description != nil && !action.description!.isEmpty {
+        try container.encodeIfPresent(action.description, forKey: .description)
+      }
+      if action.aiDescription != nil && !action.aiDescription!.isEmpty {
+        try container.encodeIfPresent(action.aiDescription, forKey: .aiDescription)
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(action.activates, forKey: .activates)
@@ -940,6 +966,8 @@ extension ActionOrGroup {
           key: action.key,
           type: action.type,
           label: action.label,
+          description: action.description,
+          aiDescription: action.aiDescription,
           value: action.value,
           iconPath: action.iconPath,
           activates: action.activates,

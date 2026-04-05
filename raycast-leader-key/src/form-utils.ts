@@ -1,4 +1,4 @@
-import { type ConfigItem, type FlatIndexRecord } from "@leaderkey/config-core";
+import { resolveActionAiDescription, resolveActionDescription, type ConfigItem, type FlatIndexRecord } from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
   ["left", "←"],
@@ -39,8 +39,10 @@ export interface KeystrokeFields {
 
 export interface ItemFormState {
   activates: boolean;
+  aiDescription: string;
   applicationPath: string;
   commandValue: string;
+  description: string;
   fullPath: string;
   folderPath: string;
   intellijValue: string;
@@ -66,8 +68,10 @@ export function normalizeConfigKey(value: string): string {
 export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormState {
   return {
     activates: false,
+    aiDescription: "",
     applicationPath: "",
     commandValue: "",
+    description: "",
     fullPath: "",
     folderPath: "",
     intellijValue: "",
@@ -165,13 +169,15 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
 
   return {
     activates: record.activates ?? false,
+    aiDescription: record.actionType === "group" ? "" : record.aiDescription ?? "",
     applicationPath: record.actionType === "application" ? record.rawValue : "",
     commandValue: record.actionType === "command" ? record.rawValue : "",
+    description: record.actionType === "group" ? "" : record.description ?? "",
     fullPath: formatFullPath(record.effectiveKeyPath),
     folderPath: record.actionType === "folder" ? record.rawValue : "",
     intellijValue: record.actionType === "intellij" ? record.rawValue : "",
     keystroke,
-    label: record.label ?? record.displayLabel ?? "",
+    label: record.actionType === "group" ? record.label ?? record.displayLabel ?? "" : "",
     menuValue: record.actionType === "menu" ? record.rawValue : "",
     shortcutValue: record.actionType === "shortcut" ? record.rawValue : "",
     stickyMode: record.stickyMode ?? false,
@@ -199,8 +205,10 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
   const baseState: ItemFormState = {
     ...emptyFormState(item.type),
     activates: item.activates ?? false,
+    aiDescription: resolveActionAiDescription(item) ?? "",
+    description: resolveActionDescription(item, { breadcrumbPath: [], configDisplayName: "", inherited: false }) ?? "",
     fullPath: item.key ? formatFullPath([item.key]) : "",
-    label: item.label ?? "",
+    label: "",
     stickyMode: item.stickyMode ?? false,
     type: item.type,
   };

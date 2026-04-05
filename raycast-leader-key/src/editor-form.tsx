@@ -82,9 +82,11 @@ function formStateToItem(state: ItemFormState, key: string, preserveItem?: Confi
   const preservedAction = preserveItem?.type === state.type ? preserveItem : undefined;
   const baseItem = {
     activates: state.type === "url" ? state.activates : undefined,
+    aiDescription: state.aiDescription.trim() || undefined,
+    description: state.description.trim() || undefined,
     iconPath: preservedAction?.iconPath,
     key,
-    label: state.label.trim() || undefined,
+    label: preservedAction?.label,
     stickyMode: state.stickyMode || undefined,
     type: state.type,
   } as const;
@@ -247,8 +249,10 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   );
   const [isSaving, setIsSaving] = useState(false);
   const { pop } = useNavigation();
-  const labelFieldTitle = formState.type === "group" ? "Description" : "Label";
-  const labelFieldPlaceholder = formState.type === "group" ? "Optional group description" : undefined;
+  const primaryTextFieldTitle = "Description";
+  const primaryTextFieldPlaceholder = formState.type === "group"
+    ? "Optional group description"
+    : "Optional action description";
   const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
   const destinationConfigPath = editableConfigPath(mode, createAtPath, targetRecord);
   const destinationConfigDisplayName = editableConfigDisplayName(mode, createAtPath, targetRecord);
@@ -276,10 +280,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const pathError = pathIsEditable(mode)
     ? parsedFullPath.error ?? pathValidation?.error
     : undefined;
-  const pathPreview = destinationKeyPath.length > 0 ? formatFullPath(destinationKeyPath) : "—";
-  const autoCreatePreview = pathValidation && pathValidation.autoCreateGroupKeys.length > 0
-    ? formatFullPath(pathValidation.autoCreateGroupKeys)
-    : "None";
   const currentPathText = targetRecord ? formatFullPath(targetRecord.effectiveKeyPath) : defaultFullPath(mode, createAtPath, targetRecord);
   const fixedPathInfo = !pathIsEditable(mode) && targetRecord
     ? `Overrides stay at ${formatFullPath(targetRecord.effectiveKeyPath)}.`
@@ -305,7 +305,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   useEffect(() => {
     setPreservedItem(initialPreserveItem);
   }, [initialPreserveItem]);
-
   useEffect(() => {
     setValidationPayload(getMemoryCachedPayload(configDirectory) ?? readCachedPayloadSync(configDirectory));
   }, [configDirectory]);
@@ -347,7 +346,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       await showToast({ style: Toast.Style.Failure, title: "A full path is required." });
       return;
     }
-
     const nextItem = formStateToItem(formState, destinationKey, preservedItem);
     if (valueError) {
       await showToast({ style: Toast.Style.Failure, title: valueError });
@@ -505,7 +503,15 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const showKeystrokeFields = formState.type === "keystroke";
   const showStickyModeField = formState.type !== "toggleStickyMode";
   const fullPathInfo = pathIsEditable(mode)
-    ? "Use tokenized syntax like a -> left -> space."
+    ? [
+        "Use tokenized syntax like a -> left -> space.",
+        pathValidation?.autoCreateGroupKeys.length
+          ? `Missing parent groups will be created automatically: ${formatFullPath(pathValidation.autoCreateGroupKeys)}.`
+          : undefined,
+        pathValidation?.overrideRecord
+          ? `This will create a local override for inherited ${pathValidation.overrideRecord.displayLabel}.`
+          : undefined,
+      ].filter(Boolean).join("\n")
     : fixedPathInfo;
   const valueFieldError = valueError;
 
@@ -531,37 +537,31 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         text={`Config: ${destinationConfigDisplayName || "—"}\nCurrent Path: ${currentPathText || "—"}`}
         title="Context"
       />
-      <Form.Description
-        text={[
-          `Destination: ${pathPreview}`,
-          `Auto-create Groups: ${autoCreatePreview}`,
-          pathValidation?.overrideRecord
-            ? `Overrides Inherited: ${pathValidation.overrideRecord.displayLabel} at ${formatFullPath(pathValidation.overrideRecord.effectiveKeyPath)}`
-            : undefined,
-        ].filter(Boolean).join("\n")}
-        title="Path Preview"
-      />
       <Form.Separator />
-      <Form.TextField
-        error={pathError}
-        id="fullPath"
-        info={fullPathInfo}
-        onChange={(value) => {
-          if (!pathIsEditable(mode)) {
-            return;
-          }
-          setFormState((current) => ({ ...current, fullPath: value }));
-        }}
-        title="Full Path"
-        value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
-      />
-      <Form.TextField
-        id="label"
-        onChange={(value) => setFormState((current) => ({ ...current, label: value }))}
-        placeholder={labelFieldPlaceholder}
-        title={labelFieldTitle}
-        value={formState.label}
-      />
+      {formState.type === "group" ? (
+        <Form.TextField
+          id="label"
+          onChange={(value) => setFormState((current) => ({ ...current, label: value }))}
+          placeholder={primaryTextFieldPlaceholder}
+          title={primaryTextFieldTitle}
+          value={formState.label}
+        />
+      ) : null}
+      {formState.type === "group" ? (
+        <Form.TextField
+          error={pathError}
+          id="fullPath"
+          info={fullPathInfo}
+          onChange={(value) => {
+            if (!pathIsEditable(mode)) {
+              return;
+            }
+            setFormState((current) => ({ ...current, fullPath: value }));
+          }}
+          title="Full Path"
+          value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
+        />
+      ) : null}
       <Form.Dropdown
         id="type"
         onChange={(value) => setFormState((current) => ({ ...current, type: value as ConfigItem["type"] }))}
@@ -581,14 +581,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>
-      {showStickyModeField ? (
-        <Form.Checkbox
-          id="sticky"
-          label="Sticky Mode"
-          onChange={(value) => setFormState((current) => ({ ...current, stickyMode: value }))}
-          value={formState.stickyMode}
-        />
-      ) : null}
 
       {showApplicationPicker ? (
         <Form.Dropdown
@@ -731,6 +723,48 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           onChange={(value) => setFormState((current) => ({ ...current, intellijValue: value }))}
           title="IntelliJ Actions"
           value={formState.intellijValue}
+        />
+      ) : null}
+      {formState.type !== "group" ? (
+        <Form.TextField
+          id="description"
+          onChange={(value) => setFormState((current) => ({ ...current, description: value }))}
+          placeholder={primaryTextFieldPlaceholder}
+          title={primaryTextFieldTitle}
+          value={formState.description}
+        />
+      ) : null}
+      {formState.type !== "group" ? (
+        <Form.TextField
+          id="aiDescription"
+          info="Optional AI-generated description. Search includes this text when present."
+          onChange={(value) => setFormState((current) => ({ ...current, aiDescription: value }))}
+          placeholder="Reserved for AI-generated notes"
+          title="AI Description"
+          value={formState.aiDescription}
+        />
+      ) : null}
+      {formState.type !== "group" ? (
+        <Form.TextField
+          error={pathError}
+          id="fullPath"
+          info={fullPathInfo}
+          onChange={(value) => {
+            if (!pathIsEditable(mode)) {
+              return;
+            }
+            setFormState((current) => ({ ...current, fullPath: value }));
+          }}
+          title="Full Path"
+          value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
+        />
+      ) : null}
+      {showStickyModeField ? (
+        <Form.Checkbox
+          id="sticky"
+          label="Sticky Mode"
+          onChange={(value) => setFormState((current) => ({ ...current, stickyMode: value }))}
+          value={formState.stickyMode}
         />
       ) : null}
     </Form>

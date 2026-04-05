@@ -6,44 +6,70 @@ interface RowPresentationOptions {
   relativeKeyPath?: string[];
 }
 
+function preferredDescription(record: FlatIndexRecord): string | undefined {
+  const description = record.description?.trim();
+  if (description) {
+    return description;
+  }
+
+  const aiDescription = record.aiDescription?.trim();
+  return aiDescription || undefined;
+}
+
 function compactActionSummary(record: FlatIndexRecord): string {
   if (record.kind === "group") {
     const count = record.childCount ?? 0;
     return `${record.displayLabel} · ${count} item${count === 1 ? "" : "s"}`;
   }
 
+  const note = preferredDescription(record);
   const label = record.displayLabel.trim();
+  const withNote = (summary: string): string => {
+    if (!note || note === summary) {
+      return summary;
+    }
+
+    return `${truncateText(note)} · ${summary}`;
+  };
 
   switch (record.actionType) {
     case "application":
-      return `↗ ${record.valuePreview || label}`;
+      return withNote(`↗ ${record.valuePreview || label}`);
     case "command":
-      return `› ${truncateText(label.replace(/^Run\s+/i, "") || record.valuePreview)}`;
+      return withNote(`› ${truncateText(label.replace(/^Run\s+/i, "") || record.valuePreview)}`);
     case "folder":
-      return `↗ ${record.valuePreview || label}`;
+      return withNote(`↗ ${record.valuePreview || label}`);
     case "intellij":
-      return `IJ ${truncateText(label.replace(/^IntelliJ:\s*/i, "") || record.valuePreview)}`;
+      return withNote(`IJ ${truncateText(label.replace(/^IntelliJ:\s*/i, "") || record.valuePreview)}`);
     case "keystroke":
-      return `⌨ ${label.replace(/^Keystroke:\s*/i, "") || record.valuePreview}`;
+      return withNote(`⌨ ${label.replace(/^Keystroke:\s*/i, "") || record.valuePreview}`);
     case "macro":
-      return `M ${label.replace(/^Macro:\s*/i, "") || record.valuePreview || "Macro"}`;
+      return withNote(`M ${label.replace(/^Macro:\s*/i, "") || record.valuePreview || "Macro"}`);
     case "menu":
-      return `☰ ${label}`;
+      return withNote(`☰ ${label}`);
     case "shortcut":
-      return `⌨ ${label.replace(/^Shortcut:\s*/i, "") || record.valuePreview}`;
+      return withNote(`⌨ ${label.replace(/^Shortcut:\s*/i, "") || record.valuePreview}`);
     case "text":
-      return `✎ ${truncateText(label.replace(/^Type\s+/i, "") || record.valuePreview)}`;
+      return withNote(`✎ ${truncateText(label.replace(/^Type\s+/i, "") || record.valuePreview)}`);
     case "toggleStickyMode":
-      return "⇄ Sticky";
+      return withNote("⇄ Sticky");
     case "url":
-      return label.replace(/^Open\s+/i, "↗ ");
+      return withNote(label.replace(/^Open\s+/i, "↗ "));
   }
 
-  return truncateText(label || record.valuePreview || record.rawValue || record.actionType);
+  return withNote(truncateText(label || record.valuePreview || record.rawValue || record.actionType));
 }
 
 function subtitleTooltip(record: FlatIndexRecord): string {
   const parts = [record.displayLabel];
+
+  if (record.description) {
+    parts.push(`Description: ${record.description}`);
+  }
+
+  if (record.aiDescription) {
+    parts.push(`AI Description: ${record.aiDescription}`);
+  }
 
   if (record.rawValue && record.rawValue !== record.displayLabel) {
     parts.push(record.rawValue);

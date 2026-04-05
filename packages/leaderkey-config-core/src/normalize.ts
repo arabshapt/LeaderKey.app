@@ -1,5 +1,5 @@
 import { discoverLiveConfigs, loadGroupFromFile, writeGroupToFile } from "./discovery.js";
-import { generateActionLabel, generateGroupLabel } from "./labels.js";
+import { generateActionLabel, generateGroupLabel, resolveActionAiDescription, resolveActionDescription } from "./labels.js";
 import type { ActionNode, ConfigItem, GroupNode, ItemContext } from "./types.js";
 
 function shouldReplaceGroupLabel(label: string | undefined): boolean {
@@ -26,6 +26,8 @@ function normalizeItem(item: ConfigItem, context: ItemContext): ConfigItem {
   const nextAction = item as ActionNode;
   return {
     ...nextAction,
+    aiDescription: resolveActionAiDescription(nextAction),
+    description: resolveActionDescription(nextAction, context),
     label: generateActionLabel(nextAction, context),
   };
 }
@@ -47,4 +49,3 @@ export async function normalizeLabelsInConfigDirectory(configDirectory: string):
 
   return touchedFiles;
 }
-

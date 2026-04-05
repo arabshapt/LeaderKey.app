@@ -7,10 +7,12 @@ function makeRecord(overrides: Partial<FlatIndexRecord>): FlatIndexRecord {
   return {
     actionType: "application",
     activates: undefined,
+    aiDescription: undefined,
     appName: undefined,
     breadcrumbDisplay: "Global -> o -> a",
     breadcrumbPath: ["Global", "o", "a"],
     childCount: undefined,
+    description: undefined,
     displayLabel: "Open Arc",
     effectiveConfigDisplayName: "Global",
     effectiveConfigPath: "/tmp/global-config.json",
@@ -36,6 +38,26 @@ function makeRecord(overrides: Partial<FlatIndexRecord>): FlatIndexRecord {
     ...overrides,
   };
 }
+
+test("searchRecords matches action descriptions and AI descriptions", () => {
+  const describedRecord = makeRecord({
+    description: "Go to history",
+    displayLabel: "Shortcut: Cmd+Y",
+    id: "described-record",
+    rawValue: "Cy",
+    valuePreview: "Cmd+Y",
+  });
+  const aiRecord = makeRecord({
+    aiDescription: "Switch to the previous browser tab",
+    displayLabel: "Shortcut: Cmd+Shift+[",
+    id: "ai-record",
+    rawValue: "CSopen_bracket",
+    valuePreview: "Cmd+Shift+[",
+  });
+
+  assert.equal(searchRecords([aiRecord, describedRecord], "history")[0]?.id, describedRecord.id);
+  assert.equal(searchRecords([describedRecord, aiRecord], "previous browser tab")[0]?.id, aiRecord.id);
+});
 
 test("searchRecords matches shortcut path variants without separators", () => {
   const pathRecord = makeRecord({ id: "path-record" });
