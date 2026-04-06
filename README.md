@@ -18,6 +18,7 @@ Watch the original intro videos by [@mikker](https://github.com/mikker):
 *The original videos showcase the core functionality that this enhanced fork builds upon.*
 
 Recent development changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+Implementation notes and accumulated lessons live in [SKILLZ.md](SKILLZ.md).
 
 Raycast extension behavior and current implementation notes are documented in [raycast-leader-key/README.md](raycast-leader-key/README.md), including:
 - command startup/loading behavior

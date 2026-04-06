@@ -6,6 +6,9 @@ All notable changes to this fork are documented here.
 
 ### Added
 - Added IntelliJ integration as a first-class `intellij` action type, using a Unix domain socket at `/tmp/intellij-leaderkey.sock` and optional multi-action delay syntax such as `SaveAll,ReformatCode|100`.
+- Added searchable Raycast editors for `intellij` and `menu` actions:
+  - `intellij` now supports action search/append and a separate delay field while preserving the existing stored `ActionA,ActionB|100` format
+  - `menu` now supports app selection, live menu-item search through Leader Key IPC, and ordered fallback menu paths
 - Added a first-class `keystroke` action type with compact shortcut syntax (`Ct`, `COt`, etc.), PID-targeted `CGEvent.postToPid(_:)` delivery, optional app targeting, and optional post-send app focus.
 - Added a local-first Raycast extension for config discovery and editing with:
   - `Search Shortcuts`
@@ -26,6 +29,7 @@ All notable changes to this fork are documented here.
 - Raycast config writes now trigger Leader Key apply/export over the always-on local control socket at `/tmp/leaderkey.sock`, instead of using app URL callbacks.
 - External config apply now follows the same reload/export refresh path as native saves, including hint/state refreshes after Raycast edits.
 - Export refreshes are coalesced to avoid overlapping Goku runs after a single external apply.
+- Raycast `intellij` and `menu` editing now use structured form controls instead of raw single-string editing, while still saving back to the existing underlying action formats.
 - `application` actions now use the stronger seq-style activation path for running apps and a more reliable launch fallback for cold launches.
 - `application` actions now preserve the fast `activate()` path for normal running-app switches, and only perform window-state reopen checks when the target app is already active.
 - `Browse Configs` search now searches recursively inside the current subtree and ranks relative path matches before absolute path matches.
@@ -43,6 +47,8 @@ All notable changes to this fork are documented here.
 - Fixed Raycast-driven config changes not always making it into Leader Key hints, exported state mappings, or `karabiner.edn`.
 - Fixed multiple redundant Goku/export runs after one external apply.
 - Fixed blank Goku failure logs by capturing exit code, stdout, and stderr.
+- Fixed menu fallback paths being saved in config but not included in exported/direct Karabiner menu execution payloads.
+- Fixed the Raycast `Primary Menu Path` field fighting user input when the value was in the intermediate `App > ` state.
 - Fixed compatibility with Homebrew-installed Goku builds that advertise `-c` but fail at runtime; Leader Key now uses `GOKU_EDN_CONFIG_FILE` instead of `goku -c`.
 - Fixed `open_app` for apps like Messages that remain frontmost after `Cmd+W` but no longer have a visible window; these now reopen instead of silently re-activating.
 - Fixed stale Raycast list refresh after add/edit/delete operations.
