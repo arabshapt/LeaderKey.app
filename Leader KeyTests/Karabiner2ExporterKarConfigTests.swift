@@ -152,9 +152,13 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     let first = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
     let second = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
 
-    XCTAssertEqual(first.repoModuleSource, second.repoModuleSource)
-    XCTAssertTrue(first.repoModuleSource.contains("export const leaderKeyManagedRules ="))
-    XCTAssertTrue(first.repoModuleSource.contains("export default leaderKeyManagedRules"))
+    // Module source generation is now deferred; generate it explicitly for the test.
+    let firstModule = Karabiner2Exporter.generateModuleSource(managedRules: first.managedRules)
+    let secondModule = Karabiner2Exporter.generateModuleSource(managedRules: second.managedRules)
+
+    XCTAssertEqual(firstModule, secondModule)
+    XCTAssertTrue(firstModule.contains("export const leaderKeyManagedRules ="))
+    XCTAssertTrue(firstModule.contains("export default leaderKeyManagedRules"))
   }
 
   func testGenerateKarConfigUsesSingleAnyKeyCatchAllMappings() throws {

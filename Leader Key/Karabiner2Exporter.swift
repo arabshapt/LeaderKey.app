@@ -329,6 +329,7 @@ final class Karabiner2Exporter {
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) -> KarabinerTSExport {
+    let tStart = CFAbsoluteTimeGetCurrent()
     var appAliases: [(bundleId: String, alias: String, config: UserConfig)] = []
     var usedAliases = Set<String>()
 
@@ -451,26 +452,47 @@ final class Karabiner2Exporter {
         description: "\(managedRuleDescriptionPrefix)ModifierPassThrough",
         mappings: modifierPassThroughMappings))
 
-    // App-specific rules first (most specific), then global, then fallback.
-    for (bundleId, alias, config) in appAliases {
-      let appInitialStateId = generateAppInitialStateId(appAlias: alias)
-      let (appStateTree, appMappings) = buildStateTree(
-        from: config.root,
-        appAlias: alias,
-        bundleId: bundleId,
-        initialStateId: appInitialStateId
-      )
-      allStateMappings.append(contentsOf: appMappings)
-      rules.append(
-        contentsOf: generateKarModeRules(
+    let tActivation = CFAbsoluteTimeGetCurrent()
+
+    // App-specific rules: parallelize buildStateTree + generateKarModeRules for each app.
+    // Each app is fully independent, so we can process them concurrently.
+    let appCount = appAliases.count
+    if appCount > 0 {
+      // Pre-allocate result arrays to avoid contention.
+      let emptyRules: [[String: Any]] = []
+      let emptyMappings: [StateMapping] = []
+      var perAppRules = Array(repeating: emptyRules, count: appCount)
+      var perAppMappings = Array(repeating: emptyMappings, count: appCount)
+
+      DispatchQueue.concurrentPerform(iterations: appCount) { index in
+        let (bundleId, alias, config) = appAliases[index]
+        let appInitialStateId = generateAppInitialStateId(appAlias: alias)
+        let (appStateTree, appMappings) = buildStateTree(
+          from: config.root,
+          appAlias: alias,
+          bundleId: bundleId,
+          initialStateId: appInitialStateId
+        )
+        let appRules = generateKarModeRules(
           from: appStateTree,
           mode: .appSpecific(bundleId: bundleId),
           descriptionBase: "\(managedRuleDescriptionPrefix)AppMode/\(alias)",
           initialStateId: appInitialStateId,
           appAlias: alias,
           appConditionRegex: bundleId
-        ))
+        )
+        perAppRules[index] = appRules
+        perAppMappings[index] = appMappings
+      }
+
+      // Merge in order (most specific first).
+      for index in 0..<appCount {
+        rules.append(contentsOf: perAppRules[index])
+        allStateMappings.append(contentsOf: perAppMappings[index])
+      }
     }
+
+    let tAppRules = CFAbsoluteTimeGetCurrent()
 
     let (globalStateTree, globalMappings) = buildStateTree(
       from: globalConfig.root,
@@ -507,13 +529,37 @@ final class Karabiner2Exporter {
         appConditionRegex: nil
       ))
 
-    let managedRules = applyKarAlternativeMappings(to: compileKarIntermediateRules(rules))
-    let repoModuleSource = karabinerTsModuleSource(managedRules: managedRules)
+    let tGlobalFallback = CFAbsoluteTimeGetCurrent()
+
+    let compiledRules = compileKarIntermediateRules(rules)
+    let tCompile = CFAbsoluteTimeGetCurrent()
+
+    let managedRules = applyKarAlternativeMappings(to: compiledRules)
+    let tAltMappings = CFAbsoluteTimeGetCurrent()
+
+    debugLog("[Benchmark] kar.gen activation: \(String(format: "%.0f", (tActivation - tStart) * 1000))ms")
+    debugLog("[Benchmark] kar.gen appRules (\(appAliases.count) apps, parallel): \(String(format: "%.0f", (tAppRules - tActivation) * 1000))ms")
+    debugLog("[Benchmark] kar.gen global+fallback: \(String(format: "%.0f", (tGlobalFallback - tAppRules) * 1000))ms")
+    debugLog("[Benchmark] kar.gen compile (\(rules.count) intermediate → \(compiledRules.count) compiled): \(String(format: "%.0f", (tCompile - tGlobalFallback) * 1000))ms")
+    debugLog("[Benchmark] kar.gen altMappings: \(String(format: "%.0f", (tAltMappings - tCompile) * 1000))ms")
+    debugLog("[Benchmark] kar.gen TOTAL (critical path): \(String(format: "%.0f", (tAltMappings - tStart) * 1000))ms")
 
     return KarabinerTSExport(
       managedRules: managedRules,
-      repoModuleSource: repoModuleSource,
-      stateMappings: sortedStateMappings(allStateMappings))
+      repoModuleSource: "",  // Deferred — caller generates on background thread
+      stateMappings: allStateMappings)  // Unsorted — caller sorts on background thread
+  }
+
+  /// Generate the TypeScript module source from managed rules.
+  /// Expensive (~114ms for 4MB output). Call on background thread when possible.
+  static func generateModuleSource(managedRules: [[String: Any]]) -> String {
+    karabinerTsModuleSource(managedRules: managedRules)
+  }
+
+  /// Sort state mappings for stable output.
+  /// Moderately expensive (~24ms for 5700 mappings). Can be deferred.
+  static func sortMappings(_ mappings: [StateMapping]) -> [StateMapping] {
+    sortedStateMappings(mappings)
   }
 
   private static let managedRuleDescriptionPrefix = "LeaderKeyManaged/"
@@ -908,7 +954,7 @@ final class Karabiner2Exporter {
     return nil
   }
 
-  private static func karabinerTsModuleSource(managedRules: [[String: Any]]) -> String {
+  static func karabinerTsModuleSource(managedRules: [[String: Any]]) -> String {
     let rulesJSONString: String
     if let jsonData = try? JSONSerialization.data(
       withJSONObject: managedRules,

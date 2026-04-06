@@ -288,39 +288,62 @@ final class Karabiner2InputMethod: InputMethod {
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) {
     let service = KarabinerTsExportService.shared
-    var managedRules: [[String: Any]] = []
-    var ruleCount = 0
 
     do {
-      // Phase 1: Generate config and write repo files.
-      // The 30MB repoModuleSource is released when this autoreleasepool exits,
-      // before the heavier JSON patching in Phase 2.
+      // === CRITICAL PATH: generateKarConfig + applyRules ===
+      // moduleSource, sorting, and file writes happen on background thread below.
+
+      let t0 = CFAbsoluteTimeGetCurrent()
+      let export = Karabiner2Exporter.generateKarConfig(
+        globalConfig: globalConfig,
+        appConfigs: appConfigs
+      )
+      let t1 = CFAbsoluteTimeGetCurrent()
+
+      // Phase 2: Patch karabiner.json with managed rules (the critical output).
       try autoreleasepool {
-        let export = Karabiner2Exporter.generateKarConfig(
-          globalConfig: globalConfig,
-          appConfigs: appConfigs
-        )
-
-        let outputDir = (Defaults[.configDir] as NSString).appendingPathComponent("export")
-        try FileManager.default.createDirectory(
-          atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
-        try saveStateMappings(export.stateMappings, outputDir: outputDir)
-
-        try service.writeRepoFiles(repoModuleSource: export.repoModuleSource)
-        managedRules = export.managedRules
-        ruleCount = export.managedRules.count
-        // export + repoModuleSource (~30MB) freed at end of autoreleasepool
+        try service.applyRules(export.managedRules)
       }
-
-      // Phase 2: Patch karabiner.json with managed rules.
-      // Runs in its own autoreleasepool so JSONSerialization intermediates (~50MB) are freed.
-      try autoreleasepool {
-        try service.applyRules(managedRules)
-        managedRules = [] // explicitly release ~11MB of rule dicts
-      }
+      let t2 = CFAbsoluteTimeGetCurrent()
 
       lastKarabinerTsExportError = nil
-      debugLog("[Karabiner2InputMethod] Applied \(ruleCount) LeaderKey rules via karabiner.ts")
+
+      debugLog("[Benchmark] kar generateKarConfig: \(String(format: "%.0f", (t1 - t0) * 1000))ms")
+      debugLog("[Benchmark] kar applyRules (karabiner.json patch): \(String(format: "%.0f", (t2 - t1) * 1000))ms")
+      debugLog("[Benchmark] kar critical path: \(String(format: "%.0f", (t2 - t0) * 1000))ms")
+      debugLog("[Karabiner2InputMethod] Applied \(export.managedRules.count) LeaderKey rules via karabiner.ts")
+
+      // === DEFERRED WORK: background thread for sorting, saving, module source ===
+      let managedRules = export.managedRules
+      let unsortedMappings = export.stateMappings
+      let configDir = Defaults[.configDir]
+
+      DispatchQueue.global(qos: .utility).async { [weak self] in
+        let bgStart = CFAbsoluteTimeGetCurrent()
+
+        // Sort state mappings and save to disk.
+        let sortedMappings = Karabiner2Exporter.sortMappings(unsortedMappings)
+        let outputDir = (configDir as NSString).appendingPathComponent("export")
+        do {
+          try FileManager.default.createDirectory(
+            atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
+          try self?.saveStateMappings(sortedMappings, outputDir: outputDir)
+        } catch {
+          debugLog("[Karabiner2InputMethod] Background: failed to save state mappings: \(error)")
+        }
+
+        // Generate and write module source (.ts file).
+        autoreleasepool {
+          let moduleSource = Karabiner2Exporter.generateModuleSource(managedRules: managedRules)
+          do {
+            try service.writeRepoFiles(repoModuleSource: moduleSource)
+          } catch {
+            debugLog("[Karabiner2InputMethod] Background: failed to write repo files: \(error)")
+          }
+        }
+
+        debugLog("[Benchmark] kar background work: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - bgStart) * 1000))ms")
+      }
     } catch {
       lastKarabinerTsExportError = error.localizedDescription
       debugLog("[Karabiner2InputMethod] Failed to export via karabiner.ts: \(error)")
