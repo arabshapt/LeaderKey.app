@@ -27,6 +27,7 @@ All notable changes to this fork are documented here.
 - External config apply now follows the same reload/export refresh path as native saves, including hint/state refreshes after Raycast edits.
 - Export refreshes are coalesced to avoid overlapping Goku runs after a single external apply.
 - `application` actions now use the stronger seq-style activation path for running apps and a more reliable launch fallback for cold launches.
+- `application` actions now preserve the fast `activate()` path for normal running-app switches, and only perform window-state reopen checks when the target app is already active.
 - `Browse Configs` search now searches recursively inside the current subtree and ranks relative path matches before absolute path matches.
 - Raycast list/detail presentation was tightened for small screens: denser rows, consistent path rendering, always-on detail previews, and better empty-group create flows.
 - Raycast editing now treats action labels as generated display text and uses separate editable description fields instead.
@@ -43,6 +44,7 @@ All notable changes to this fork are documented here.
 - Fixed multiple redundant Goku/export runs after one external apply.
 - Fixed blank Goku failure logs by capturing exit code, stdout, and stderr.
 - Fixed compatibility with Homebrew-installed Goku builds that advertise `-c` but fail at runtime; Leader Key now uses `GOKU_EDN_CONFIG_FILE` instead of `goku -c`.
+- Fixed `open_app` for apps like Messages that remain frontmost after `Cmd+W` but no longer have a visible window; these now reopen instead of silently re-activating.
 - Fixed stale Raycast list refresh after add/edit/delete operations.
 - Fixed split detail panes in Raycast only rendering for the first selected row.
 - Fixed app saves/export refreshes so managed `LEADERKEY_SPECIFIC_CONFIGS` content in `karabiner.edn` stays in sync when new app configs are created.

@@ -101,6 +101,13 @@ if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
 - Minimal processing in event tap callback
 - Defers heavy work to main queue when needed
 
+### App Activation Strategy
+- Running apps still use the seq-style fast path based on `NSRunningApplication.activate()` whenever possible
+- A special-case fallback exists for apps that are already active but have no usable window
+- Messages is the canonical example: after `Cmd+W`, the app can remain frontmost and keep the menu bar while `activate()` does nothing visible
+- Leader Key now checks AX window state only for already-active target apps, and reopens with `open -a` only when no regular window exists
+- This keeps normal background-app switching fast while fixing the frontmost-no-window edge case
+
 ## Configuration System
 
 ### Multi-Level Configs
@@ -119,6 +126,12 @@ if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
 - Event tap may be disabled by system
 - Adaptive health check ensures recovery within 1 second
 - Force reset always available as fallback
+
+### Frontmost App With No Window
+- Some macOS apps can be frontmost without any visible document/chat window
+- The app menu staying in the menu bar is not enough evidence that a user-visible window exists
+- `activate()` is correct for the normal running-app case, but incorrect for this state
+- The right fix is not to abandon the fast path globally; it is to detect this state narrowly and reopen only then
 
 ### Multiple Monitors
 - Window positioning accounts for screen with mouse

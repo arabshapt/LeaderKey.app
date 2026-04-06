@@ -179,7 +179,8 @@ sock.close()
 
 ## Speed Optimization Patterns
 - **`send_user_command` over `shell_command`** — Karabiner's `send_user_command` uses an existing datagram socket (fire-and-forget, ~1ms). `shell_command` spawns a new process each time (~100-200ms). Always prefer `send_user_command` with v1 payloads for app/URL/menu actions
-- **`NSRunningApplication.activate()` over `NSWorkspace.openApplication`** — `activate()` is direct IPC to WindowServer (~1ms). `openApplication` goes through LaunchServices (~50ms). Use `activate()` as fast path for running apps, fall back to `openApplication` for cold launches
+- **`NSRunningApplication.activate()` over `NSWorkspace.openApplication`** — `activate()` is direct IPC to WindowServer (~1ms). `openApplication` goes through LaunchServices (~50ms). Use `activate()` as fast path for running apps, but only if the target app already has a usable window
+- **Reopen checks only for already-active apps** — some apps (notably Messages) can remain frontmost and keep owning the menu bar after `Cmd+W`, while having no visible window. In that state `activate()` is effectively a no-op. `open_app` now does the more expensive AX/window-state check only when the target app is already active, preserving the seq-style fast path for normal app switches
 - **App cache (`appCache`)** — `KarabinerUserCommandReceiver` caches `app string → (url, bundleId)` to avoid repeated FileManager + Bundle lookups. First call resolves, all subsequent are dictionary hits
 - **AX menu walking** — Use `AXUIElementPerformAction(kAXPressAction)` directly (non-visual). `AXPick` and `AXShowMenu` are slower alternatives. Descendant search (depth 6) handles inconsistent menu structures across apps
 - **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management commands
@@ -190,6 +191,7 @@ sock.close()
 ## Common Gotchas
 - **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)
 - **Config caching** — `UserConfig.appConfigs` dict caches loaded configs. Call `reloadConfig()` to bust the cache
+- **Frontmost app does not guarantee a visible window** — Messages can stay frontmost after `Cmd+W` and still own the menu bar. If app activation logs show `activated ...` but nothing appears, check whether the app is already active with no regular window. The correct behavior is to reopen, not re-activate
 - **Shell command escaping** in Goku EDN requires two layers: shell escaping (`'\''`) then EDN escaping (`\\`, `\"`)
 - **State IDs** in `Karabiner2Exporter` — global starts at 1, fallback at 2, inactive is 0
 - **Karabiner key repeat** — Karabiner only allows key repeat for the **last** event in the `to` array. In sticky-mode shortcuts, always put key events (`:escape`, `:!Cz`, etc.) at the end and variable sets (`["leaderkey_sticky" 1]`) before them. Correct: `[["leaderkey_sticky" 1] :!Cz]`, wrong: `[:!Cz ["leaderkey_sticky" 1]]`
