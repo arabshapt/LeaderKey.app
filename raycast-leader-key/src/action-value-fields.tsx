@@ -10,7 +10,7 @@ import { useMemo, type Dispatch, type SetStateAction } from "react";
 import { IntelliJActionPicker } from "./intellij-action-picker.js";
 import { MenuFallbackPathsEditor } from "./menu-fallbacks-editor.js";
 import { MenuItemPicker } from "./menu-picker.js";
-import { menuAppPrefix, menuPathValue, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
+import { composeMenuDraftValue, menuAppPrefix, menuPathValue, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
 
 interface ActionValueFieldsProps {
   defaultMenuAppName?: string;
@@ -307,10 +307,7 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
             onChange={(value) =>
               setFormState((current) => ({
                 ...current,
-                menuValue: encodeMenuActionValue({
-                  appName: selectedMenuAppName,
-                  path: value,
-                }),
+                menuValue: composeMenuDraftValue(value, selectedMenuAppName),
               }))}
             title="Primary Menu Path"
             value={selectedMenuPath}

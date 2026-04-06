@@ -175,3 +175,11 @@ test("menu actions serialize fallback paths and intellij actions preserve delay 
   const intellijAction = formStateToActionNode(intellijState);
   assert.equal(intellijAction.value, "SaveAll,ReformatCode|150");
 });
+
+test("menu actions normalize in-progress draft spacing on save", () => {
+  const menuState = emptyFormState("menu");
+  menuState.menuValue = "Codex > file > open";
+
+  const menuAction = formStateToActionNode(menuState);
+  assert.equal(menuAction.value, "Codex > file > open");
+});

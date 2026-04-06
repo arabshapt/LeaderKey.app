@@ -1,4 +1,5 @@
 import {
+  encodeMenuActionValue,
   parseIntellijActionValue,
   parseMenuActionValue,
   type ActionNode,
@@ -90,11 +91,17 @@ export function formStateToActionNode(
         value: preservedAction?.type === "macro" ? preservedAction.value : "",
       };
     case "menu":
+      {
+        const parsedMenu = parseMenuActionValue(state.menuValue);
       return {
         ...baseAction,
         menuFallbackPaths: state.menuFallbackPaths.map((path) => path.trim()).filter(Boolean),
-        value: state.menuValue.trim(),
+        value: encodeMenuActionValue({
+          appName: parsedMenu.appName,
+          path: parsedMenu.path,
+        }),
       };
+      }
     case "shortcut":
       return { ...baseAction, value: state.shortcutValue.trim() };
     case "text":

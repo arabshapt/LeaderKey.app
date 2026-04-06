@@ -6,6 +6,7 @@ import {
   formatFullPath,
   itemToFormState,
   menuAppPrefix,
+  menuPathValue,
   normalizeConfigKey,
   parseTokenizedFullPath,
   recordToFormState,
@@ -115,6 +116,11 @@ test("replaceMenuAppPrefix preserves the rest of the menu path", () => {
   assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", "Arc", "Codex"), "Arc > File > Open Recent");
   assert.equal(replaceMenuAppPrefix("File > Open Recent", "Codex"), "Codex > File > Open Recent");
   assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", undefined, "Codex"), "File > Open Recent");
+});
+
+test("menuPathValue preserves in-progress manual menu path drafts", () => {
+  assert.equal(menuPathValue("Codex > file > ", "Codex"), "file > ");
+  assert.equal(menuPathValue("file > ", undefined), "file > ");
 });
 
 test("itemToFormState preserves menu fallback paths for menu actions", () => {

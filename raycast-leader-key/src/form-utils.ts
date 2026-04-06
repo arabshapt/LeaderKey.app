@@ -1,5 +1,4 @@
 import {
-  encodeMenuActionValue,
   parseMenuActionValue,
   resolveActionAiDescription,
   resolveActionDescription,
@@ -163,21 +162,29 @@ export function menuAppPrefix(value: string, candidateAppNames?: Iterable<string
   return Array.from(candidateAppNames).some((candidate) => candidate === prefix) ? prefix : undefined;
 }
 
-export function replaceMenuAppPrefix(value: string, appName: string | undefined, currentAppName?: string): string {
+export function composeMenuDraftValue(path: string, appName?: string): string {
   const nextAppName = appName?.trim();
+  if (!nextAppName) {
+    return path;
+  }
+
+  return path.length > 0 ? `${nextAppName} > ${path}` : `${nextAppName} > `;
+}
+
+export function replaceMenuAppPrefix(value: string, appName: string | undefined, currentAppName?: string): string {
   const path = menuPathValue(value, currentAppName);
-  return encodeMenuActionValue({ appName: nextAppName, path });
+  return composeMenuDraftValue(path, appName);
 }
 
 export function menuPathValue(value: string, currentAppName?: string): string {
   const currentPrefix = currentAppName?.trim();
   if (!currentPrefix) {
-    return value.trim();
+    return value;
   }
 
   const currentPrefixPattern = new RegExp(`^\\s*${currentPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*>\\s*(.*)$`);
   const match = value.match(currentPrefixPattern);
-  return match ? match[1]!.trim() : value.trim();
+  return match ? match[1] ?? "" : value;
 }
 
 export function parseKeystrokeRawValue(rawValue: string): KeystrokeFields {
