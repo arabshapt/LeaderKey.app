@@ -421,7 +421,7 @@ final class KarabinerUserCommandReceiver {
           return
         }
 
-        if Self.runningAppNeedsReopen(running) {
+        if Self.shouldCheckForReopen(running) && Self.runningAppNeedsReopen(running) {
           launchAppViaOpen(resolved.url)
           let action = toggle ? "open_app_toggle" : "open_app"
           debugLog(
@@ -449,6 +449,13 @@ final class KarabinerUserCommandReceiver {
 
   private static func activateRunningApp(_ runningApp: NSRunningApplication) -> Bool {
     runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+  }
+
+  private static func shouldCheckForReopen(_ runningApp: NSRunningApplication) -> Bool {
+    // The expensive window-state check is only needed when the target app is already
+    // active. That is the case where activate() can be a no-op while the app still
+    // owns the menu bar but has no visible windows, as with Messages after Cmd+W.
+    runningApp.isActive
   }
 
   static func runningAppHasRegularWindow(pid: pid_t, windowList: [[String: Any]]) -> Bool {
