@@ -141,4 +141,38 @@ final class KarabinerCommandRouterTests: XCTestCase {
     let payload: [String: Any] = ["command_line_arguments": ["stateid", 12]]
     XCTAssertNil(KarabinerCommandRouter.normalizeSendUserCommandPayload(payload))
   }
+
+  func testRunningAppHasRegularWindowMatchesTargetPIDAndStandardLayer() {
+    let windowList: [[String: Any]] = [
+      [
+        kCGWindowOwnerPID as String: NSNumber(value: 42),
+        kCGWindowLayer as String: NSNumber(value: 0),
+        kCGWindowBounds as String: ["Width": NSNumber(value: 900), "Height": NSNumber(value: 700)],
+      ]
+    ]
+
+    XCTAssertTrue(KarabinerUserCommandReceiver.runningAppHasRegularWindow(pid: 42, windowList: windowList))
+  }
+
+  func testRunningAppHasRegularWindowIgnoresTinyOrNonStandardWindows() {
+    let windowList: [[String: Any]] = [
+      [
+        kCGWindowOwnerPID as String: NSNumber(value: 42),
+        kCGWindowLayer as String: NSNumber(value: 1),
+        kCGWindowBounds as String: ["Width": NSNumber(value: 900), "Height": NSNumber(value: 700)],
+      ],
+      [
+        kCGWindowOwnerPID as String: NSNumber(value: 42),
+        kCGWindowLayer as String: NSNumber(value: 0),
+        kCGWindowBounds as String: ["Width": NSNumber(value: 1), "Height": NSNumber(value: 1)],
+      ],
+      [
+        kCGWindowOwnerPID as String: NSNumber(value: 7),
+        kCGWindowLayer as String: NSNumber(value: 0),
+        kCGWindowBounds as String: ["Width": NSNumber(value: 900), "Height": NSNumber(value: 700)],
+      ],
+    ]
+
+    XCTAssertFalse(KarabinerUserCommandReceiver.runningAppHasRegularWindow(pid: 42, windowList: windowList))
+  }
 }

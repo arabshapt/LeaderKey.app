@@ -421,6 +421,15 @@ final class KarabinerUserCommandReceiver {
           return
         }
 
+        if Self.runningAppNeedsReopen(running) {
+          launchAppViaOpen(resolved.url)
+          let action = toggle ? "open_app_toggle" : "open_app"
+          debugLog(
+            "[KarabinerUserCommandReceiver] \(action): reopened '\(app)' mode=\(lookup.strategy) reason=no_regular_window"
+          )
+          return
+        }
+
         if Self.activateRunningApp(running) {
           let action = toggle ? "open_app_toggle" : "open_app"
           debugLog("[KarabinerUserCommandReceiver] \(action): activated '\(app)' mode=\(lookup.strategy)")
@@ -440,6 +449,71 @@ final class KarabinerUserCommandReceiver {
 
   private static func activateRunningApp(_ runningApp: NSRunningApplication) -> Bool {
     runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+  }
+
+  static func runningAppHasRegularWindow(pid: pid_t, windowList: [[String: Any]]) -> Bool {
+    let targetPID = Int(pid)
+
+    return windowList.contains { windowInfo in
+      guard let ownerPID = (windowInfo[kCGWindowOwnerPID as String] as? NSNumber)?.intValue,
+            ownerPID == targetPID else {
+        return false
+      }
+
+      let layer = (windowInfo[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+      guard layer == 0 else { return false }
+
+      guard let bounds = windowInfo[kCGWindowBounds as String] as? [String: Any] else {
+        return true
+      }
+
+      let width = (bounds["Width"] as? NSNumber)?.doubleValue ?? 0
+      let height = (bounds["Height"] as? NSNumber)?.doubleValue ?? 0
+      return width > 1 && height > 1
+    }
+  }
+
+  private static func runningAppHasUsableAXWindow(pid: pid_t) -> Bool? {
+    let appElement = AXUIElementCreateApplication(pid)
+    var windowsRef: CFTypeRef?
+    let error = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+
+    guard error == .success else {
+      debugLog(
+        "[KarabinerUserCommandReceiver] app: AX window lookup failed for pid=\(pid) error=\(error.rawValue)"
+      )
+      return nil
+    }
+
+    guard let windows = windowsRef as? [AXUIElement] else { return false }
+
+    return windows.contains { window in
+      if let role = axGetString(window, attr: kAXRoleAttribute), role != kAXWindowRole as String {
+        return false
+      }
+
+      if let size = axGetSize(window, attr: kAXSizeAttribute),
+         size.width <= 1 || size.height <= 1 {
+        return false
+      }
+
+      return true
+    }
+  }
+
+  private static func runningAppNeedsReopen(_ runningApp: NSRunningApplication) -> Bool {
+    if let hasAXWindow = runningAppHasUsableAXWindow(pid: runningApp.processIdentifier) {
+      return !hasAXWindow
+    }
+
+    let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+    guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+      // If window inspection fails, preserve the reported Messages case where the app
+      // stays frontmost after closing its last window.
+      return runningApp.isActive
+    }
+
+    return !runningAppHasRegularWindow(pid: runningApp.processIdentifier, windowList: windowList)
   }
 
   private static func launchAppViaOpen(_ appURL: URL) {
@@ -565,6 +639,33 @@ final class KarabinerUserCommandReceiver {
       }
     }
     return nil
+  }
+
+  private static func axGetString(_ element: AXUIElement, attr: String) -> String? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
+          let str = ref as? String,
+          !str.isEmpty else {
+      return nil
+    }
+
+    return str
+  }
+
+  private static func axGetSize(_ element: AXUIElement, attr: String) -> CGSize? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
+          let ref,
+          CFGetTypeID(ref) == AXValueGetTypeID() else {
+      return nil
+    }
+
+    let value = unsafeBitCast(ref, to: AXValue.self)
+    guard AXValueGetType(value) == .cgSize else { return nil }
+
+    var size = CGSize.zero
+    guard AXValueGetValue(value, .cgSize, &size) else { return nil }
+    return size
   }
 
   /// Find a child element by title (direct children only)
