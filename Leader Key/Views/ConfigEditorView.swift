@@ -109,7 +109,8 @@ func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     var newAction = Action(
       key: action.key, type: action.type, label: action.label, description: action.description,
       aiDescription: action.aiDescription, value: action.value,
-      iconPath: action.iconPath, activates: action.activates, stickyMode: action.stickyMode,
+      iconPath: action.iconPath, activates: action.activates, menuFallbackPaths: action.menuFallbackPaths,
+      stickyMode: action.stickyMode,
       macroSteps: action.macroSteps)
     // Preserve metadata properties
     newAction.isFromFallback = action.isFromFallback

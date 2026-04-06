@@ -1,4 +1,12 @@
-import { resolveActionAiDescription, resolveActionDescription, type ConfigItem, type FlatIndexRecord, type MacroStep } from "@leaderkey/config-core";
+import {
+  encodeMenuActionValue,
+  parseMenuActionValue,
+  resolveActionAiDescription,
+  resolveActionDescription,
+  type ConfigItem,
+  type FlatIndexRecord,
+  type MacroStep,
+} from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
   ["left", "←"],
@@ -60,6 +68,7 @@ export interface ItemFormState {
   keystroke: KeystrokeFields;
   label: string;
   macroSteps: MacroStep[];
+  menuFallbackPaths: string[];
   menuValue: string;
   shortcutValue: string;
   stickyMode: boolean;
@@ -90,6 +99,7 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     keystroke: { focusTargetApp: false, spec: "" },
     label: "",
     macroSteps: [],
+    menuFallbackPaths: [],
     menuValue: "",
     shortcutValue: "",
     stickyMode: false,
@@ -141,8 +151,7 @@ export function parseTokenizedFullPath(value: string): ParsedTokenizedPath {
 }
 
 export function menuAppPrefix(value: string, candidateAppNames?: Iterable<string>): string | undefined {
-  const match = value.match(/^\s*([^>]+?)\s*>\s*(.*)$/);
-  const prefix = match?.[1]?.trim();
+  const prefix = parseMenuActionValue(value).appName?.trim();
   if (!prefix) {
     return undefined;
   }
@@ -155,19 +164,20 @@ export function menuAppPrefix(value: string, candidateAppNames?: Iterable<string
 }
 
 export function replaceMenuAppPrefix(value: string, appName: string | undefined, currentAppName?: string): string {
-  const currentPrefix = currentAppName?.trim();
-  const currentPrefixPattern = currentPrefix
-    ? new RegExp(`^\\s*${currentPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*>\\s*(.*)$`)
-    : undefined;
-  const match = currentPrefixPattern ? value.match(currentPrefixPattern) : undefined;
-  const suffix = match ? match[1]!.trim() : value.trim();
-  const normalizedAppName = appName?.trim();
+  const nextAppName = appName?.trim();
+  const path = menuPathValue(value, currentAppName);
+  return encodeMenuActionValue({ appName: nextAppName, path });
+}
 
-  if (!normalizedAppName) {
-    return suffix;
+export function menuPathValue(value: string, currentAppName?: string): string {
+  const currentPrefix = currentAppName?.trim();
+  if (!currentPrefix) {
+    return value.trim();
   }
 
-  return suffix ? `${normalizedAppName} > ${suffix}` : `${normalizedAppName} > `;
+  const currentPrefixPattern = new RegExp(`^\\s*${currentPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*>\\s*(.*)$`);
+  const match = value.match(currentPrefixPattern);
+  return match ? match[1]!.trim() : value.trim();
 }
 
 export function parseKeystrokeRawValue(rawValue: string): KeystrokeFields {
@@ -222,6 +232,7 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
     keystroke,
     label: record.actionType === "group" ? record.label ?? record.displayLabel ?? "" : "",
     macroSteps: [],
+    menuFallbackPaths: record.actionType === "menu" ? record.menuFallbackPaths ?? [] : [],
     menuValue: record.actionType === "menu" ? record.rawValue : "",
     shortcutValue: record.actionType === "shortcut" ? record.rawValue : "",
     stickyMode: record.stickyMode ?? false,
@@ -254,6 +265,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
     fullPath: item.key ? formatFullPath([item.key]) : "",
     label: "",
     macroSteps: item.type === "macro" ? cloneMacroActionSteps(item.macroSteps) : [],
+    menuFallbackPaths: item.type === "menu" ? [...(item.menuFallbackPaths ?? [])] : [],
     stickyMode: item.stickyMode ?? false,
     type: item.type,
   };

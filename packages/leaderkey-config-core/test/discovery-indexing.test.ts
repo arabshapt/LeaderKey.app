@@ -36,6 +36,7 @@ test("discovers live configs, respects custom names, and indexes merged fallback
         actions: [
           {
             key: "d",
+            menuFallbackPaths: ["Tab > Clone Tab", "Window > Duplicate Tab"],
             type: "menu",
             value: "Google Chrome > Tab > Duplicate Tab",
           },
@@ -95,11 +96,12 @@ test("discovers live configs, respects custom names, and indexes merged fallback
   assert.equal(inheritedChromeRecord.inherited, true);
   assert.equal(inheritedChromeRecord.sourceConfigDisplayName, "Fallback App Config");
   assert.deepEqual(inheritedChromeRecord.sourceNodePath, [0, 0]);
+  assert.deepEqual(inheritedChromeRecord.menuFallbackPaths, ["Tab > Clone Tab", "Window > Duplicate Tab"]);
+  assert.match(inheritedChromeRecord.searchText, /clone tab/);
 
   const searchResult = expectRecord(
-    searchRecords(payload.records, "duplicate tab").find((record) => record.id === inheritedChromeRecord.id),
-    "expected duplicate tab query to find inherited record",
+    searchRecords(payload.records, "clone tab").find((record) => record.id === inheritedChromeRecord.id),
+    "expected fallback menu query to find inherited record",
   );
   assert.equal(searchResult.displayLabel, "Tab → Duplicate Tab");
 });
-

@@ -159,3 +159,19 @@ test("macro validation rejects invalid nested step delay", () => {
 
   assert.equal(validateActionNode(invalidMacro), "Step 1: Delay must be a non-negative number.");
 });
+
+test("menu actions serialize fallback paths and intellij actions preserve delay encoding", () => {
+  const menuState = emptyFormState("menu");
+  menuState.menuValue = "Codex > View > Show Sidebar";
+  menuState.menuFallbackPaths = ["View > Hide Sidebar", "Window > Toggle Sidebar"];
+
+  const menuAction = formStateToActionNode(menuState);
+  assert.deepEqual(menuAction.menuFallbackPaths, ["View > Hide Sidebar", "Window > Toggle Sidebar"]);
+  assert.equal(menuAction.value, "Codex > View > Show Sidebar");
+
+  const intellijState = emptyFormState("intellij");
+  intellijState.intellijValue = "SaveAll,ReformatCode|150";
+
+  const intellijAction = formStateToActionNode(intellijState);
+  assert.equal(intellijAction.value, "SaveAll,ReformatCode|150");
+});

@@ -1,8 +1,16 @@
-import { Form } from "@raycast/api";
-import type { InstalledApp } from "@leaderkey/config-core";
+import { Action, Form, Icon } from "@raycast/api";
+import {
+  encodeIntellijActionValue,
+  encodeMenuActionValue,
+  parseIntellijActionValue,
+  type InstalledApp,
+} from "@leaderkey/config-core";
 import { useMemo, type Dispatch, type SetStateAction } from "react";
 
-import { menuAppPrefix, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
+import { IntelliJActionPicker } from "./intellij-action-picker.js";
+import { MenuFallbackPathsEditor } from "./menu-fallbacks-editor.js";
+import { MenuItemPicker } from "./menu-picker.js";
+import { menuAppPrefix, menuPathValue, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
 
 interface ActionValueFieldsProps {
   defaultMenuAppName?: string;
@@ -10,6 +18,107 @@ interface ActionValueFieldsProps {
   installedApps: InstalledApp[];
   setFormState: Dispatch<SetStateAction<ItemFormState>>;
   valueFieldError?: string;
+}
+
+interface ActionValueFieldActionsProps {
+  defaultMenuAppName?: string;
+  formState: ItemFormState;
+  installedApps: InstalledApp[];
+  setFormState: Dispatch<SetStateAction<ItemFormState>>;
+}
+
+function normalizeCommaSeparatedActions(value: string): string[] {
+  return value.split(",").map((action) => action.trim()).filter(Boolean);
+}
+
+export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
+  const { defaultMenuAppName, formState, installedApps, setFormState } = props;
+  const knownMenuAppNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const app of installedApps) {
+      names.add(app.name);
+    }
+    if (defaultMenuAppName) {
+      names.add(defaultMenuAppName);
+    }
+    const literalParts = formState.menuValue.split(" > ").map((part) => part.trim()).filter(Boolean);
+    if (literalParts.length > 2 || formState.menuValue.trim().endsWith(">")) {
+      const rawAppName = menuAppPrefix(formState.menuValue);
+      if (rawAppName) {
+        names.add(rawAppName);
+      }
+    }
+    return Array.from(names);
+  }, [defaultMenuAppName, formState.menuValue, installedApps]);
+  const selectedMenuAppName = useMemo(
+    () => menuAppPrefix(formState.menuValue, knownMenuAppNames),
+    [formState.menuValue, knownMenuAppNames],
+  );
+  const parsedIntellij = useMemo(() => parseIntellijActionValue(formState.intellijValue), [formState.intellijValue]);
+
+  return (
+    <>
+      {formState.type === "menu" && selectedMenuAppName ? (
+        <Action.Push
+          icon={Icon.MagnifyingGlass}
+          target={
+            <MenuItemPicker
+              appName={selectedMenuAppName}
+              onSelect={(path) =>
+                setFormState((current) => {
+                  return {
+                    ...current,
+                    menuValue: encodeMenuActionValue({
+                      appName: selectedMenuAppName,
+                      path,
+                    }),
+                  };
+                })}
+              title="Search Menu Items"
+            />
+          }
+          title="Search Menu Items"
+        />
+      ) : null}
+      {formState.type === "menu" ? (
+        <Action.Push
+          icon={Icon.List}
+          target={
+            <MenuFallbackPathsEditor
+              appName={selectedMenuAppName}
+              initialPaths={formState.menuFallbackPaths}
+              onChange={(menuFallbackPaths) => setFormState((current) => ({ ...current, menuFallbackPaths }))}
+              title="Edit Fallback Menu Paths"
+            />
+          }
+          title="Edit Fallback Menu Paths"
+        />
+      ) : null}
+      {formState.type === "intellij" ? (
+        <Action.Push
+          icon={Icon.MagnifyingGlass}
+          target={
+            <IntelliJActionPicker
+              currentActionIds={parsedIntellij.actionIds}
+              onAppend={(actionId) =>
+                setFormState((current) => {
+                  const parsed = parseIntellijActionValue(current.intellijValue);
+                  return {
+                    ...current,
+                    intellijValue: encodeIntellijActionValue({
+                      actionIds: [...parsed.actionIds, actionId],
+                      delayMs: parsed.delayMs,
+                    }),
+                  };
+                })}
+              title="Search IntelliJ Actions"
+            />
+          }
+          title="Search IntelliJ Actions"
+        />
+      ) : null}
+    </>
+  );
 }
 
 export function ActionValueFields(props: ActionValueFieldsProps) {
@@ -23,12 +132,24 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
     if (defaultMenuAppName) {
       names.add(defaultMenuAppName);
     }
+    const literalParts = formState.menuValue.split(" > ").map((part) => part.trim()).filter(Boolean);
+    if (literalParts.length > 2 || formState.menuValue.trim().endsWith(">")) {
+      const rawAppName = menuAppPrefix(formState.menuValue);
+      if (rawAppName) {
+        names.add(rawAppName);
+      }
+    }
     return Array.from(names).sort((left, right) => left.localeCompare(right));
-  }, [defaultMenuAppName, installedApps]);
+  }, [defaultMenuAppName, formState.menuValue, installedApps]);
+  const parsedIntellij = useMemo(() => parseIntellijActionValue(formState.intellijValue), [formState.intellijValue]);
   const selectedMenuAppName = menuAppPrefix(formState.menuValue, knownMenuAppNames);
+  const selectedMenuPath = menuPathValue(formState.menuValue, selectedMenuAppName);
   const selectedMenuAppValue = selectedMenuAppName
     ? installedApps.find((app) => app.name === selectedMenuAppName)?.bundlePath ?? `__current__:${selectedMenuAppName}`
     : "__none__";
+  const fallbackSummary = formState.menuFallbackPaths.length > 0
+    ? formState.menuFallbackPaths.map((path, index) => `${index + 1}. ${path}`).join("\n")
+    : "No fallback menu paths.";
 
   return (
     <>
@@ -151,7 +272,7 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
           <Form.Dropdown
             filtering
             id="menuApp"
-            info="Selecting an app only rewrites the leading app prefix."
+            info="Selecting an app rewrites only the app prefix. Live menu search uses the selected app."
             onChange={(value) => {
               const nextAppName = value === "__none__"
                 ? undefined
@@ -170,17 +291,33 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
             {selectedMenuAppName && !installedApps.some((app) => app.name === selectedMenuAppName) ? (
               <Form.Dropdown.Item title={`${selectedMenuAppName} (Current)`} value={`__current__:${selectedMenuAppName}`} />
             ) : null}
+            {knownMenuAppNames
+              .filter((appName) => !installedApps.some((app) => app.name === appName))
+              .map((appName) => (
+                <Form.Dropdown.Item key={`manual-${appName}`} title={`${appName} (Typed)`} value={`__current__:${appName}`} />
+              ))}
             {installedApps.map((app) => (
               <Form.Dropdown.Item key={app.bundlePath} title={app.name} value={app.bundlePath} />
             ))}
           </Form.Dropdown>
           <Form.TextField
             error={valueFieldError}
-            id="menuValue"
-            info="Stored as App > Menu > Item. Use the app picker above to set the prefix quickly."
-            onChange={(value) => setFormState((current) => ({ ...current, menuValue: value }))}
-            title="Menu Path"
-            value={formState.menuValue}
+            id="menuPrimaryPath"
+            info="Stored as App > Menu > Item. The app prefix comes from the picker above."
+            onChange={(value) =>
+              setFormState((current) => ({
+                ...current,
+                menuValue: encodeMenuActionValue({
+                  appName: selectedMenuAppName,
+                  path: value,
+                }),
+              }))}
+            title="Primary Menu Path"
+            value={selectedMenuPath}
+          />
+          <Form.Description
+            text={fallbackSummary}
+            title="Fallback Menu Paths"
           />
         </>
       ) : null}
@@ -196,13 +333,46 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
       ) : null}
 
       {formState.type === "intellij" ? (
-        <Form.TextField
-          error={valueFieldError}
-          id="intellijValue"
-          onChange={(value) => setFormState((current) => ({ ...current, intellijValue: value }))}
-          title="IntelliJ Actions"
-          value={formState.intellijValue}
-        />
+        <>
+          <Form.TextArea
+            error={valueFieldError}
+            id="intellijActions"
+            info="Use search to append known actions, or edit the comma-separated IDs directly."
+            onChange={(value) =>
+              setFormState((current) => {
+                const parsed = parseIntellijActionValue(current.intellijValue);
+                return {
+                  ...current,
+                  intellijValue: encodeIntellijActionValue({
+                    actionIds: normalizeCommaSeparatedActions(value),
+                    delayMs: parsed.delayMs,
+                  }),
+                };
+              })}
+            title="IntelliJ Actions"
+            value={parsedIntellij.actionIds.join(", ")}
+          />
+          <Form.TextField
+            error={valueFieldError}
+            id="intellijDelay"
+            info="Optional delay in milliseconds between IntelliJ actions."
+            onChange={(value) =>
+              setFormState((current) => {
+                const parsed = parseIntellijActionValue(current.intellijValue);
+                const trimmed = value.trim();
+                const nextDelayMs = trimmed ? Number.parseInt(trimmed, 10) : undefined;
+                return {
+                  ...current,
+                  intellijValue: encodeIntellijActionValue({
+                    actionIds: parsed.actionIds,
+                    delayMs: Number.isFinite(nextDelayMs) ? nextDelayMs : undefined,
+                  }),
+                };
+              })}
+            title="Delay (ms)"
+            value={parsedIntellij.delayMs !== undefined ? String(parsedIntellij.delayMs) : ""}
+          />
+        </>
       ) : null}
     </>
   );

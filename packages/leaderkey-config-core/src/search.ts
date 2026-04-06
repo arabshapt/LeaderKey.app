@@ -168,6 +168,11 @@ function prepareFields(record: FlatIndexRecord, context?: SearchContext): Prepar
       value: normalizeText(record.rawValue),
       weight: 220,
     },
+    {
+      compact: compactText(record.menuFallbackPaths?.join(" ") ?? ""),
+      value: normalizeText(record.menuFallbackPaths?.join(" ") ?? ""),
+      weight: 240,
+    },
   ];
 
   return fields.filter((field) => field.value || field.compact);

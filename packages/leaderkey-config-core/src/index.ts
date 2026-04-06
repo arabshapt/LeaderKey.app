@@ -10,7 +10,8 @@ export { findInstalledApps } from "./apps.js";
 export { configFingerprint, discoverLiveConfigs, loadGroupFromFile, loadMetadata, saveMetadata } from "./discovery.js";
 export { buildEditorCommand, openInEditor } from "./editors.js";
 export { buildCachePayload, recordsForConfig } from "./indexing.js";
-export { triggerLeaderKeyConfigReload } from "./leaderkey.js";
+export { encodeIntellijActionValue, encodeMenuActionValue, parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
+export { listLeaderKeyMenuItems, triggerLeaderKeyConfigReload } from "./leaderkey.js";
 export {
   createItemAtPath,
   appendChildToGroup,
@@ -37,6 +38,7 @@ export {
 } from "./labels.js";
 export type { InstalledApp } from "./apps.js";
 export type { AppConfigTemplateSource, CreateAppConfigOptions } from "./app-configs.js";
+export type { ParsedIntellijActionValue, ParsedMenuActionValue } from "./action-values.js";
 export type {
   ActionNode,
   CachePayload,
@@ -53,3 +55,4 @@ export type {
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";
 export type { RecordPathValidationResult, ValidateRecordPathOptions } from "./path-validation.js";
+export type { LeaderKeyMenuItem } from "./leaderkey.js";

@@ -4,6 +4,20 @@ import Foundation
 enum KarabinerCommandRouter {
   static func route(command: String, delegate: UnixSocketServerDelegate?) -> String {
     let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if trimmedCommand.lowercased().hasPrefix("menu-items") {
+      let payloadStart = trimmedCommand.index(trimmedCommand.startIndex, offsetBy: "menu-items".count)
+      let payloadText = trimmedCommand[payloadStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let payloadData = payloadText.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+            let appName = (payload["app"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !appName.isEmpty else {
+        return "ERROR: menu-items requires a JSON payload with an app name"
+      }
+
+      return KarabinerUserCommandReceiver.listMenuItemsJSON(app: appName)
+    }
+
     let parts = trimmedCommand.split(separator: " ")
 
     guard !parts.isEmpty else {

@@ -56,6 +56,24 @@ enum URLPlaceholderExpander {
 }
 
 final class KarabinerUserCommandReceiver {
+  private struct MenuInventoryItem: Encodable {
+    let appName: String
+    let enabled: Bool
+    let path: String
+    let title: String
+  }
+
+  private struct MenuInventoryResponse: Encodable {
+    let app: String
+    let items: [MenuInventoryItem]
+  }
+
+  private enum MenuSelectionResult {
+    case success
+    case notFound(String)
+    case pressFailed(String)
+  }
+
   private let receiverQueue = DispatchQueue(label: "com.leaderkey.usercommand.receiver")
   private var socketHandle: Int32 = -1
   private var readSource: DispatchSourceRead?
@@ -233,7 +251,10 @@ final class KarabinerUserCommandReceiver {
         debugLog("[KarabinerUserCommandReceiver] v1 menu missing 'app' or 'path'")
         return
       }
-      selectMenuItem(app: app, path: path)
+      let fallbackPaths = (dict["fallbackPaths"] as? [String])?
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty } ?? []
+      Self.selectMenuItemImpl(app: app, path: path, fallbackPaths: fallbackPaths)
 
     case "intellij":
       guard let action = dict["action"] as? String else {
@@ -561,64 +582,110 @@ final class KarabinerUserCommandReceiver {
   // MARK: - Menu item selection (AX API)
 
   /// Public entry point for direct calls (e.g. from Controller)
-  static func selectMenuItemDirectly(app appName: String, path: String) {
-    selectMenuItemImpl(app: appName, path: path)
+  static func selectMenuItemDirectly(app appName: String, path: String, fallbackPaths: [String] = []) {
+    selectMenuItemImpl(app: appName, path: path, fallbackPaths: fallbackPaths)
+  }
+
+  static func listMenuItemsJSON(app appName: String) -> String {
+    guard let running = Self.findRunningApp(appName) else {
+      return "ERROR: App not running: \(appName)"
+    }
+
+    let appElement = AXUIElementCreateApplication(running.processIdentifier)
+    var menuBarRef: CFTypeRef?
+    let err = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarRef)
+    guard err == .success, let menuBarRef else {
+      return "ERROR: No menu bar for \(appName) (AXError \(err.rawValue))"
+    }
+    let menuBar = unsafeBitCast(menuBarRef, to: AXUIElement.self)
+
+    var seenPaths = Set<String>()
+    var items: [MenuInventoryItem] = []
+    _ = Self.collectLeafMenuItems(
+      from: menuBar,
+      appName: appName,
+      currentPath: [],
+      results: &items,
+      seenPaths: &seenPaths)
+    items.sort { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
+
+    let response = MenuInventoryResponse(app: appName, items: items)
+    let encoder = JSONEncoder()
+    guard let data = try? encoder.encode(response),
+          let json = String(data: data, encoding: .utf8) else {
+      return "ERROR: Failed to encode menu inventory"
+    }
+
+    return json
   }
 
   private func selectMenuItem(app appName: String, path: String) {
-    Self.selectMenuItemImpl(app: appName, path: path)
+    Self.selectMenuItemImpl(app: appName, path: path, fallbackPaths: [])
   }
 
-  private static func selectMenuItemImpl(app appName: String, path: String) {
-    let pid: pid_t
-    if let running = Self.findRunningApp(appName) {
-      pid = running.processIdentifier
-    } else {
+  private static func selectMenuItemImpl(app appName: String, path: String, fallbackPaths: [String]) {
+    guard let running = Self.findRunningApp(appName) else {
       debugLog("[menu] app not running: \(appName)")
       return
     }
 
-    // Parse menu path: supports ">" and "/" delimiters
-    let parts = Self.splitMenuPath(path)
-    guard !parts.isEmpty else {
-      debugLog("[menu] empty path")
-      return
-    }
-
     DispatchQueue.global(qos: .userInitiated).async {
-      let appElement = AXUIElementCreateApplication(pid)
+      let appElement = AXUIElementCreateApplication(running.processIdentifier)
 
       var menuBarRef: CFTypeRef?
       let err = AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarRef)
-      guard err == .success, let menuBar = menuBarRef else {
+      guard err == .success, let menuBarRef else {
         debugLog("[menu] no menu bar for \(appName) (AXError \(err.rawValue))")
         return
       }
+      let menuBar = unsafeBitCast(menuBarRef, to: AXUIElement.self)
 
-      // First component: descendant search (depth 6) to handle inconsistent menu structures
-      guard let first = Self.axFindDescendant(menuBar as! AXUIElement, title: parts[0], depth: 6) else {
-        let tops = Self.axChildTitles(menuBar as! AXUIElement)
-        debugLog("[menu] part not found: '\(parts[0])' in [\(tops.joined(separator: ", "))]")
-        return
-      }
-
-      // Remaining components: descendant search at each level
-      var current: AXUIElement = first
-      for i in 1..<parts.count {
-        guard let next = Self.axFindDescendant(current, title: parts[i], depth: 6) else {
-          debugLog("[menu] part not found: '\(parts[i])'")
+      for (index, candidatePath) in ([path] + fallbackPaths).enumerated() {
+        switch Self.selectMenuItem(menuBar: menuBar, appName: appName, path: candidatePath) {
+        case .success:
+          if index > 0 {
+            debugLog("[menu] ok via fallback[\(index)]: \(appName) > \(candidatePath)")
+          }
+          return
+        case .notFound(let message):
+          if index == fallbackPaths.count {
+            debugLog(message)
+          }
+          continue
+        case .pressFailed(let message):
+          debugLog(message)
           return
         }
-        current = next
-      }
-
-      let pressErr = AXUIElementPerformAction(current, kAXPressAction as CFString)
-      if pressErr != .success {
-        debugLog("[menu] press failed (AXError \(pressErr.rawValue))")
-      } else {
-        debugLog("[menu] ok: \(appName) > \(path)")
       }
     }
+  }
+
+  private static func selectMenuItem(menuBar: AXUIElement, appName: String, path: String) -> MenuSelectionResult {
+    let parts = Self.splitMenuPath(path)
+    guard !parts.isEmpty else {
+      return .notFound("[menu] empty path")
+    }
+
+    guard let first = Self.axFindDescendant(menuBar, title: parts[0], depth: 6) else {
+      let tops = Self.axChildTitles(menuBar)
+      return .notFound("[menu] part not found: '\(parts[0])' in [\(tops.joined(separator: ", "))]")
+    }
+
+    var current: AXUIElement = first
+    for i in 1..<parts.count {
+      guard let next = Self.axFindDescendant(current, title: parts[i], depth: 6) else {
+        return .notFound("[menu] part not found: '\(parts[i])' for \(appName) > \(path)")
+      }
+      current = next
+    }
+
+    let pressErr = AXUIElementPerformAction(current, kAXPressAction as CFString)
+    if pressErr != .success {
+      return .pressFailed("[menu] press failed for \(appName) > \(path) (AXError \(pressErr.rawValue))")
+    }
+
+    debugLog("[menu] ok: \(appName) > \(path)")
+    return .success
   }
 
   /// Split menu path by ">" or "/" delimiter, trimming whitespace
@@ -659,6 +726,19 @@ final class KarabinerUserCommandReceiver {
     return str
   }
 
+  private static func axGetBool(_ element: AXUIElement, attr: String) -> Bool? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success else {
+      return nil
+    }
+
+    if let number = ref as? NSNumber {
+      return number.boolValue
+    }
+
+    return nil
+  }
+
   private static func axGetSize(_ element: AXUIElement, attr: String) -> CGSize? {
     var ref: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
@@ -676,11 +756,15 @@ final class KarabinerUserCommandReceiver {
   }
 
   /// Find a child element by title (direct children only)
-  private static func axFindChild(_ parent: AXUIElement, title: String) -> AXUIElement? {
+  private static func axChildren(_ parent: AXUIElement) -> [AXUIElement] {
     var childrenRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-          let children = childrenRef as? [AXUIElement] else { return nil }
-    for child in children {
+          let children = childrenRef as? [AXUIElement] else { return [] }
+    return children
+  }
+
+  private static func axFindChild(_ parent: AXUIElement, title: String) -> AXUIElement? {
+    for child in axChildren(parent) {
       if let t = axGetTitle(child), t == title { return child }
     }
     return nil
@@ -692,10 +776,7 @@ final class KarabinerUserCommandReceiver {
     // Check direct children first
     if let direct = axFindChild(parent, title: title) { return direct }
     // Recurse into children
-    var childrenRef: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-          let children = childrenRef as? [AXUIElement] else { return nil }
-    for child in children {
+    for child in axChildren(parent) {
       if let found = axFindDescendant(child, title: title, depth: depth - 1) { return found }
     }
     return nil
@@ -703,10 +784,51 @@ final class KarabinerUserCommandReceiver {
 
   /// Get titles of direct children (for debug logging on failure)
   private static func axChildTitles(_ parent: AXUIElement) -> [String] {
-    var childrenRef: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(parent, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-          let children = childrenRef as? [AXUIElement] else { return [] }
-    return children.compactMap { axGetTitle($0) }
+    return axChildren(parent).compactMap { axGetTitle($0) }
+  }
+
+  @discardableResult
+  private static func collectLeafMenuItems(
+    from element: AXUIElement,
+    appName: String,
+    currentPath: [String],
+    results: inout [MenuInventoryItem],
+    seenPaths: inout Set<String>
+  ) -> Bool {
+    let role = axGetString(element, attr: kAXRoleAttribute)
+    let rawTitle = axGetTitle(element)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = rawTitle?.isEmpty == false ? rawTitle : nil
+    let nextPath = (title != nil && role != kAXMenuBarRole as String) ? currentPath + [title!] : currentPath
+
+    var foundLeafInChildren = false
+    for child in axChildren(element) {
+      if collectLeafMenuItems(
+        from: child,
+        appName: appName,
+        currentPath: nextPath,
+        results: &results,
+        seenPaths: &seenPaths)
+      {
+        foundLeafInChildren = true
+      }
+    }
+
+    let isLeafMenuItem = role == kAXMenuItemRole as String && title != nil && !nextPath.isEmpty && !foundLeafInChildren
+    if isLeafMenuItem {
+      let path = nextPath.joined(separator: " > ")
+      if seenPaths.insert(path).inserted {
+        results.append(
+          MenuInventoryItem(
+            appName: appName,
+            enabled: axGetBool(element, attr: kAXEnabledAttribute) ?? true,
+            path: path,
+            title: title!
+          ))
+      }
+      return true
+    }
+
+    return foundLeafInChildren
   }
 
   private static func defaultSocketPath() -> String {

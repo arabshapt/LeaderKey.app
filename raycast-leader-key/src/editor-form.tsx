@@ -30,7 +30,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { formStateToActionNode, validateActionNode } from "./action-form.js";
-import { ActionValueFields } from "./action-value-fields.js";
+import { ActionValueFieldActions, ActionValueFields } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
 import {
   emptyFormState,
@@ -564,6 +564,12 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     <Form
       actions={
         <ActionPanel>
+          <ActionValueFieldActions
+            defaultMenuAppName={defaultMenuAppName}
+            formState={formState}
+            installedApps={installedApps}
+            setFormState={setFormState}
+          />
           {formState.type === "macro" ? (
             <Action.Push
               icon={Icon.List}

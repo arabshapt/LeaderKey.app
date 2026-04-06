@@ -462,7 +462,11 @@ class Controller {
       let appName = parts[0].trimmingCharacters(in: .whitespaces)
       let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
       // Send as v1 payload to the receiver for AX-based menu clicking
-      KarabinerUserCommandReceiver.selectMenuItemDirectly(app: appName, path: menuPath)
+      KarabinerUserCommandReceiver.selectMenuItemDirectly(
+        app: appName,
+        path: menuPath,
+        fallbackPaths: action.menuFallbackPaths ?? []
+      )
     case .intellij:
       // Value is action ID(s) e.g. "ReformatCode" or "SaveAll,ReformatCode"
       KarabinerUserCommandReceiver.sendToIntelliJSocket(action: action.value)

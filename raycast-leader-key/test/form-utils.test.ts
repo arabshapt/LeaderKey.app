@@ -4,11 +4,12 @@ import test from "node:test";
 import {
   emptyFormState,
   formatFullPath,
+  itemToFormState,
   menuAppPrefix,
   normalizeConfigKey,
   parseTokenizedFullPath,
-  replaceMenuAppPrefix,
   recordToFormState,
+  replaceMenuAppPrefix,
 } from "../src/form-utils.js";
 
 test("emptyFormState returns blank default action fields", () => {
@@ -103,6 +104,7 @@ test("formatFullPath renders special keys as tokenized aliases", () => {
 
 test("menuAppPrefix extracts the leading app name from menu values", () => {
   assert.equal(menuAppPrefix("Codex > File > Open Recent"), "Codex");
+  assert.equal(menuAppPrefix("Codex > "), "Codex");
   assert.equal(menuAppPrefix(" Google Chrome > History "), "Google Chrome");
   assert.equal(menuAppPrefix("File > Open", ["Codex", "Google Chrome"]), undefined);
   assert.equal(menuAppPrefix(""), undefined);
@@ -113,4 +115,16 @@ test("replaceMenuAppPrefix preserves the rest of the menu path", () => {
   assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", "Arc", "Codex"), "Arc > File > Open Recent");
   assert.equal(replaceMenuAppPrefix("File > Open Recent", "Codex"), "Codex > File > Open Recent");
   assert.equal(replaceMenuAppPrefix("Codex > File > Open Recent", undefined, "Codex"), "File > Open Recent");
+});
+
+test("itemToFormState preserves menu fallback paths for menu actions", () => {
+  const state = itemToFormState({
+    key: "m",
+    menuFallbackPaths: ["View > Hide Sidebar", "Window > Toggle Sidebar"],
+    type: "menu",
+    value: "Codex > View > Show Sidebar",
+  });
+
+  assert.deepEqual(state.menuFallbackPaths, ["View > Hide Sidebar", "Window > Toggle Sidebar"]);
+  assert.equal(state.menuValue, "Codex > View > Show Sidebar");
 });

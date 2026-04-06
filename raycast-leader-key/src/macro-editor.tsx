@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { type MacroStepActionType, cloneMacroSteps, createEmptyMacroStep, formStateToActionNode, validateActionNode } from "./action-form.js";
-import { ActionValueFields } from "./action-value-fields.js";
+import { ActionValueFieldActions, ActionValueFields } from "./action-value-fields.js";
 import { itemToFormState, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
 
 const MACRO_STEP_TYPE_OPTIONS: Array<{ title: string; value: MacroStepActionType }> = [
@@ -324,6 +324,12 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
     <Form
       actions={
         <ActionPanel>
+          <ActionValueFieldActions
+            defaultMenuAppName={defaultMenuAppName}
+            formState={formState}
+            installedApps={installedApps}
+            setFormState={setFormState}
+          />
           <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title="Save Step" />
           {formState.type === "macro" ? (
             <Action.Push

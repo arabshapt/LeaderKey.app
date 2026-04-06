@@ -456,17 +456,18 @@ export function cloneRecordToConfigItem(record: FlatIndexRecord): ConfigItem {
     };
   }
 
-  return {
-    activates: record.activates,
-    aiDescription: record.aiDescription,
-    description: record.description,
-    key: record.key,
-    label: record.label,
-    stickyMode: record.stickyMode,
-    type: record.actionType as ActionNode["type"],
-    value: record.rawValue,
-  };
-}
+    return {
+      activates: record.activates,
+      aiDescription: record.aiDescription,
+      description: record.description,
+      key: record.key,
+      label: record.label,
+      menuFallbackPaths: record.menuFallbackPaths,
+      stickyMode: record.stickyMode,
+      type: record.actionType as ActionNode["type"],
+      value: record.rawValue,
+    };
+  }
 
 export async function openConfigLocation(record: FlatIndexRecord): Promise<string> {
   return record.inherited && record.sourceConfigDisplayName === FALLBACK_CONFIG_DISPLAY_NAME

@@ -1,4 +1,4 @@
-import type { FlatIndexRecord } from "@leaderkey/config-core";
+import { parseIntellijActionValue, parseMenuActionValue, type FlatIndexRecord } from "@leaderkey/config-core";
 
 import { fullPathText } from "./record-formatting.js";
 
@@ -17,11 +17,6 @@ interface ParsedKeystrokeValue {
   app?: string;
   focusTargetApp: boolean;
   spec: string;
-}
-
-interface ParsedIntellijValue {
-  actions: string[];
-  delayMs?: number;
 }
 
 function escapeInlineCode(value: string): string {
@@ -83,16 +78,12 @@ function parseKeystrokeValue(rawValue: string): ParsedKeystrokeValue {
   return { app, focusTargetApp, spec };
 }
 
-function parseIntellijValue(rawValue: string): ParsedIntellijValue {
-  const [actionsPart, delayPart] = rawValue.split("|");
-  const actions = actionsPart
-    .split(",")
-    .map((action) => action.trim())
-    .filter(Boolean)
-    .map((action) => action.replace(/([a-z0-9])([A-Z])/g, "$1 $2"));
-
-  const delayMs = delayPart ? Number.parseInt(delayPart, 10) : undefined;
-  return { actions, delayMs: Number.isFinite(delayMs) ? delayMs : undefined };
+function parseIntellijValue(rawValue: string): { actions: string[]; delayMs?: number } {
+  const parsed = parseIntellijActionValue(rawValue);
+  return {
+    actions: parsed.actionIds.map((action) => action.replace(/([a-z0-9])([A-Z])/g, "$1 $2")),
+    delayMs: parsed.delayMs,
+  };
 }
 
 function plainEnglishSummary(record: FlatIndexRecord): string {
@@ -125,7 +116,9 @@ function plainEnglishSummary(record: FlatIndexRecord): string {
       return `Runs a macro with ${count} enabled step${count === 1 ? "" : "s"} shown in the preview below.`;
     }
     case "menu":
-      return "Selects this menu item in the target application.";
+      return record.menuFallbackPaths?.length
+        ? "Selects this menu item in the target application and can retry ordered fallback menu paths if the primary path is missing."
+        : "Selects this menu item in the target application.";
     case "shortcut":
       return `Sends ${record.valuePreview || record.displayLabel.replace(/^Shortcut:\s*/i, "")} to the frontmost app.`;
     case "text":
@@ -158,7 +151,16 @@ function valueSection(record: FlatIndexRecord): string[] {
     case "text":
       return ["**Value**", "", codeBlock(record.rawValue)];
     case "menu":
-      return ["**Value**", "", codeBlock(record.rawValue)];
+      return [
+        "**Value**",
+        "",
+        `Primary: \`${parseMenuActionValue(record.rawValue).path || record.rawValue}\``,
+        ...(record.menuFallbackPaths?.length
+          ? ["Fallbacks:", ...record.menuFallbackPaths.map((path) => `- \`${escapeInlineCode(path)}\``)]
+          : []),
+        "",
+        codeBlock(record.rawValue),
+      ];
     case "intellij": {
       const parsed = parseIntellijValue(record.rawValue);
       const lines = [
@@ -247,6 +249,10 @@ function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
 
   if (record.macroStepSummary && record.macroStepSummary.length > 0) {
     rows.push({ title: "Enabled Steps", text: String(record.macroStepSummary.length) });
+  }
+
+  if (record.menuFallbackPaths && record.menuFallbackPaths.length > 0) {
+    rows.push({ title: "Fallback Menu Paths", text: record.menuFallbackPaths.join(" | ") });
   }
 
   if (record.description) {

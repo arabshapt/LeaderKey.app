@@ -1,5 +1,6 @@
 import { URL } from "node:url";
 
+import { parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
 import { humanizeShortcutSequence, humanizeSlug, snippet } from "./utils.js";
 import type { ActionNode, GroupNode, ItemContext, MacroStep } from "./types.js";
 
@@ -7,11 +8,6 @@ interface ParsedKeystrokeValue {
   app?: string;
   focusTargetApp: boolean;
   spec: string;
-}
-
-interface ParsedIntellijValue {
-  actions: string[];
-  delayMs?: number;
 }
 
 const GROUP_LABELS = new Map<string, string>([
@@ -46,16 +42,12 @@ function parseKeystrokeValue(rawValue: string): ParsedKeystrokeValue {
   return { app, focusTargetApp, spec };
 }
 
-function parseIntellijValue(rawValue: string): ParsedIntellijValue {
-  const [actionsPart, delayPart] = rawValue.split("|");
-  const actions = actionsPart
-    .split(",")
-    .map((action) => action.trim())
-    .filter(Boolean)
-    .map((action) => action.replace(/([a-z0-9])([A-Z])/g, "$1 $2"));
-
-  const delayMs = delayPart ? Number.parseInt(delayPart, 10) : undefined;
-  return { actions, delayMs: Number.isFinite(delayMs) ? delayMs : undefined };
+function humanizedIntellijActions(rawValue: string): { actions: string[]; delayMs?: number } {
+  const parsed = parseIntellijActionValue(rawValue);
+  return {
+    actions: parsed.actionIds.map((action) => action.replace(/([a-z0-9])([A-Z])/g, "$1 $2")),
+    delayMs: parsed.delayMs,
+  };
 }
 
 function decodeUrlComponent(value: string | null): string | undefined {
@@ -206,7 +198,7 @@ export function generateActionLabel(action: ActionNode, context: ItemContext): s
     case "folder":
       return action.value ? `Open ${action.value.split("/").filter(Boolean).at(-1) ?? action.value}` : "Open Folder";
     case "intellij": {
-      const parsed = parseIntellijValue(action.value);
+      const parsed = humanizedIntellijActions(action.value);
       const actionLabel = parsed.actions.join(", ");
       return parsed.delayMs ? `IntelliJ: ${actionLabel} (${parsed.delayMs}ms)` : `IntelliJ: ${actionLabel}`;
     }
@@ -223,11 +215,13 @@ export function generateActionLabel(action: ActionNode, context: ItemContext): s
       return parts.length > 0 ? `Macro: ${parts.join(" → ")}` : "Macro";
     }
     case "menu": {
-      const parts = action.value.split(" > ").map((part) => part.trim()).filter(Boolean);
-      if (parts.length === 0) {
+      const parsed = parseMenuActionValue(action.value);
+      if (parsed.pathSegments.length === 0) {
         return "Menu Item";
       }
-      return parts.length > 2 ? `${parts.at(-2)} → ${parts.at(-1)}` : parts.at(-1)!;
+      return parsed.pathSegments.length > 1
+        ? `${parsed.pathSegments.at(-2)} → ${parsed.pathSegments.at(-1)}`
+        : parsed.pathSegments.at(-1)!;
     }
     case "shortcut":
       return action.value ? `Shortcut: ${humanizeShortcutSequence(action.value)}` : "Shortcut";
@@ -288,7 +282,7 @@ export function actionValuePreview(action: ActionNode): string {
     case "folder":
       return action.value;
     case "intellij": {
-      const parsed = parseIntellijValue(action.value);
+      const parsed = humanizedIntellijActions(action.value);
       return parsed.actions.join(", ");
     }
     case "keystroke": {

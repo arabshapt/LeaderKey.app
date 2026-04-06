@@ -1121,7 +1121,7 @@ final class Karabiner2Exporter {
             return [
               "from": karFrom(keyCode: keyCode, modifiers: modifiers),
               "to": [
-                karMenu(app: appName, path: menuPath),
+                karMenu(app: appName, path: menuPath, fallbackPaths: action.menuFallbackPaths ?? []),
                 karSetVariable(name: "leaderkey_sticky", value: 1)
               ]
             ]
@@ -1129,7 +1129,7 @@ final class Karabiner2Exporter {
           return [
             "from": karFrom(keyCode: keyCode, modifiers: modifiers),
             "to": [
-              karMenu(app: appName, path: menuPath),
+              karMenu(app: appName, path: menuPath, fallbackPaths: action.menuFallbackPaths ?? []),
               karSendUserCommand("deactivate"),
               karSetVariable(name: "leaderkey_active", value: 0),
               karSetVariable(name: "leaderkey_global", value: 0),
@@ -1313,14 +1313,33 @@ final class Karabiner2Exporter {
     ["send_user_command": ["payload": ["v": 1, "type": "open", "background": background, "target": target]]]
   }
 
+  private static func ednEscapedString(_ value: String) -> String {
+    value
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"")
+  }
+
+  private static func ednStringLiteral(_ value: String) -> String {
+    "\"\(ednEscapedString(value))\""
+  }
+
+  private static func ednStringVector(_ values: [String]) -> String {
+    "[\(values.map(ednStringLiteral).joined(separator: " "))]"
+  }
+
   /// Generate Goku EDN for send_user_command with v1 menu payload
-  private static func gokuMenu(app: String, path: String) -> String {
-    "{:send_user_command {:payload {:v 1 :type \"menu\" :app \"\(app)\" :path \"\(path)\"}}}"
+  private static func gokuMenu(app: String, path: String, fallbackPaths: [String] = []) -> String {
+    let fallbackFragment = fallbackPaths.isEmpty ? "" : " :fallbackPaths \(ednStringVector(fallbackPaths))"
+    return "{:send_user_command {:payload {:v 1 :type \"menu\" :app \(ednStringLiteral(app)) :path \(ednStringLiteral(path))\(fallbackFragment)}}}"
   }
 
   /// Generate kar JSON for send_user_command with v1 menu payload
-  private static func karMenu(app: String, path: String) -> [String: Any] {
-    ["send_user_command": ["payload": ["v": 1, "type": "menu", "app": app, "path": path]]]
+  private static func karMenu(app: String, path: String, fallbackPaths: [String] = []) -> [String: Any] {
+    var payload: [String: Any] = ["v": 1, "type": "menu", "app": app, "path": path]
+    if !fallbackPaths.isEmpty {
+      payload["fallbackPaths"] = fallbackPaths
+    }
+    return ["send_user_command": ["payload": payload]]
   }
 
   /// Generate Goku EDN for send_user_command with v1 intellij payload
@@ -2510,7 +2529,7 @@ final class Karabiner2Exporter {
       if parts.count >= 2 {
         let appName = parts[0].trimmingCharacters(in: .whitespaces)
         let menuPath = parts.dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " > ")
-        let actions = "\(gokuMenu(app: appName, path: menuPath)) \(gokuSendUserCommand("deactivate"))"
+        let actions = "\(gokuMenu(app: appName, path: menuPath, fallbackPaths: action.menuFallbackPaths ?? [])) \(gokuSendUserCommand("deactivate"))"
         let stateVars = "[\"leader_state\" \(inactiveStateId)] [\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0]"
 
         if let bundleId = bundleId {
@@ -3062,10 +3081,10 @@ final class Karabiner2Exporter {
         let stateVars: String
 
         if hasStickyMode {
-          actions = gokuMenu(app: appName, path: menuPath)
+          actions = gokuMenu(app: appName, path: menuPath, fallbackPaths: action.menuFallbackPaths ?? [])
           stateVars = "[\"leaderkey_sticky\" 1]"
         } else {
-          actions = "\(gokuMenu(app: appName, path: menuPath)) \(gokuSendUserCommand("deactivate"))"
+          actions = "\(gokuMenu(app: appName, path: menuPath, fallbackPaths: action.menuFallbackPaths ?? [])) \(gokuSendUserCommand("deactivate"))"
           stateVars = "[\"leaderkey_active\" 0] [\"leaderkey_global\" 0] [\"leaderkey_appspecific\" 0] [\"leader_state\" \(inactiveStateId)]"
         }
 

@@ -29,6 +29,7 @@ export interface ActionNode {
   value: string;
   iconPath?: string;
   activates?: boolean;
+  menuFallbackPaths?: string[];
   stickyMode?: boolean;
   macroSteps?: MacroStep[];
 }
@@ -86,6 +87,7 @@ export interface FlatIndexRecord {
   displayLabel: string;
   rawValue: string;
   valuePreview: string;
+  menuFallbackPaths?: string[];
   effectiveConfigDisplayName: string;
   effectiveConfigPath: string;
   effectiveScope: ScopeType;

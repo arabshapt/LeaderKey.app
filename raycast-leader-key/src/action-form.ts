@@ -1,4 +1,10 @@
-import type { ActionNode, ConfigItem, MacroStep } from "@leaderkey/config-core";
+import {
+  parseIntellijActionValue,
+  parseMenuActionValue,
+  type ActionNode,
+  type ConfigItem,
+  type MacroStep,
+} from "@leaderkey/config-core";
 
 import { encodeKeystrokeRawValue, type ItemFormState } from "./form-utils.js";
 
@@ -71,7 +77,10 @@ export function formStateToActionNode(
     case "folder":
       return { ...baseAction, value: state.folderPath.trim() };
     case "intellij":
-      return { ...baseAction, value: state.intellijValue.trim() };
+      return {
+        ...baseAction,
+        value: state.intellijValue.trim(),
+      };
     case "keystroke":
       return { ...baseAction, value: encodeKeystrokeRawValue(state.keystroke) };
     case "macro":
@@ -81,7 +90,11 @@ export function formStateToActionNode(
         value: preservedAction?.type === "macro" ? preservedAction.value : "",
       };
     case "menu":
-      return { ...baseAction, value: state.menuValue.trim() };
+      return {
+        ...baseAction,
+        menuFallbackPaths: state.menuFallbackPaths.map((path) => path.trim()).filter(Boolean),
+        value: state.menuValue.trim(),
+      };
     case "shortcut":
       return { ...baseAction, value: state.shortcutValue.trim() };
     case "text":
@@ -99,6 +112,29 @@ export function validateActionNode(action: ActionNode): string | undefined {
   }
 
   if (action.type === "toggleStickyMode") {
+    return undefined;
+  }
+
+  if (action.type === "menu") {
+    const parsed = parseMenuActionValue(action.value);
+    if (!parsed.appName?.trim()) {
+      return "A target app is required for menu actions.";
+    }
+    if (!parsed.path.trim()) {
+      return "A primary menu path is required.";
+    }
+    return undefined;
+  }
+
+  if (action.type === "intellij") {
+    const parsed = parseIntellijActionValue(action.value);
+    if (parsed.actionIds.length === 0) {
+      return "At least one IntelliJ action ID is required.";
+    }
+    const delayPart = action.value.split("|")[1]?.trim();
+    if (delayPart && parsed.delayMs === undefined) {
+      return "Delay must be a whole number of milliseconds.";
+    }
     return undefined;
   }
 

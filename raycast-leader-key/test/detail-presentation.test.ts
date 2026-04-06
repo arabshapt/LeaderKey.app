@@ -135,3 +135,21 @@ test("buildRecordDetailPresentation renders url, application, group, and macro p
   assert.match(macroPresentation.markdown, /\*\*Steps\*\*/);
   assert.match(macroPresentation.markdown, /- Open Arc/);
 });
+
+test("buildRecordDetailPresentation shows fallback menu paths for menu actions", () => {
+  const presentation = buildRecordDetailPresentation(makeRecord({
+    actionType: "menu",
+    displayLabel: "View → Show Sidebar",
+    menuFallbackPaths: ["View > Hide Sidebar", "Window > Toggle Sidebar"],
+    rawValue: "Codex > View > Show Sidebar",
+    valuePreview: "Codex > View > Show Sidebar",
+  }));
+
+  assert.match(presentation.markdown, /Primary: `View > Show Sidebar`/);
+  assert.match(presentation.markdown, /Fallbacks:/);
+  assert.match(presentation.markdown, /View > Hide Sidebar/);
+  assert.equal(
+    presentation.metadata.find((row) => row.title === "Fallback Menu Paths")?.text,
+    "View > Hide Sidebar | Window > Toggle Sidebar",
+  );
+});

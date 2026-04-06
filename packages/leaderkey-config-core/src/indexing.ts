@@ -201,6 +201,7 @@ function buildFlatRecord(
       kind: "group",
       label,
       macroStepSummary: undefined,
+      menuFallbackPaths: undefined,
       parentEffectiveKeyPath,
       rawValue: "",
       searchText: [
@@ -268,6 +269,7 @@ function buildFlatRecord(
     aiDescription,
     label: node.item.label,
     macroStepSummary: macroStepSummary(node.item),
+    menuFallbackPaths: node.item.menuFallbackPaths,
     parentEffectiveKeyPath,
     rawValue: node.item.value,
     searchText: [
@@ -279,6 +281,7 @@ function buildFlatRecord(
       node.item.label,
       node.item.type,
       node.item.value,
+      node.item.menuFallbackPaths?.join(" "),
       valuePreview,
       appName,
     ]

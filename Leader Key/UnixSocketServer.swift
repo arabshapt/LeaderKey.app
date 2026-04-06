@@ -141,8 +141,23 @@ final class UnixSocketServer {
   }
 
   private func sendResponse(_ response: String, to socket: Int32) {
-    response.withCString { cString in
-      _ = send(socket, cString, strlen(cString), 0)
+    let bytes = Array(response.utf8)
+    var totalSent = 0
+
+    while totalSent < bytes.count {
+      let sent = bytes.withUnsafeBytes { rawBuffer -> Int in
+        guard let baseAddress = rawBuffer.baseAddress else {
+          return -1
+        }
+
+        let nextPointer = baseAddress.advanced(by: totalSent)
+        return send(socket, nextPointer, bytes.count - totalSent, 0)
+      }
+
+      guard sent > 0 else {
+        break
+      }
+      totalSent += sent
     }
   }
 

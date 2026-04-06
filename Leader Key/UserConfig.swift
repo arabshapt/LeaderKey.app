@@ -777,6 +777,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var value: String
   var iconPath: String?
   var activates: Bool?
+  var menuFallbackPaths: [String]? = nil
   var stickyMode: Bool?
   var macroSteps: [MacroStep]?
 
@@ -785,7 +786,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var fallbackSource: String?
 
   enum CodingKeys: String, CodingKey {
-    case key, type, label, description, aiDescription, value, iconPath, activates, stickyMode, macroSteps
+    case key, type, label, description, aiDescription, value, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps
     // Exclude isFromFallback and fallbackSource from JSON persistence
   }
 
@@ -799,7 +800,8 @@ struct Action: Item, Codable, Equatable, Identifiable {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
       && lhs.description == rhs.description && lhs.aiDescription == rhs.aiDescription
       && lhs.value == rhs.value && lhs.iconPath == rhs.iconPath && lhs.activates == rhs.activates
-      && lhs.stickyMode == rhs.stickyMode && lhs.macroSteps == rhs.macroSteps
+      && lhs.menuFallbackPaths == rhs.menuFallbackPaths && lhs.stickyMode == rhs.stickyMode
+      && lhs.macroSteps == rhs.macroSteps
     // Intentionally exclude isFromFallback and fallbackSource from equality comparison
   }
 
@@ -893,7 +895,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, description, aiDescription, iconPath, activates, stickyMode, macroSteps
+    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps
   }
 
   init(from decoder: Decoder) throws {
@@ -905,6 +907,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     let aiDescription = try container.decodeIfPresent(String.self, forKey: .aiDescription)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
     let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
+    let menuFallbackPaths = try container.decodeIfPresent([String].self, forKey: .menuFallbackPaths)
     let stickyMode = try container.decodeIfPresent(Bool.self, forKey: .stickyMode)
 
     switch type {
@@ -919,7 +922,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
         Action(
           key: key, type: type, label: label, description: description, aiDescription: aiDescription,
           value: value, iconPath: iconPath,
-          activates: activates, stickyMode: stickyMode, macroSteps: macroSteps))
+          activates: activates, menuFallbackPaths: menuFallbackPaths, stickyMode: stickyMode, macroSteps: macroSteps))
     }
   }
 
@@ -941,6 +944,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(action.activates, forKey: .activates)
+      try container.encodeIfPresent(action.menuFallbackPaths, forKey: .menuFallbackPaths)
       try container.encodeIfPresent(action.stickyMode, forKey: .stickyMode)
       try container.encodeIfPresent(action.macroSteps, forKey: .macroSteps)
     case .group(let group):
@@ -971,6 +975,7 @@ extension ActionOrGroup {
           value: action.value,
           iconPath: action.iconPath,
           activates: action.activates,
+          menuFallbackPaths: action.menuFallbackPaths,
           stickyMode: action.stickyMode,
           macroSteps: action.macroSteps?.map { step in
             MacroStep(
