@@ -5,7 +5,7 @@ protocol InputMethod: AnyObject {
   var isActive: Bool { get }
   var healthStatus: InputMethodHealthStatus { get }
 
-  func start(with delegate: InputMethodDelegate) -> Bool
+  func start(with delegate: InputMethodDelegate, onExportComplete: (() -> Void)?) -> Bool
   func stop()
   func checkHealth() -> Bool
   func getStatistics() -> String

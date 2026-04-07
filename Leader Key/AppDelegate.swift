@@ -1357,9 +1357,14 @@ extension AppDelegate {
 
     currentInputMethod = Karabiner2InputMethod()
 
-    if let method = currentInputMethod, method.start(with: self) {
+    // Pass loadStateMappings as onExportComplete callback to avoid a data race:
+    // exportCurrentConfiguration runs on a background thread and mutates config.appConfigs.
+    // loadStateMappings calls findActionForMapping which reads config.appConfigs.
+    // Running both concurrently crashes (Swift dicts are not thread-safe).
+    if let method = currentInputMethod, method.start(with: self, onExportComplete: { [weak self] in
+      self?.loadStateMappings()
+    }) {
       print("[AppDelegate] Karabiner input method started successfully")
-      loadStateMappings()
       self.isMonitoring = true
       self.didShowPermissionsAlertRecently = false
     } else {

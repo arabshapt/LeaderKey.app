@@ -44,7 +44,7 @@ final class Karabiner2InputMethod: InputMethod {
     )
   }
 
-  func start(with delegate: InputMethodDelegate) -> Bool {
+  func start(with delegate: InputMethodDelegate, onExportComplete: (() -> Void)? = nil) -> Bool {
     self.delegate = delegate
 
     userCommandReceiver.delegate = delegate as? UnixSocketServerDelegate
@@ -57,6 +57,14 @@ final class Karabiner2InputMethod: InputMethod {
       }
       DispatchQueue.global(qos: .utility).async { [weak self] in
         self?.exportCurrentConfiguration(caller: "start")
+        // Notify caller on main thread that export is done and state mappings file is fresh.
+        // This avoids data races: callers should defer loadStateMappings() to this callback
+        // rather than calling it immediately after start() returns.
+        if let onExportComplete = onExportComplete {
+          DispatchQueue.main.async {
+            onExportComplete()
+          }
+        }
       }
     } else {
       debugLog("[Karabiner2InputMethod] Failed to start")
