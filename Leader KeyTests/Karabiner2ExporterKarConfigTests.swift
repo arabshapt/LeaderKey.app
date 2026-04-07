@@ -53,8 +53,12 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     let first = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
     let second = Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
 
+    // Sort mappings before comparing since generateKarConfig returns unsorted order.
     let encoder = JSONEncoder()
-    XCTAssertEqual(try encoder.encode(first.stateMappings), try encoder.encode(second.stateMappings))
+    encoder.outputFormatting = .sortedKeys
+    let firstSorted = Karabiner2Exporter.sortMappings(first.stateMappings)
+    let secondSorted = Karabiner2Exporter.sortMappings(second.stateMappings)
+    XCTAssertEqual(try encoder.encode(firstSorted), try encoder.encode(secondSorted))
     XCTAssertEqual(first.repoModuleSource, second.repoModuleSource)
     XCTAssertEqual(try serializeJSON(first.managedRules), try serializeJSON(second.managedRules))
   }

@@ -313,26 +313,20 @@ final class Karabiner2InputMethod: InputMethod {
       debugLog("[Benchmark] kar critical path: \(String(format: "%.0f", (t2 - t0) * 1000))ms")
       debugLog("[Karabiner2InputMethod] Applied \(export.managedRules.count) LeaderKey rules via karabiner.ts")
 
-      // === DEFERRED WORK: background thread for sorting, saving, module source ===
-      let managedRules = export.managedRules
-      let unsortedMappings = export.stateMappings
+      // === State mappings: sort + save synchronously (AppDelegate reads this file immediately) ===
+      let sortedMappings = Karabiner2Exporter.sortMappings(export.stateMappings)
       let configDir = Defaults[.configDir]
+      let outputDir = (configDir as NSString).appendingPathComponent("export")
+      try FileManager.default.createDirectory(
+        atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
+      try saveStateMappings(sortedMappings, outputDir: outputDir)
+      let t3 = CFAbsoluteTimeGetCurrent()
+      debugLog("[Benchmark] kar sortMappings+save: \(String(format: "%.0f", (t3 - t2) * 1000))ms")
 
-      DispatchQueue.global(qos: .utility).async { [weak self] in
+      // === DEFERRED: only moduleSource generation (nothing reads the .ts file immediately) ===
+      let managedRules = export.managedRules
+      DispatchQueue.global(qos: .utility).async {
         let bgStart = CFAbsoluteTimeGetCurrent()
-
-        // Sort state mappings and save to disk.
-        let sortedMappings = Karabiner2Exporter.sortMappings(unsortedMappings)
-        let outputDir = (configDir as NSString).appendingPathComponent("export")
-        do {
-          try FileManager.default.createDirectory(
-            atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
-          try self?.saveStateMappings(sortedMappings, outputDir: outputDir)
-        } catch {
-          debugLog("[Karabiner2InputMethod] Background: failed to save state mappings: \(error)")
-        }
-
-        // Generate and write module source (.ts file).
         autoreleasepool {
           let moduleSource = Karabiner2Exporter.generateModuleSource(managedRules: managedRules)
           do {
@@ -341,8 +335,7 @@ final class Karabiner2InputMethod: InputMethod {
             debugLog("[Karabiner2InputMethod] Background: failed to write repo files: \(error)")
           }
         }
-
-        debugLog("[Benchmark] kar background work: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - bgStart) * 1000))ms")
+        debugLog("[Benchmark] kar background work (moduleSource): \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - bgStart) * 1000))ms")
       }
     } catch {
       lastKarabinerTsExportError = error.localizedDescription
