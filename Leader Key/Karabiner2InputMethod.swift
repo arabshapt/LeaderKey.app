@@ -283,6 +283,25 @@ final class Karabiner2InputMethod: InputMethod {
     }
   }
 
+  /// Exports the current configuration using the karabiner.ts backend.
+  ///
+  /// ## Pipeline Data Flow
+  /// ```
+  /// exportUsingKar (this method)
+  ///   1. generateKarConfig  → managedRules + stateMappings (CPU)
+  ///   2. applyRules          → patches karabiner.json for Karabiner Elements
+  ///   3. saveStateMappings   → writes leaderkey-state-mappings.json   ← MUST complete synchronously
+  ///   4. (background)        → generates .ts module source file
+  ///
+  /// AppDelegate.runExportRefresh (caller)
+  ///   calls exportCurrentConfiguration()      (steps 1-3 above)
+  ///   then  loadStateMappings()                (reads file from step 3)
+  ///   then  builds actionCache from mappings
+  /// ```
+  ///
+  /// **IMPORTANT**: `saveStateMappings` (step 3) MUST run synchronously before this method returns.
+  /// `AppDelegate.loadStateMappings()` reads the same file immediately after this call completes.
+  /// Deferring step 3 to a background thread will cause "No mapping found" errors for new config items.
   private func exportUsingKar(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
@@ -290,8 +309,7 @@ final class Karabiner2InputMethod: InputMethod {
     let service = KarabinerTsExportService.shared
 
     do {
-      // === CRITICAL PATH: generateKarConfig + applyRules ===
-      // moduleSource, sorting, and file writes happen on background thread below.
+      // === CRITICAL PATH: generateKarConfig + applyRules + saveStateMappings ===
 
       let t0 = CFAbsoluteTimeGetCurrent()
       let export = Karabiner2Exporter.generateKarConfig(
@@ -313,7 +331,11 @@ final class Karabiner2InputMethod: InputMethod {
       debugLog("[Benchmark] kar critical path: \(String(format: "%.0f", (t2 - t0) * 1000))ms")
       debugLog("[Karabiner2InputMethod] Applied \(export.managedRules.count) LeaderKey rules via karabiner.ts")
 
-      // === State mappings: sort + save synchronously (AppDelegate reads this file immediately) ===
+      // === State mappings: sort + save synchronously ===
+      // AppDelegate.loadStateMappings() reads this file right after exportCurrentConfiguration returns.
+      // See runExportRefresh() in AppDelegate.swift — it calls loadStateMappings() on main queue
+      // immediately after this method completes. If these are deferred to background, the load
+      // will read stale data and new state IDs will produce "No mapping found" errors.
       let sortedMappings = Karabiner2Exporter.sortMappings(export.stateMappings)
       let configDir = Defaults[.configDir]
       let outputDir = (configDir as NSString).appendingPathComponent("export")

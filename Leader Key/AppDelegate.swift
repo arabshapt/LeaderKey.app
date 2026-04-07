@@ -2833,11 +2833,17 @@ extension AppDelegate {
     }
   }
 
+  /// Runs the export pipeline and reloads state mappings from the exported file.
+  ///
+  /// **Ordering dependency**: `exportCurrentConfiguration` MUST write the state mappings file
+  /// synchronously before returning. `loadStateMappings()` reads that same file immediately after.
+  /// See `Karabiner2InputMethod.exportUsingKar` for the full pipeline flow diagram.
   private func runExportRefresh() {
     debugLog("[AppDelegate] Refreshing state mappings after config change")
     let karabiner2Method = (currentInputMethod as? Karabiner2InputMethod) ?? Karabiner2InputMethod()
     karabiner2Method.exportCurrentConfiguration(caller: "refreshStateMappings")
 
+    // Reads export/leaderkey-state-mappings.json written synchronously by exportUsingKar above.
     DispatchQueue.main.async { [weak self] in
       self?.loadStateMappings()
     }
