@@ -108,7 +108,7 @@ final class KarabinerTsExportService {
       {
         // Cache hit: rebuild the root from the cached template + new managed rules.
         root = try Self.rebuildFromCache(cache, compiledRules: managedRules)
-        debugLog("[Benchmark] kar.apply cache HIT — skipped 11MB read+parse")
+        debugLog("[Benchmark] karabiner.ts.apply cache HIT — skipped 11MB read+parse")
       } else {
         // Cache miss: full read + parse.
         let data = try Data(contentsOf: url)
@@ -123,7 +123,7 @@ final class KarabinerTsExportService {
         // Build cache from the parsed root for next time.
         templateCache = try Self.buildTemplateCache(
           from: parsed, path: resolvedKarabinerPath, mtime: fileMtime)
-        debugLog("[Benchmark] kar.apply cache MISS — built new template cache")
+        debugLog("[Benchmark] karabiner.ts.apply cache MISS — built new template cache")
       }
 
       let backupPath = resolvedKarabinerPath + ".leaderkey.backup.\(Int(Date().timeIntervalSince1970))"

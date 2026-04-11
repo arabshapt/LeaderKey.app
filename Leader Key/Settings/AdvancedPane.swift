@@ -97,7 +97,7 @@ struct AdvancedPane: View {
                   .font(.caption)
                   .foregroundColor(.secondary)
 
-                if karabiner2Backend.requiresKarabinerTsExport {
+                if karabiner2Backend.usesKarabinerTsExport {
                   HStack(alignment: .center, spacing: 10) {
                     Text("Repo path:")
                       .foregroundColor(.secondary)
@@ -143,7 +143,7 @@ struct AdvancedPane: View {
                   }
                 }
 
-                if karabiner2Backend.requiresGoku {
+                if karabiner2Backend.usesLegacyGoku {
                   HStack(alignment: .center, spacing: 10) {
                     Text("goku binary:")
                       .foregroundColor(.secondary)
@@ -526,6 +526,12 @@ struct AdvancedPane: View {
     .frame(minHeight: 600)
     .sheet(isPresented: $showingAlternativeMappings) {
       AlternativeMappingsView()
+    }
+    .onAppear {
+      let normalizedBackend = karabiner2Backend.normalized
+      if karabiner2Backend != normalizedBackend {
+        karabiner2Backend = normalizedBackend
+      }
     }
   }
 

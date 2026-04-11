@@ -18,8 +18,8 @@ final class Karabiner2InputMethod: InputMethod {
     let karabinerRunning = isKarabinerRunning()
     let socketActive = isActive
     let userCommandActive = userCommandReceiver.isRunning
-    let backend = Defaults[.karabiner2Backend]
-    let karabinerTsHealthy = !backend.requiresKarabinerTsExport || lastKarabinerTsExportError == nil
+    let backend = Defaults[.karabiner2Backend].normalized
+    let karabinerTsHealthy = !backend.usesKarabinerTsExport || lastKarabinerTsExportError == nil
 
     let isHealthy = karabinerRunning && socketActive && userCommandActive && karabinerTsHealthy
     let message: String
@@ -30,7 +30,7 @@ final class Karabiner2InputMethod: InputMethod {
       message = "Unix socket server is not active"
     } else if !userCommandActive {
       message = "Karabiner user command receiver is not active"
-    } else if backend.requiresKarabinerTsExport, let lastKarabinerTsExportError {
+    } else if backend.usesKarabinerTsExport, let lastKarabinerTsExportError {
       message = "karabiner.ts export is unhealthy: \(lastKarabinerTsExportError)"
     } else {
       let backendLabel = backend.displayName
@@ -89,7 +89,7 @@ final class Karabiner2InputMethod: InputMethod {
       \(socketServer.getStatistics())
       User Command Receiver: \(userCommandReceiver.isRunning ? "Running" : "Stopped")
       User Command Socket: \(userCommandReceiver.socketPath)
-      Backend: \(Defaults[.karabiner2Backend].displayName)
+      Backend: \(Defaults[.karabiner2Backend].normalized.displayName)
       Current State: \(currentState)
       Mode: Karabiner 2.0 (State Machine)
       """
@@ -183,35 +183,24 @@ final class Karabiner2InputMethod: InputMethod {
     debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs")
     debugLog("[Benchmark] Config discovery: \(String(format: "%.0f", discoveryElapsed * 1000))ms")
 
-    let backend = Defaults[.karabiner2Backend]
-    var managedExport: Karabiner2Exporter.KarabinerTSExport?
-
-    if backend.requiresKarabinerTsExport || backend.requiresGoku {
-      do {
-        managedExport = try Karabiner2Exporter.generateKarConfig(
-          globalConfig: globalConfig,
-          appConfigs: appConfigs
-        )
-      } catch {
-        debugLog("[Karabiner2InputMethod] Failed to build shared managed export: \(error)")
-        if backend.requiresKarabinerTsExport || backend == .goku {
-          return
-        }
-      }
-    }
-
-    if backend.requiresKarabinerTsExport {
-      let karStart = CFAbsoluteTimeGetCurrent()
-      exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs, precomputedExport: managedExport)
-      debugLog("[Benchmark] karabiner.ts export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
-    }
-
-    guard backend.requiresGoku else {
+    let backend = Defaults[.karabiner2Backend].normalized
+    if backend.usesKarabinerTsExport {
+      let karabinerTsStart = CFAbsoluteTimeGetCurrent()
+      exportUsingKarabinerTS(globalConfig: globalConfig, appConfigs: appConfigs)
+      debugLog("[Benchmark] karabiner.ts export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karabinerTsStart) * 1000))ms")
       debugLog("[Benchmark] Total pipeline: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000))ms")
       return
     }
 
-    // 3. Generate unified EDN with hierarchical organization
+    exportUsingLegacyGoku(globalConfig: globalConfig, appConfigs: appConfigs, pipelineStart: pipelineStart)
+  }
+
+  private func exportUsingLegacyGoku(
+    globalConfig: UserConfig,
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    pipelineStart: CFAbsoluteTime
+  ) {
+    // Generate unified EDN with hierarchical organization
     let ednGenStart = CFAbsoluteTimeGetCurrent()
     let ednContent: String
     let stateMappings: [Karabiner2Exporter.StateMapping]
@@ -239,13 +228,7 @@ final class Karabiner2InputMethod: InputMethod {
       try ednContent.write(toFile: filePath, atomically: true, encoding: .utf8)
 
       debugLog("[Karabiner2InputMethod] Exported unified configuration to \(filePath)")
-      let mappingsToSave: [Karabiner2Exporter.StateMapping]
-      if let managedExport {
-        mappingsToSave = Karabiner2Exporter.sortMappings(managedExport.stateMappings)
-      } else {
-        mappingsToSave = Karabiner2Exporter.sortMappings(stateMappings)
-      }
-      try saveStateMappings(mappingsToSave, outputDir: outputDir)
+      try saveStateMappings(Karabiner2Exporter.sortMappings(stateMappings), outputDir: outputDir)
       
       // Inject into main karabiner.edn if markers exist
       // Check if activation shortcuts already exist in target file
@@ -310,12 +293,6 @@ final class Karabiner2InputMethod: InputMethod {
         let gokuResult = GokuCompilerService.shared.compileAndApply(configPath: configPath)
         debugLog("[Benchmark] Goku compilation: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - gokuStart) * 1000))ms")
         debugLog("[Karabiner2InputMethod] \(gokuResult.message)")
-
-        if let managedExport {
-          let karStart = CFAbsoluteTimeGetCurrent()
-          try KarabinerTsExportService.shared.applyRules(managedExport.managedRules)
-          debugLog("[Benchmark] Post-Goku managed rule patch: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
-        }
       } else {
         debugLog("[Karabiner2InputMethod] goku skipped: karabiner.edn not found")
       }
@@ -330,8 +307,8 @@ final class Karabiner2InputMethod: InputMethod {
   ///
   /// ## Pipeline Data Flow
   /// ```
-  /// exportUsingKar (this method)
-  ///   1. generateKarConfig  → managedRules + stateMappings (CPU)
+  /// exportUsingKarabinerTS (this method)
+  ///   1. generateKarabinerTSExport  → managedRules + stateMappings (CPU)
   ///   2. applyRules          → patches karabiner.json for Karabiner Elements
   ///   3. saveStateMappings   → writes leaderkey-state-mappings.json   ← MUST complete synchronously
   ///   4. (background)        → generates .ts module source file
@@ -345,7 +322,7 @@ final class Karabiner2InputMethod: InputMethod {
   /// **IMPORTANT**: `saveStateMappings` (step 3) MUST run synchronously before this method returns.
   /// `AppDelegate.loadStateMappings()` reads the same file immediately after this call completes.
   /// Deferring step 3 to a background thread will cause "No mapping found" errors for new config items.
-  private func exportUsingKar(
+  private func exportUsingKarabinerTS(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
     precomputedExport: Karabiner2Exporter.KarabinerTSExport? = nil
@@ -353,14 +330,14 @@ final class Karabiner2InputMethod: InputMethod {
     let service = KarabinerTsExportService.shared
 
     do {
-      // === CRITICAL PATH: generateKarConfig + applyRules + saveStateMappings ===
+      // === CRITICAL PATH: generateKarabinerTSExport + applyRules + saveStateMappings ===
 
       let t0 = CFAbsoluteTimeGetCurrent()
       let export: Karabiner2Exporter.KarabinerTSExport
       if let precomputedExport {
         export = precomputedExport
       } else {
-        export = try Karabiner2Exporter.generateKarConfig(
+        export = try Karabiner2Exporter.generateKarabinerTSExport(
           globalConfig: globalConfig,
           appConfigs: appConfigs
         )
@@ -375,9 +352,9 @@ final class Karabiner2InputMethod: InputMethod {
 
       lastKarabinerTsExportError = nil
 
-      debugLog("[Benchmark] kar generateKarConfig: \(String(format: "%.0f", (t1 - t0) * 1000))ms")
-      debugLog("[Benchmark] kar applyRules (karabiner.json patch): \(String(format: "%.0f", (t2 - t1) * 1000))ms")
-      debugLog("[Benchmark] kar critical path: \(String(format: "%.0f", (t2 - t0) * 1000))ms")
+      debugLog("[Benchmark] karabiner.ts generateKarabinerTSExport: \(String(format: "%.0f", (t1 - t0) * 1000))ms")
+      debugLog("[Benchmark] karabiner.ts applyRules (karabiner.json patch): \(String(format: "%.0f", (t2 - t1) * 1000))ms")
+      debugLog("[Benchmark] karabiner.ts critical path: \(String(format: "%.0f", (t2 - t0) * 1000))ms")
       debugLog("[Karabiner2InputMethod] Applied \(export.managedRules.count) LeaderKey rules via karabiner.ts")
 
       // === State mappings: sort + save synchronously ===
@@ -392,7 +369,7 @@ final class Karabiner2InputMethod: InputMethod {
         atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
       try saveStateMappings(sortedMappings, outputDir: outputDir)
       let t3 = CFAbsoluteTimeGetCurrent()
-      debugLog("[Benchmark] kar sortMappings+save: \(String(format: "%.0f", (t3 - t2) * 1000))ms")
+      debugLog("[Benchmark] karabiner.ts sortMappings+save: \(String(format: "%.0f", (t3 - t2) * 1000))ms")
 
       // === DEFERRED: only moduleSource generation (nothing reads the .ts file immediately) ===
       let managedRules = export.managedRules
@@ -406,7 +383,7 @@ final class Karabiner2InputMethod: InputMethod {
             debugLog("[Karabiner2InputMethod] Background: failed to write repo files: \(error)")
           }
         }
-        debugLog("[Benchmark] kar background work (moduleSource): \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - bgStart) * 1000))ms")
+        debugLog("[Benchmark] karabiner.ts background work (moduleSource): \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - bgStart) * 1000))ms")
       }
     } catch {
       lastKarabinerTsExportError = error.localizedDescription

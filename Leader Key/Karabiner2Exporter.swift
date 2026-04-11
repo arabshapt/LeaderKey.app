@@ -262,7 +262,7 @@ final class Karabiner2Exporter {
     }
   }
 
-  static func generateKarConfig(
+  static func generateKarabinerTSExport(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
   ) throws -> KarabinerTSExport {
@@ -279,10 +279,10 @@ final class Karabiner2Exporter {
     let managedRules = applyKarAlternativeMappings(to: compiledRules)
     let tAltMappings = CFAbsoluteTimeGetCurrent()
 
-    debugLog("[Benchmark] kar.gen shared-model (\(managedModel.appAliases.count) apps): \(String(format: "%.0f", (tModel - tStart) * 1000))ms")
-    debugLog("[Benchmark] kar.gen compile (\(managedModel.rules.count) intermediate → \(compiledRules.count) compiled): \(String(format: "%.0f", (tCompile - tModel) * 1000))ms")
-    debugLog("[Benchmark] kar.gen altMappings: \(String(format: "%.0f", (tAltMappings - tCompile) * 1000))ms")
-    debugLog("[Benchmark] kar.gen TOTAL (critical path): \(String(format: "%.0f", (tAltMappings - tStart) * 1000))ms")
+    debugLog("[Benchmark] karabiner.ts.gen shared-model (\(managedModel.appAliases.count) apps): \(String(format: "%.0f", (tModel - tStart) * 1000))ms")
+    debugLog("[Benchmark] karabiner.ts.gen compile (\(managedModel.rules.count) intermediate → \(compiledRules.count) compiled): \(String(format: "%.0f", (tCompile - tModel) * 1000))ms")
+    debugLog("[Benchmark] karabiner.ts.gen altMappings: \(String(format: "%.0f", (tAltMappings - tCompile) * 1000))ms")
+    debugLog("[Benchmark] karabiner.ts.gen TOTAL (critical path): \(String(format: "%.0f", (tAltMappings - tStart) * 1000))ms")
 
     return KarabinerTSExport(
       managedRules: managedRules,
@@ -915,12 +915,12 @@ final class Karabiner2Exporter {
     "{:send_user_command {:payload {:v 1 :type \"open\" :background \(background) :target \"\(target)\"}}}"
   }
 
-  /// Generate kar JSON for send_user_command with v1 open_app payload
+  /// Generate Karabiner JSON for send_user_command with v1 open_app payload
   private static func karOpenApp(_ appPath: String) -> [String: Any] {
     ["send_user_command": ["payload": ["v": 1, "type": "open_app", "app": appPath]]]
   }
 
-  /// Generate kar JSON for send_user_command with v1 open payload (URLs, etc.)
+  /// Generate Karabiner JSON for send_user_command with v1 open payload (URLs, etc.)
   private static func karOpen(_ target: String, background: Bool = false) -> [String: Any] {
     ["send_user_command": ["payload": ["v": 1, "type": "open", "background": background, "target": target]]]
   }
@@ -945,7 +945,7 @@ final class Karabiner2Exporter {
     return "{:send_user_command {:payload {:v 1 :type \"menu\" :app \(ednStringLiteral(app)) :path \(ednStringLiteral(path))\(fallbackFragment)}}}"
   }
 
-  /// Generate kar JSON for send_user_command with v1 menu payload
+  /// Generate Karabiner JSON for send_user_command with v1 menu payload
   private static func karMenu(app: String, path: String, fallbackPaths: [String] = []) -> [String: Any] {
     var payload: [String: Any] = ["v": 1, "type": "menu", "app": app, "path": path]
     if !fallbackPaths.isEmpty {
@@ -959,7 +959,7 @@ final class Karabiner2Exporter {
     "{:send_user_command {:payload {:v 1 :type \"intellij\" :action \"\(action)\"}}}"
   }
 
-  /// Generate kar JSON for send_user_command with v1 intellij payload
+  /// Generate Karabiner JSON for send_user_command with v1 intellij payload
   private static func karIntelliJ(action: String) -> [String: Any] {
     ["send_user_command": ["payload": ["v": 1, "type": "intellij", "action": action]]]
   }
@@ -975,7 +975,7 @@ final class Karabiner2Exporter {
     return "{:send_user_command {:payload {:v 1 :type \"keystroke\" :spec \"\(spec)\"}}}"
   }
 
-  /// Generate kar JSON for send_user_command with v1 keystroke payload
+  /// Generate Karabiner JSON for send_user_command with v1 keystroke payload
   private static func karKeystroke(app: String?, spec: String, focusApp: Bool = false) -> [String: Any] {
     var payload: [String: Any] = ["v": 1, "type": "keystroke", "spec": spec]
     if let app = app { payload["app"] = app }

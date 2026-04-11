@@ -3,7 +3,18 @@ import KeyboardShortcuts
 import Defaults
 @testable import Leader_Key
 
-final class Karabiner2ExporterKarConfigTests: XCTestCase {
+final class Karabiner2BackendTests: XCTestCase {
+  func testVisibleBackendsExcludeLegacyBothAndPreferKarabinerTS() {
+    XCTAssertEqual(Karabiner2Backend.allCases, [.karabinerTS, .goku])
+    XCTAssertEqual(Karabiner2Backend.legacyBoth.normalized, .karabinerTS)
+    XCTAssertTrue(Karabiner2Backend.karabinerTS.usesKarabinerTsExport)
+    XCTAssertFalse(Karabiner2Backend.karabinerTS.usesLegacyGoku)
+    XCTAssertFalse(Karabiner2Backend.goku.usesKarabinerTsExport)
+    XCTAssertTrue(Karabiner2Backend.goku.usesLegacyGoku)
+  }
+}
+
+final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
   override func setUp() {
     super.setUp()
     Karabiner2Exporter.alternativeMappingsOverride = []
@@ -16,10 +27,10 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     super.tearDown()
   }
 
-  func testGenerateKarConfigContainsSendUserCommandRoutes() throws {
+  func testGenerateKarabinerTSExportContainsSendUserCommandRoutes() throws {
     let config = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let payloads = extractSendUserCommandPayloads(from: result.managedRules)
 
     XCTAssertTrue(payloads.contains("activate"))
@@ -29,9 +40,9 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertTrue(payloads.contains("shake"))
   }
 
-  func testGenerateKarConfigPreservesStickyAndResetBehavior() throws {
+  func testGenerateKarabinerTSExportPreservesStickyAndResetBehavior() throws {
     let config = makeSampleConfig()
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let allManipulators = flattenManipulators(from: result.managedRules)
 
     let stickyTransition = allManipulators.first(where: { manipulator in
@@ -52,10 +63,10 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
   func testStateMappingsAreDeterministic() throws {
     let config = makeSampleConfig()
 
-    let first = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
-    let second = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let first = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let second = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
 
-    // Sort mappings before comparing since generateKarConfig returns unsorted order.
+    // Sort mappings before comparing since generateKarabinerTSExport returns unsorted order.
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
     let firstSorted = Karabiner2Exporter.sortMappings(first.stateMappings)
@@ -65,7 +76,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertEqual(try serializeJSON(first.managedRules), try serializeJSON(second.managedRules))
   }
 
-  func testGenerateKarConfigEncodesKeystrokePayloadsAndStickyBehavior() throws {
+  func testGenerateKarabinerTSExportEncodesKeystrokePayloadsAndStickyBehavior() throws {
     let config = UserConfig()
     let targetedAction = Action(
       key: "k",
@@ -100,7 +111,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
 
     config.root.actions = [.action(targetedAction), .action(focusedAction), .action(stickyAction)]
 
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let allManipulators = flattenManipulators(from: result.managedRules)
 
     let targetedMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
@@ -152,11 +163,11 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertFalse(hasSendUserCommand(manipulator: stickyMapping, prefix: "deactivate"))
   }
 
-  func testGenerateKarConfigProducesDeterministicRepoModuleExports() throws {
+  func testGenerateKarabinerTSExportProducesDeterministicRepoModuleExports() throws {
     let config = makeSampleConfig()
 
-    let first = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
-    let second = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let first = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let second = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
 
     // Module source generation is now deferred; generate it explicitly for the test.
     let firstModule = Karabiner2Exporter.generateModuleSource(managedRules: first.managedRules)
@@ -167,10 +178,10 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertTrue(firstModule.contains("export default leaderKeyManagedRules"))
   }
 
-  func testGenerateKarConfigUsesSingleAnyKeyCatchAllMappings() throws {
+  func testGenerateKarabinerTSExportUsesSingleAnyKeyCatchAllMappings() throws {
     let config = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let allManipulators = flattenManipulators(from: result.managedRules)
     let shakeManipulator = try XCTUnwrap(allManipulators.first(where: { manipulator in
       hasSendUserCommand(manipulator: manipulator, prefix: "shake")
@@ -182,10 +193,10 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertEqual(modifiers["mandatory"] as? [String], ["any"])
   }
 
-  func testGenerateKarConfigCompactsModeRuleDescriptions() throws {
+  func testGenerateKarabinerTSExportCompactsModeRuleDescriptions() throws {
     let config = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let descriptions = result.managedRules.compactMap { $0["description"] as? String }
 
     XCTAssertFalse(descriptions.contains(where: { $0.contains("/State/") || $0.contains("/CatchAll/") }))
@@ -194,11 +205,11 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertEqual(Set(descriptions).count, descriptions.count)
   }
 
-  func testGenerateKarConfigCompactsAppSpecificModeRules() throws {
+  func testGenerateKarabinerTSExportCompactsAppSpecificModeRules() throws {
     let globalConfig = makeSampleConfig()
     let appConfig = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
       globalConfig: globalConfig,
       appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
     )
@@ -208,11 +219,11 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertFalse(descriptions.contains(where: { $0.hasPrefix("LeaderKeyManaged/AppMode/safari/") }))
   }
 
-  func testGenerateKarConfigIncludesLegacyActivationBranches() throws {
+  func testGenerateKarabinerTSExportIncludesLegacyActivationBranches() throws {
     let globalConfig = makeSampleConfig()
     let appConfig = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
       globalConfig: globalConfig,
       appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
     )
@@ -232,11 +243,11 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }))
   }
 
-  func testGenerateKarConfigIncludesModeGuards() throws {
+  func testGenerateKarabinerTSExportIncludesModeGuards() throws {
     let globalConfig = makeSampleConfig()
     let appConfig = makeSampleConfig()
 
-    let result = try Karabiner2Exporter.generateKarConfig(
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
       globalConfig: globalConfig,
       appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
     )
@@ -260,8 +271,8 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertFalse(hasConditionType(fallbackManipulator, type: "frontmost_application_if"))
   }
 
-  func testGenerateKarConfigRemovesLegacyLeaderVariables() throws {
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: makeSampleConfig(), appConfigs: [])
+  func testGenerateKarabinerTSExportRemovesLegacyLeaderVariables() throws {
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: makeSampleConfig(), appConfigs: [])
     let serialized = String(data: try serializeJSON(result.managedRules), encoding: .utf8) ?? ""
 
     XCTAssertFalse(serialized.contains("leaderkey_active"))
@@ -270,7 +281,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertFalse(serialized.contains("leaderkey_mode"))
   }
 
-  func testGenerateKarConfigSharesFallbackAcrossAppsWithoutEmptyDeltaRules() throws {
+  func testGenerateKarabinerTSExportSharesFallbackAcrossAppsWithoutEmptyDeltaRules() throws {
     let fallbackRoot = Group(
       key: nil,
       label: "Fallback",
@@ -287,7 +298,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     appTwo.root = fallbackRoot
 
     try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
-      let result = try Karabiner2Exporter.generateKarConfig(
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
         globalConfig: globalConfig,
         appConfigs: [
           (bundleId: "com.apple.Safari", config: appOne, customName: "Safari"),
@@ -300,7 +311,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
   }
 
-  func testGenerateKarConfigEmitsAppOverrideAddAndSuppressDeltas() throws {
+  func testGenerateKarabinerTSExportEmitsAppOverrideAddAndSuppressDeltas() throws {
     let fallbackRoot = Group(
       key: nil,
       label: "Fallback",
@@ -328,7 +339,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     )
 
     try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
-      let result = try Karabiner2Exporter.generateKarConfig(
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
         globalConfig: globalConfig,
         appConfigs: [(bundleId: "com.apple.Safari", config: appConfig, customName: "Safari")]
       )
@@ -361,7 +372,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
   }
 
-  func testGenerateKarConfigFailsOnStateIdCollision() {
+  func testGenerateKarabinerTSExportFailsOnStateIdCollision() {
     let config = UserConfig()
     config.root.actions = [
       .group(
@@ -389,7 +400,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     }
     defer { Karabiner2Exporter.stateIdOverride = nil }
 
-    XCTAssertThrowsError(try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])) { error in
+    XCTAssertThrowsError(try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])) { error in
       XCTAssertTrue(error.localizedDescription.contains("state-id collision"))
     }
   }
@@ -412,7 +423,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     XCTAssertFalse(stateMappings.isEmpty)
   }
 
-  func testGenerateKarConfigAppliesAlternativeMappingsToManagedRules() throws {
+  func testGenerateKarabinerTSExportAppliesAlternativeMappingsToManagedRules() throws {
     Karabiner2Exporter.alternativeMappingsOverride = [
       AlternativeMapping(originalKey: "h", alternativeKey: "left_arrow", conditions: ["caps_lock-mode"])
     ]
@@ -430,7 +441,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     )
     config.root.actions = [.action(stickyAction)]
 
-    let result = try Karabiner2Exporter.generateKarConfig(globalConfig: config, appConfigs: [])
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let globalRule = try XCTUnwrap(
       result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" }))
     let manipulators = flattenManipulators(from: [globalRule])
@@ -458,7 +469,7 @@ final class Karabiner2ExporterKarConfigTests: XCTestCase {
     userConfig.loadConfig(suppressAlerts: true)
 
     let appConfigs = try loadRealAppConfigs(using: userConfig)
-    let export = try Karabiner2Exporter.generateKarConfig(
+    let export = try Karabiner2Exporter.generateKarabinerTSExport(
       globalConfig: userConfig,
       appConfigs: appConfigs
     )

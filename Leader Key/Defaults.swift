@@ -104,9 +104,9 @@ extension Defaults.Keys {
     "karabinerTsRepoPath", default: defaultKarabinerTsRepoPath(), suite: defaultsSuite)
   /// Optional override path for goku binary (if empty, uses goku from PATH)
   static let gokuBinaryPath = Key<String>("gokuBinaryPath", default: "", suite: defaultsSuite)
-  /// Karabiner 2.0 export backend: kar, goku, or both
+  /// Karabiner 2.0 export backend.
   static let karabiner2Backend = Key<Karabiner2Backend>(
-    "karabiner2Backend", default: .goku, suite: defaultsSuite)
+    "karabiner2Backend", default: .karabinerTS, suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -272,40 +272,51 @@ enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identif
 }
 
 enum Karabiner2Backend: String, Defaults.Serializable, CaseIterable, Identifiable {
-  case kar
+  case karabinerTS = "kar"
   case goku
-  case both
+  case legacyBoth = "both"
+
+  static var allCases: [Karabiner2Backend] {
+    [.karabinerTS, .goku]
+  }
 
   var id: Self { self }
 
-  var displayName: String {
+  var normalized: Karabiner2Backend {
     switch self {
-    case .kar:
+    case .legacyBoth:
+      return .karabinerTS
+    case .karabinerTS, .goku:
+      return self
+    }
+  }
+
+  var displayName: String {
+    switch normalized {
+    case .karabinerTS, .legacyBoth:
       return "karabiner.ts (repo export)"
     case .goku:
       return "Goku (EDN)"
-    case .both:
-      return "Both (karabiner.ts + Goku)"
     }
   }
 
   var description: String {
-    switch self {
-    case .kar:
-      return "Writes a generated Leader Key module into a configured karabiner.ts workspace and applies the managed rules directly"
+    switch normalized {
+    case .karabinerTS, .legacyBoth:
+      return "Writes a generated Leader Key module into a configured karabiner.ts workspace "
+        + "and applies the managed rules directly."
     case .goku:
-      return "Generates EDN config, injected into karabiner.edn and compiled by Goku"
-    case .both:
-      return "Writes the generated karabiner.ts module first, then runs the legacy Goku EDN pipeline"
+      return "Legacy path: generates EDN config, injects it into karabiner.edn, "
+        + "and compiles it with Goku."
     }
   }
 
-  var requiresKarabinerTsExport: Bool {
-    self == .kar || self == .both
+  var usesKarabinerTsExport: Bool {
+    normalized == .karabinerTS
   }
 
-  var requiresGoku: Bool {
-    self == .goku || self == .both
+  var usesLegacyGoku: Bool {
+    normalized == .goku
   }
 }
 
