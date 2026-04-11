@@ -190,6 +190,18 @@ private struct OpacityPane: View {
 
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSocketServerDelegate {
+  private struct KarabinerActivationContext {
+    enum Mode {
+      case defaultOnly
+      case appSpecificWithFallback
+      case fallbackOnly
+    }
+
+    let mode: Mode
+    let bundleId: String?
+    let activatedAt: Date
+  }
+
   // --- Properties ---
   var controller: Controller!
   var statusItem = StatusItem()
@@ -208,6 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private var isExportRefreshInFlight = false
   private var hasPendingExportRefresh = false
   private var lastExportStartTime: CFAbsoluteTime = 0
+  private var karabinerActivationContext: KarabinerActivationContext?
 
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
@@ -2515,13 +2528,30 @@ extension AppDelegate {
 
       // Determine activation type based on bundleId
       let activationType: Controller.ActivationType
-      if let bundleId = bundleId {
-        // Always use appSpecificWithFallback for any bundleId (including __FALLBACK__)
-        // This ensures consistent behavior with CGEventTap mode
+      let activationContext: KarabinerActivationContext
+      if bundleId == "__FALLBACK__" {
+        activationType = .fallbackOnly
+        activationContext = KarabinerActivationContext(
+          mode: .fallbackOnly,
+          bundleId: nil,
+          activatedAt: Date()
+        )
+      } else if let bundleId = bundleId {
         activationType = .appSpecificWithFallback
+        activationContext = KarabinerActivationContext(
+          mode: .appSpecificWithFallback,
+          bundleId: bundleId,
+          activatedAt: Date()
+        )
       } else {
         activationType = .defaultOnly
+        activationContext = KarabinerActivationContext(
+          mode: .defaultOnly,
+          bundleId: nil,
+          activatedAt: Date()
+        )
       }
+      self.karabinerActivationContext = activationContext
 
       // Check if window is already visible (same as handleActivation does)
       if self.controller.window.isVisible {
@@ -2693,6 +2723,7 @@ extension AppDelegate {
       guard let self = self else { return }
 
       debugLog("[InputMethod] Deactivation received")
+      self.karabinerActivationContext = nil
       
       // Reset Karabiner sticky mode flag and opacity
       if self.isKarabinerStickyMode {
@@ -2713,6 +2744,7 @@ extension AppDelegate {
       guard let self = self else { return }
       
       debugLog("[InputMethod] Settings command received")
+      self.karabinerActivationContext = nil
       
       // If Leader Key is active, hide it and reset state (like deactivate does)
       if self.controller.userState.isActive {
@@ -2914,28 +2946,90 @@ extension AppDelegate {
 
     debugLog("[AppDelegate] Refreshed active sequence after config reload")
   }
-  
-  private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
-    // Determine which root to use based on bundle ID
-    let rootGroup: Group
-    if let bundleId = mapping.bundleId {
-      if bundleId == "__FALLBACK__" {
-        // For fallback mode, use the fallback config
-        rootGroup = config.getFallbackConfig()
-      } else {
-        // Regular app-specific config
-        if let appRoot = config.appConfigs[bundleId],
-           let root = appRoot {
-          rootGroup = root
-        } else {
-          // App config not found, use the merged config (app-specific + fallback)
-          rootGroup = config.getConfig(for: bundleId)
+
+  private func activationType(for contextMode: KarabinerActivationContext.Mode) -> Controller.ActivationType {
+    switch contextMode {
+    case .defaultOnly:
+      return .defaultOnly
+    case .appSpecificWithFallback:
+      return .appSpecificWithFallback
+    case .fallbackOnly:
+      return .fallbackOnly
+    }
+  }
+
+  private func bundleIdForShow(context: KarabinerActivationContext) -> String? {
+    switch context.mode {
+    case .defaultOnly:
+      return nil
+    case .appSpecificWithFallback:
+      return context.bundleId
+    case .fallbackOnly:
+      return "__FALLBACK__"
+    }
+  }
+
+  private func resolvedActivationContext(for mapping: Karabiner2Exporter.StateMapping) -> KarabinerActivationContext {
+    switch mapping.scope {
+    case .global:
+      return KarabinerActivationContext(mode: .defaultOnly, bundleId: nil, activatedAt: Date())
+
+    case .fallbackOnly:
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+
+    case .appShared:
+      if let activationContext = karabinerActivationContext {
+        switch activationContext.mode {
+        case .defaultOnly:
+          return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activationContext.activatedAt)
+        case .appSpecificWithFallback, .fallbackOnly:
+          return activationContext
         }
       }
-    } else {
-      // No bundle ID means use global config
-      rootGroup = config.root
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+
+    case .appOverride, .appSuppress:
+      if let activationContext = karabinerActivationContext,
+         activationContext.mode == .appSpecificWithFallback {
+        return activationContext
+      }
+      if let bundleId = mapping.bundleId {
+        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
+      }
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
     }
+  }
+
+  private func rootGroupForMapping(
+    _ mapping: Karabiner2Exporter.StateMapping,
+    activationContext: KarabinerActivationContext?
+  ) -> Group {
+    switch mapping.scope {
+    case .global:
+      return config.root
+
+    case .fallbackOnly:
+      return config.getFallbackConfig()
+
+    case .appShared:
+      guard let activationContext else {
+        return config.getFallbackConfig()
+      }
+      switch activationContext.mode {
+      case .defaultOnly, .fallbackOnly:
+        return config.getFallbackConfig()
+      case .appSpecificWithFallback:
+        return config.getConfig(for: activationContext.bundleId)
+      }
+
+    case .appOverride, .appSuppress:
+      let bundleId = activationContext?.bundleId ?? mapping.bundleId
+      return config.getConfig(for: bundleId)
+    }
+  }
+  
+  private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
+    let rootGroup = rootGroupForMapping(mapping, activationContext: nil)
     
     var currentGroup = rootGroup
     
@@ -2980,10 +3074,14 @@ extension AppDelegate {
       return
     }
 
-    debugLog("[AppDelegate] Found mapping for state ID \(stateId): type=\(mapping.actionType), label=\(mapping.actionLabel ?? "unknown"), bundleId=\(mapping.bundleId ?? "nil")")
+    let activationContext = resolvedActivationContext(for: mapping)
+    let activationType = activationType(for: activationContext.mode)
+    let activationBundleId = bundleIdForShow(context: activationContext)
 
-    // Determine activation type from mapping's bundleId
-    let activationType: Controller.ActivationType = mapping.bundleId != nil ? .appSpecificWithFallback : .defaultOnly
+    debugLog(
+      "[AppDelegate] Found mapping for state ID \(stateId): scope=\(mapping.scope.rawValue), " +
+        "type=\(mapping.actionType), label=\(mapping.actionLabel ?? "unknown"), " +
+        "bundleId=\(mapping.bundleId ?? "nil"), activeBundle=\(activationBundleId ?? "nil")")
 
     // Helper: ensure window is visible with the correct config, then run continuation
     let ensureWindowVisible: (@escaping () -> Void) -> Void = { [weak self] continuation in
@@ -2991,9 +3089,9 @@ extension AppDelegate {
       if self.controller.window.isVisible {
         continuation()
       } else {
-        debugLog("[AppDelegate] Window not visible, showing with bundleId: \(mapping.bundleId ?? "nil")")
-        self.controller.show(type: activationType, bundleId: mapping.bundleId) {
-          self.startSequence(activationType: activationType, bundleId: mapping.bundleId)
+        debugLog("[AppDelegate] Window not visible, showing with bundleId: \(activationBundleId ?? "nil")")
+        self.controller.show(type: activationType, bundleId: activationBundleId) {
+          self.startSequence(activationType: activationType, bundleId: activationBundleId)
           continuation()
         }
       }

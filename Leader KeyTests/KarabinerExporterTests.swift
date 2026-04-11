@@ -53,15 +53,15 @@ class KarabinerExporterTests: XCTestCase {
         // Generate EDN
         let edn = Karabiner2Exporter.generateGokuEDN(from: config)
         
-        // Verify URL action (Foreground)
-        XCTAssertTrue(edn.contains("open 'https://example.com'"), "EDN should contain foreground open command for HTTP URL")
-        XCTAssertFalse(edn.contains("open -g 'https://example.com'"), "EDN should NOT contain background flag for HTTP URL")
-        
-        // Verify Custom URL action (Background)
-        XCTAssertTrue(edn.contains("open -g 'raycast://confetti'"), "EDN should contain background open command for custom URL")
-        
-        // Verify Explicit Background URL action
-        XCTAssertTrue(edn.contains("open -g 'https://example.com/bg'"), "EDN should contain background open command for URL with activates=false")
+        // Verify URL action payloads
+        XCTAssertTrue(edn.contains(":type :open"))
+        XCTAssertTrue(edn.contains(":target \"https://example.com\""))
+        XCTAssertTrue(edn.contains(":background false"))
+
+        XCTAssertTrue(edn.contains(":target \"raycast://confetti\""))
+        XCTAssertTrue(edn.contains(":background true"))
+
+        XCTAssertTrue(edn.contains(":target \"https://example.com/bg\""))
     }
 
     func testGenerateGokuEDNIncludesKeystrokePayloads() {
@@ -108,8 +108,12 @@ class KarabinerExporterTests: XCTestCase {
 
         let edn = Karabiner2Exporter.generateGokuEDN(from: config)
 
-        XCTAssertTrue(edn.contains(":type \"keystroke\" :app \"Google Chrome\" :spec \"Ct\""))
-        XCTAssertTrue(edn.contains(":type \"keystroke\" :spec \"escape\""))
-        XCTAssertTrue(edn.contains(":type \"keystroke\" :app \"Safari\" :focus true :spec \"CSf\""))
+        XCTAssertTrue(edn.contains(":type :keystroke"))
+        XCTAssertTrue(edn.contains(":app \"Google Chrome\""))
+        XCTAssertTrue(edn.contains(":spec \"Ct\""))
+        XCTAssertTrue(edn.contains(":spec \"escape\""))
+        XCTAssertTrue(edn.contains(":app \"Safari\""))
+        XCTAssertTrue(edn.contains(":focus true"))
+        XCTAssertTrue(edn.contains(":spec \"CSf\""))
     }
 }

@@ -184,10 +184,25 @@ final class Karabiner2InputMethod: InputMethod {
     debugLog("[Benchmark] Config discovery: \(String(format: "%.0f", discoveryElapsed * 1000))ms")
 
     let backend = Defaults[.karabiner2Backend]
+    var managedExport: Karabiner2Exporter.KarabinerTSExport?
+
+    if backend.requiresKarabinerTsExport || backend.requiresGoku {
+      do {
+        managedExport = try Karabiner2Exporter.generateKarConfig(
+          globalConfig: globalConfig,
+          appConfigs: appConfigs
+        )
+      } catch {
+        debugLog("[Karabiner2InputMethod] Failed to build shared managed export: \(error)")
+        if backend.requiresKarabinerTsExport || backend == .goku {
+          return
+        }
+      }
+    }
 
     if backend.requiresKarabinerTsExport {
       let karStart = CFAbsoluteTimeGetCurrent()
-      exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs)
+      exportUsingKar(globalConfig: globalConfig, appConfigs: appConfigs, precomputedExport: managedExport)
       debugLog("[Benchmark] karabiner.ts export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
     }
 
@@ -198,10 +213,17 @@ final class Karabiner2InputMethod: InputMethod {
 
     // 3. Generate unified EDN with hierarchical organization
     let ednGenStart = CFAbsoluteTimeGetCurrent()
-    let (ednContent, stateMappings) = Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
-      globalConfig: globalConfig,
-      appConfigs: appConfigs
-    )
+    let ednContent: String
+    let stateMappings: [Karabiner2Exporter.StateMapping]
+    do {
+      (ednContent, stateMappings) = try Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
+        globalConfig: globalConfig,
+        appConfigs: appConfigs
+      )
+    } catch {
+      debugLog("[Karabiner2InputMethod] Failed to generate unified Goku EDN: \(error)")
+      return
+    }
     
     debugLog("[Benchmark] EDN generation: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - ednGenStart) * 1000))ms")
 
@@ -217,16 +239,23 @@ final class Karabiner2InputMethod: InputMethod {
       try ednContent.write(toFile: filePath, atomically: true, encoding: .utf8)
 
       debugLog("[Karabiner2InputMethod] Exported unified configuration to \(filePath)")
-      try saveStateMappings(stateMappings, outputDir: outputDir)
+      let mappingsToSave: [Karabiner2Exporter.StateMapping]
+      if let managedExport {
+        mappingsToSave = Karabiner2Exporter.sortMappings(managedExport.stateMappings)
+      } else {
+        mappingsToSave = Karabiner2Exporter.sortMappings(stateMappings)
+      }
+      try saveStateMappings(mappingsToSave, outputDir: outputDir)
       
       // Inject into main karabiner.edn if markers exist
       // Check if activation shortcuts already exist in target file
       let configPath = NSHomeDirectory() + "/.config/karabiner.edn"
-      var hasExistingActivationShortcuts = false
+      var shouldPreserveActivationShortcuts = false
       
       if FileManager.default.fileExists(atPath: configPath) {
         if let existingContent = try? String(contentsOfFile: configPath, encoding: .utf8) {
-          hasExistingActivationShortcuts = existingContent.contains("\"Leader Key - Activation Shortcuts\"")
+          shouldPreserveActivationShortcuts =
+            Karabiner2Exporter.shouldPreserveActivationShortcuts(in: existingContent)
         }
       }
       
@@ -242,11 +271,11 @@ final class Karabiner2InputMethod: InputMethod {
       // Prepare rules for injection
       var rulesToInject = mainRules
       
-      // Only add activation shortcuts if they don't already exist
-      if !hasExistingActivationShortcuts, let activationShortcuts = activationShortcuts {
-        debugLog("[Karabiner2InputMethod] Including activation shortcuts (not found in existing file)")
+      // Replace legacy activation shortcuts because they still set removed leaderkey_* mode variables.
+      if !shouldPreserveActivationShortcuts, let activationShortcuts = activationShortcuts {
+        debugLog("[Karabiner2InputMethod] Including generated activation shortcuts")
         rulesToInject.insert(activationShortcuts, at: 0)  // Add at beginning
-      } else if hasExistingActivationShortcuts {
+      } else if shouldPreserveActivationShortcuts {
         debugLog("[Karabiner2InputMethod] Preserving existing activation shortcuts")
       }
       
@@ -257,7 +286,7 @@ final class Karabiner2InputMethod: InputMethod {
           mainRules: rulesToInject,
           specificConfigRules: specificConfigRules,
           autoAddMarkers: true,  // Auto-add markers if missing
-          preserveActivationShortcuts: hasExistingActivationShortcuts  // Preserve if they exist
+          preserveActivationShortcuts: shouldPreserveActivationShortcuts
         )
         
         switch injectionResult {
@@ -281,6 +310,12 @@ final class Karabiner2InputMethod: InputMethod {
         let gokuResult = GokuCompilerService.shared.compileAndApply(configPath: configPath)
         debugLog("[Benchmark] Goku compilation: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - gokuStart) * 1000))ms")
         debugLog("[Karabiner2InputMethod] \(gokuResult.message)")
+
+        if let managedExport {
+          let karStart = CFAbsoluteTimeGetCurrent()
+          try KarabinerTsExportService.shared.applyRules(managedExport.managedRules)
+          debugLog("[Benchmark] Post-Goku managed rule patch: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karStart) * 1000))ms")
+        }
       } else {
         debugLog("[Karabiner2InputMethod] goku skipped: karabiner.edn not found")
       }
@@ -312,7 +347,8 @@ final class Karabiner2InputMethod: InputMethod {
   /// Deferring step 3 to a background thread will cause "No mapping found" errors for new config items.
   private func exportUsingKar(
     globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    precomputedExport: Karabiner2Exporter.KarabinerTSExport? = nil
   ) {
     let service = KarabinerTsExportService.shared
 
@@ -320,10 +356,15 @@ final class Karabiner2InputMethod: InputMethod {
       // === CRITICAL PATH: generateKarConfig + applyRules + saveStateMappings ===
 
       let t0 = CFAbsoluteTimeGetCurrent()
-      let export = Karabiner2Exporter.generateKarConfig(
-        globalConfig: globalConfig,
-        appConfigs: appConfigs
-      )
+      let export: Karabiner2Exporter.KarabinerTSExport
+      if let precomputedExport {
+        export = precomputedExport
+      } else {
+        export = try Karabiner2Exporter.generateKarConfig(
+          globalConfig: globalConfig,
+          appConfigs: appConfigs
+        )
+      }
       let t1 = CFAbsoluteTimeGetCurrent()
 
       // Phase 2: Patch karabiner.json with managed rules (the critical output).

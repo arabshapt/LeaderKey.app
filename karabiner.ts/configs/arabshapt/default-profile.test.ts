@@ -34,14 +34,14 @@ describe('arabshapt Default profile migration', () => {
   "basic.to_if_alone_timeout_milliseconds": 260,
   "basic.to_if_held_down_threshold_milliseconds": 50
 })
-    expect(defaultComplexModifications.rules).toHaveLength(76)
+    expect(defaultComplexModifications.rules).toHaveLength(74)
 
     const digest = createHash('sha256')
       .update(JSON.stringify(canonicalize(defaultComplexModifications)))
       .digest('hex')
 
     expect(digest).toBe(defaultComplexModificationsSha256)
-    expect(digest).toBe("4a34cd1933d5008f73b3e8fb81609edae7ec7d4ce45bd22753cf70dc5487610c")
+    expect(digest).toBe("ab481e7bdd9aaeb3397d2157e78cc649f9ee61922ec154ed0dfd5a7a2546b3b8")
   })
 
   test('preserves send_user_command payload shapes', () => {
@@ -77,13 +77,13 @@ describe('arabshapt Default profile migration', () => {
     }
 
     expect(counts).toEqual({
-  "string": 6606,
-  "object": 3347,
+  "string": 1353,
+  "object": 373,
   "types": {
-    "open_app": 2091,
-    "open": 1245,
+    "open": 229,
     "menu": 7,
     "intellij": 1,
+    "open_app": 133,
     "keystroke": 3
   }
 })

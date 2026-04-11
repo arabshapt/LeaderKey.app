@@ -387,7 +387,37 @@ private final class StatusItemSpy: StatusItem {
   }
 }
 
+private final class TestLeaderKeyWindow: MainWindow {
+  override var hasCheatsheet: Bool { false }
+
+  required init(controller: Controller) {
+    super.init(controller: controller, contentRect: NSRect(x: 100, y: 100, width: 640, height: 480))
+  }
+
+  override func show(at origin: NSPoint? = nil, after: (() -> Void)? = nil) {
+    shouldBeVisible = true
+    if let origin {
+      setFrameOrigin(origin)
+    }
+    alphaValue = 1
+    orderFront(nil)
+    after?()
+  }
+
+  override func hide(after: (() -> Void)?) {
+    shouldBeVisible = false
+    alphaValue = 0
+    orderOut(nil)
+    after?()
+  }
+}
+
 final class AppDelegateConfigEventTests: XCTestCase {
+  private enum TestStateId {
+    static let globalGroup: Int32 = 3001
+    static let sharedAppGroup: Int32 = 3002
+  }
+
   override func setUp() {
     super.setUp()
     defaultsSuite = UserDefaults(suiteName: name)!
@@ -417,5 +447,152 @@ final class AppDelegateConfigEventTests: XCTestCase {
       refreshActiveSequenceAfterReload: {}
     )
     XCTAssertEqual(statusItemSpy.reloadSuccessCount, 1)
+  }
+
+  func testSharedAppStateUsesActivationContextToReopenMergedAppConfig() throws {
+    let fixture = try makeActivationFixture()
+
+    fixture.appDelegate.inputMethodDidReceiveActivation(bundleId: fixture.bundleId)
+    drainMainQueue()
+    drainMainQueue()
+
+    fixture.appDelegate.controller.window.hide(after: nil)
+    fixture.appDelegate.inputMethodDidReceiveStateId(TestStateId.sharedAppGroup)
+    drainMainQueue()
+    drainMainQueue()
+
+    XCTAssertEqual(fixture.appDelegate.controller.userState.activeRoot?.label, "App Root")
+  }
+
+  func testFallbackActivationKeepsSharedAppStateInFallbackConfig() throws {
+    let fixture = try makeActivationFixture()
+
+    fixture.appDelegate.inputMethodDidReceiveActivation(bundleId: "__FALLBACK__")
+    drainMainQueue()
+    drainMainQueue()
+
+    fixture.appDelegate.controller.window.hide(after: nil)
+    fixture.appDelegate.inputMethodDidReceiveStateId(TestStateId.sharedAppGroup)
+    drainMainQueue()
+    drainMainQueue()
+
+    XCTAssertEqual(fixture.appDelegate.controller.userState.activeRoot?.label, "Fallback Root")
+  }
+
+  func testGlobalStateIdResolvesWithoutActivationContext() throws {
+    let fixture = try makeActivationFixture()
+
+    fixture.appDelegate.inputMethodDidReceiveStateId(TestStateId.globalGroup)
+    drainMainQueue()
+    drainMainQueue()
+
+    XCTAssertEqual(fixture.appDelegate.controller.userState.activeRoot?.label, "Global Root")
+  }
+
+  private func makeActivationFixture() throws -> (appDelegate: AppDelegate, bundleId: String, configURL: URL) {
+    let configURL = try makeTemporaryDirectory()
+    Defaults[.configDir] = configURL.path
+
+    let globalRoot = Group(
+      key: nil,
+      label: "Global Root",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(Group(key: "g", label: "Global Child", iconPath: nil, stickyMode: nil, actions: []))
+      ]
+    )
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback Root",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(Group(key: "f", label: "Fallback Child", iconPath: nil, stickyMode: nil, actions: []))
+      ]
+    )
+    let appRoot = Group(
+      key: nil,
+      label: "App Root",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(Group(key: "a", label: "App Child", iconPath: nil, stickyMode: nil, actions: []))
+      ]
+    )
+
+    try writeConfig(globalRoot, named: "global-config.json", into: configURL)
+    try writeConfig(fallbackRoot, named: "app-fallback-config.json", into: configURL)
+
+    let bundleId = "com.example.Editor"
+    try writeConfig(appRoot, named: "app.\(bundleId).json", into: configURL)
+    try writeStateMappings(
+      [
+        Karabiner2Exporter.StateMapping(
+          stateId: TestStateId.globalGroup,
+          path: ["g"],
+          scope: .global,
+          appAlias: nil,
+          bundleId: nil,
+          actionType: "group",
+          actionTypeRaw: nil,
+          actionValue: nil,
+          actionLabel: "Global Child"
+        ),
+        Karabiner2Exporter.StateMapping(
+          stateId: TestStateId.sharedAppGroup,
+          path: ["f"],
+          scope: .appShared,
+          appAlias: nil,
+          bundleId: nil,
+          actionType: "group",
+          actionTypeRaw: nil,
+          actionValue: nil,
+          actionLabel: "Fallback Child"
+        ),
+      ],
+      into: configURL
+    )
+
+    let appDelegate = AppDelegate()
+    appDelegate.config.discoverConfigFiles()
+    appDelegate.config.loadConfig()
+
+    let userState = UserState(userConfig: appDelegate.config)
+    appDelegate.state = userState
+    let controller = Controller(userState: userState, userConfig: appDelegate.config, appDelegate: appDelegate)
+    controller.window = TestLeaderKeyWindow(controller: controller)
+    appDelegate.controller = controller
+
+    return (appDelegate, bundleId, configURL)
+  }
+
+  private func writeConfig(_ group: Group, named fileName: String, into directory: URL) throws {
+    let data = try JSONEncoder().encode(group)
+    try data.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+  }
+
+  private func writeStateMappings(_ mappings: [Karabiner2Exporter.StateMapping], into directory: URL) throws {
+    let exportDirectory = directory.appendingPathComponent("export", isDirectory: true)
+    try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+    let data = try JSONEncoder().encode(mappings)
+    try data.write(
+      to: exportDirectory.appendingPathComponent("leaderkey-state-mappings.json"),
+      options: .atomic
+    )
+  }
+
+  private func makeTemporaryDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+  }
+
+  private func drainMainQueue(file: StaticString = #filePath, line: UInt = #line) {
+    let expectation = expectation(description: "main-queue-drain")
+    DispatchQueue.main.async {
+      expectation.fulfill()
+    }
+    wait(for: [expectation], timeout: 1.0)
   }
 }
