@@ -67,6 +67,60 @@ final class KarabinerTsExportServiceTests: XCTestCase {
     XCTAssertEqual(rules[1]["description"] as? String, "LeaderKeyManaged/NewRule")
   }
 
+  func testCompileAndApplySkipsUnchangedGeneratedOutputs() throws {
+    let repoURL = try makeTemporaryDirectory()
+    let karabinerJSONURL = repoURL.appendingPathComponent("karabiner.json")
+    try "{}".write(to: repoURL.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+    try writeKarabinerJSON(
+      [
+        "profiles": [
+          [
+            "name": "Default",
+            "selected": true,
+            "complex_modifications": [
+              "rules": [
+                ["description": "KeepMe", "manipulators": [["type": "basic"]]]
+              ]
+            ],
+          ]
+        ]
+      ], to: karabinerJSONURL)
+
+    let managedRules = [
+      ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
+    ]
+    let moduleSource = """
+      export const leaderKeyDefaultProfileName = "Default"
+      export const leaderKeyManagedRules = [] as const
+      export default leaderKeyManagedRules
+      """
+
+    let firstResult = KarabinerTsExportService.shared.compileAndApply(
+      managedRules: managedRules,
+      repoModuleSource: moduleSource,
+      repoPath: repoURL.path,
+      karabinerJsonPath: karabinerJSONURL.path
+    )
+    XCTAssertTrue(firstResult.success)
+
+    let generatedModuleURL = repoURL.appendingPathComponent(KarabinerTsExportService.generatedModuleRelativePath)
+    let firstKarabinerModifiedAt = try modificationDate(for: karabinerJSONURL)
+    let firstModuleModifiedAt = try modificationDate(for: generatedModuleURL)
+
+    Thread.sleep(forTimeInterval: 1.1)
+
+    let secondResult = KarabinerTsExportService.shared.compileAndApply(
+      managedRules: managedRules,
+      repoModuleSource: moduleSource,
+      repoPath: repoURL.path,
+      karabinerJsonPath: karabinerJSONURL.path
+    )
+    XCTAssertTrue(secondResult.success)
+
+    XCTAssertEqual(try modificationDate(for: karabinerJSONURL), firstKarabinerModifiedAt)
+    XCTAssertEqual(try modificationDate(for: generatedModuleURL), firstModuleModifiedAt)
+  }
+
   func testCompileAndApplyDoesNotTouchKarabinerJSONWhenRepoExportFails() throws {
     let repoURL = try makeTemporaryDirectory()
     let karabinerJSONURL = repoURL.appendingPathComponent("karabiner.json")
@@ -255,6 +309,11 @@ final class KarabinerTsExportServiceTests: XCTestCase {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
+  }
+
+  private func modificationDate(for url: URL) throws -> Date {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    return try XCTUnwrap(attributes[.modificationDate] as? Date)
   }
 
   private func writeKarabinerJSON(_ root: [String: Any], to url: URL) throws {

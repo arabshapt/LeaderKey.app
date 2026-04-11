@@ -23,18 +23,32 @@ final class KeyLookupCache {
 
   /// Build the cache from a Group hierarchy
   func buildFromGroup(_ group: Group) {
-    queue.async(flags: .barrier) {
-      self.validKeysPerGroup.removeAll()
-      self.stickyModePerGroup.removeAll()
-      self.childGroupsPerGroup.removeAll()
-      self.rootGroupId = group.id
+    var validKeysPerGroup: [UUID: Set<String>] = [:]
+    var stickyModePerGroup: [UUID: Bool] = [:]
+    var childGroupsPerGroup: [UUID: [UUID]] = [:]
 
-      self.processGroup(group)
+    Self.processGroup(
+      group,
+      validKeysPerGroup: &validKeysPerGroup,
+      stickyModePerGroup: &stickyModePerGroup,
+      childGroupsPerGroup: &childGroupsPerGroup
+    )
+
+    queue.sync(flags: .barrier) {
+      self.validKeysPerGroup = validKeysPerGroup
+      self.stickyModePerGroup = stickyModePerGroup
+      self.childGroupsPerGroup = childGroupsPerGroup
+      self.rootGroupId = group.id
     }
   }
 
   /// Recursively process a group and its children
-  private func processGroup(_ group: Group) {
+  private static func processGroup(
+    _ group: Group,
+    validKeysPerGroup: inout [UUID: Set<String>],
+    stickyModePerGroup: inout [UUID: Bool],
+    childGroupsPerGroup: inout [UUID: [UUID]]
+  ) {
     var validKeys = Set<String>()
     var childGroups = [UUID]()
 
@@ -48,7 +62,12 @@ final class KeyLookupCache {
       // If it's a subgroup, process it recursively
       if case .group(let subgroup) = actionOrGroup {
         childGroups.append(subgroup.id)
-        processGroup(subgroup)
+        processGroup(
+          subgroup,
+          validKeysPerGroup: &validKeysPerGroup,
+          stickyModePerGroup: &stickyModePerGroup,
+          childGroupsPerGroup: &childGroupsPerGroup
+        )
       }
     }
 
@@ -155,7 +174,7 @@ final class KeyLookupCache {
 
   /// Clear all cached data
   func clear() {
-    queue.async(flags: .barrier) {
+    queue.sync(flags: .barrier) {
       self.validKeysPerGroup.removeAll()
       self.stickyModePerGroup.removeAll()
       self.childGroupsPerGroup.removeAll()

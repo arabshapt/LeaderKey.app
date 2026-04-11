@@ -9,7 +9,7 @@
 
 ## Architecture
 
-Leader Key is a **Karabiner Elements companion app** — a configurator UI, WhichKey/hint overlay, and config exporter. Karabiner Elements is always the foundation for keyboard input.
+Leader Key = **Karabiner Elements companion app** — configurator UI, WhichKey/hint overlay, config exporter. Karabiner always foundation.
 
 ### Data Flow
 ```
@@ -22,16 +22,16 @@ Karabiner Elements (captures keys, detects frontmost app)
 ```
 
 ### Key Design Decisions
-- **Karabiner is single source of truth for app detection** — bundleId always comes from Karabiner's `activate {bundleId}` command. Never use `NSWorkspace.shared.frontmostApplication` for config loading — it can't detect overlay apps like Raycast
-- **stateid is self-contained** — `executeActionByStateId()` uses `mapping.bundleId` to show the window with the correct config if not already visible
-- **Two export backends** — Goku (EDN format) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`
-- **v1 payload protocol** — `KarabinerUserCommandReceiver` handles structured `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd, `menu` → AX API, `intellij` → UDS socket at `/tmp/intellij-leaderkey.sock`. String payloads route to `KarabinerCommandRouter` as before
-- **Config merging** — app-specific configs are merged with fallback config via `mergeConfigWithFallback()`
-- **Goku is the personal Karabiner source of truth** — `~/.config/karabiner.edn` is canonical for arabshapt's full personal setup. The large `karabiner.ts/configs/arabshapt/default-profile.ts` file is a generated migration snapshot, not a hand-edited config. Re-sync it with `cd karabiner.ts && npm run sync:arabshapt`
+- **Karabiner = single source of truth for app detection** — bundleId always from Karabiner's `activate {bundleId}` command. Never use `NSWorkspace.shared.frontmostApplication` for config loading — can't detect overlay apps like Raycast
+- **stateid self-contained** — `executeActionByStateId()` uses `mapping.bundleId` to show window with correct config if not visible
+- **Two export backends** — Goku (EDN) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`
+- **v1 payload protocol** — `KarabinerUserCommandReceiver` handles `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd, `menu` → AX API, `intellij` → UDS at `/tmp/intellij-leaderkey.sock`. String payloads → `KarabinerCommandRouter`
+- **Config merging** — app-specific configs merged with fallback via `mergeConfigWithFallback()`
+- **Goku = personal Karabiner source of truth** — `~/.config/karabiner.edn` canonical for arabshapt's setup. `karabiner.ts/configs/arabshapt/default-profile.ts` = generated migration snapshot, not hand-edited. Re-sync: `cd karabiner.ts && npm run sync:arabshapt`
 
 ### Config Files (in `~/Library/Application Support/Leader Key/`)
 - `global-config.json` — default global config (always loaded as `root`)
-- `app-fallback-config.json` — fallback config merged into every app config
+- `app-fallback-config.json` — fallback merged into every app config
 - `app.{bundleId}.json` — app-specific configs (e.g., `app.com.raycast.macos.json`)
 
 ### File Organization
@@ -45,26 +45,26 @@ Karabiner Elements (captures keys, detects frontmost app)
 | Models | `Defaults.swift`, `UserState.swift`, `ConfigCache.swift`, `KeyLookupCache.swift` |
 
 ## Code Style Guidelines
-- **Imports**: Group Foundation/AppKit imports first, then third-party libraries (Combine, Defaults)
-- **Naming**: Use descriptive camelCase for variables/functions, PascalCase for types
-- **Types**: Use explicit type annotations for public properties and parameters
-- **Error Handling**: Use do/catch blocks and `alertHandler.showAlert()` for user-facing errors
-- **Extensions**: Create extensions for additional functionality (UserConfig is split into 11 focused extensions)
-- **State Management**: Use @Published and ObservableObject for reactive UI updates
-- **Testing**: Descriptive test names, XCTAssert* methods. Tests in `Leader KeyTests/`
-- **Access Control**: Use appropriate access modifiers (private, fileprivate, internal)
-- Follow Swift idioms and default formatting (4-space indentation, spaces around operators)
+- **Imports**: Foundation/AppKit first, then third-party (Combine, Defaults)
+- **Naming**: camelCase vars/funcs, PascalCase types
+- **Types**: Explicit annotations for public properties/params
+- **Error Handling**: do/catch + `alertHandler.showAlert()` for user-facing errors
+- **Extensions**: Extend for added functionality (UserConfig = 11 focused extensions)
+- **State Management**: @Published + ObservableObject for reactive UI
+- **Testing**: Descriptive names, XCTAssert* methods. Tests in `Leader KeyTests/`
+- **Access Control**: Appropriate modifiers (private, fileprivate, internal)
+- Swift idioms, 4-space indent, spaces around operators
 
 ## IntelliJ Integration (v1.3.0+)
 
-The `intellij` action type sends actions directly to IntelliJ via Unix Domain Socket — no HTTP, no shell spawn.
+`intellij` action type sends directly to IntelliJ via Unix Domain Socket — no HTTP, no shell spawn.
 
-**Socket path**: `/tmp/intellij-leaderkey.sock` (created by the IntelliJ plugin on startup)
+**Socket path**: `/tmp/intellij-leaderkey.sock` (IntelliJ plugin creates on startup)
 
-**Protocol**: Newline-delimited JSON over `SOCK_STREAM`. Same request format as the HTTP server.
+**Protocol**: Newline-delimited JSON over `SOCK_STREAM`. Same request format as HTTP server.
 
 **Single action**: `{"action":"ReformatCode"}`
-**Multiple actions**: `{"actions":"SaveAll,ReformatCode","delay":100}` (delay is optional ms between actions)
+**Multiple actions**: `{"actions":"SaveAll,ReformatCode","delay":100}` (delay = optional ms between actions)
 
 **Plugin location**: `~/personalProjects/intellijPlugin/`
 **Build**: `JAVA_HOME=.../temurin-21.0.7/Contents/Home ./gradlew build` (requires Java 21 — system Java 25 breaks Gradle)
@@ -75,9 +75,9 @@ The `intellij` action type sends actions directly to IntelliJ via Unix Domain So
 {"key": "f", "type": "intellij", "value": "ReformatCode,OptimizeImports", "label": "Format"}
 ```
 
-**Export**: Goku uses `gokuIntelliJ()`, kar uses `karIntelliJ()` — both generate `send_user_command` with `{v:1, type:"intellij", action:"..."}` payload.
+**Export**: Goku uses `gokuIntelliJ()`, kar uses `karIntelliJ()` — both generate `send_user_command` with `{v:1, type:"intellij", action:"..."}`.
 
-**Adding a new v1 payload type** (pattern to follow):
+**Adding new v1 payload type** (pattern):
 1. Add `case "newtype"` to `handleV1Payload()` in `KarabinerUserCommandReceiver.swift`
 2. Add `case newtype` to `Type` enum in `UserConfig.swift` + display name
 3. Add `case .newtype` to `Controller.swift` `runAction()`
@@ -87,19 +87,19 @@ The `intellij` action type sends actions directly to IntelliJ via Unix Domain So
 
 ## Raycast Config Editing
 
-The Raycast extension is a separate fast-path editor and discoverability surface. It is intentionally independent from the native settings UI.
+Raycast extension = separate fast-path editor + discoverability surface. Intentionally independent from native settings UI.
 
 **Commands**:
 - `Search Shortcuts` — global/effective search across derived shortcut records
-- `Browse Configs` — config-first navigation and editing
+- `Browse Configs` — config-first navigation/editing
 - `Add/Edit by Path` — character-driven path editor (`ab.c` = `a → b → . → c`)
 
 **Key behaviors**:
-- Current-app Raycast deeplinks must be resolved **before** Raycast opens. Use `app:{frontmostBundleId}` in the Raycast deeplink target and let Leader Key expand `{frontmostBundleId}` at execution time.
-- Raycast copy/paste uses an internal extension clipboard, not the macOS clipboard.
-- Paste is conflict-safe: if the copied key already exists in the target group, open a prefilled create/edit form instead of overwriting.
-- Empty groups must still expose create actions (`Add First Action`, `Add First Group`) so they are never dead ends.
-- Raycast writes JSON directly, then triggers apply over Leader Key's local socket. Do not rely on URL callbacks.
+- Current-app Raycast deeplinks must resolve **before** Raycast opens. Use `app:{frontmostBundleId}` in deeplink target; Leader Key expands `{frontmostBundleId}` at execution.
+- Raycast copy/paste uses internal extension clipboard, not macOS clipboard.
+- Paste conflict-safe: if copied key exists in target group, open prefilled create/edit form instead of overwriting.
+- Empty groups must expose create actions (`Add First Action`, `Add First Group`) — never dead ends.
+- Raycast writes JSON directly, then triggers apply over Leader Key's local socket. Don't rely on URL callbacks.
 
 ## Manual Testing (v1 payload protocol)
 
@@ -109,7 +109,7 @@ killall "Leader Key" 2>/dev/null
 "/path/to/DerivedData/Leader_Key-.../Build/Products/Debug/Leader Key.app/Contents/MacOS/Leader Key"
 ```
 
-Send test payloads to the Karabiner user-command receiver (in a second terminal):
+Send test payloads to Karabiner user-command receiver (second terminal):
 ```bash
 # open_app → seqd
 python3 -c "
@@ -178,26 +178,26 @@ sock.close()
 ```
 
 ## Speed Optimization Patterns
-- **`send_user_command` over `shell_command`** — Karabiner's `send_user_command` uses an existing datagram socket (fire-and-forget, ~1ms). `shell_command` spawns a new process each time (~100-200ms). Always prefer `send_user_command` with v1 payloads for app/URL/menu actions
-- **`NSRunningApplication.activate()` over `NSWorkspace.openApplication`** — `activate()` is direct IPC to WindowServer (~1ms). `openApplication` goes through LaunchServices (~50ms). Use `activate()` as fast path for running apps, but only if the target app already has a usable window
-- **Reopen checks only for already-active apps** — some apps (notably Messages) can remain frontmost and keep owning the menu bar after `Cmd+W`, while having no visible window. In that state `activate()` is effectively a no-op. `open_app` now does the more expensive AX/window-state check only when the target app is already active, preserving the seq-style fast path for normal app switches
-- **App cache (`appCache`)** — `KarabinerUserCommandReceiver` caches `app string → (url, bundleId)` to avoid repeated FileManager + Bundle lookups. First call resolves, all subsequent are dictionary hits
-- **AX menu walking** — Use `AXUIElementPerformAction(kAXPressAction)` directly (non-visual). `AXPick` and `AXShowMenu` are slower alternatives. Descendant search (depth 6) handles inconsistent menu structures across apps
-- **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management commands
-- **Macro execution** — macros that use `menu` type go through in-process AX API calls, not shell spawns. Same for `application` (cached NSRunningApplication) and `url` (NSWorkspace)
-- **IntelliJ UDS over HTTP** — `intellij` action type connects to `/tmp/intellij-leaderkey.sock` directly (~1ms). Eliminates HTTP handshake overhead of the old `curl localhost:63343` approach (~50ms). Use `SOCK_STREAM` (not `SOCK_DGRAM`) — JVM UDS only supports stream sockets
-- **Always-on control socket for external apply** — Raycast and other local tools should send `apply-config` to `/tmp/leaderkey.sock` instead of touching files or using URL schemes. This keeps apply in-process and avoids duplicate reload paths
+- **`send_user_command` over `shell_command`** — `send_user_command` uses existing datagram socket (~1ms). `shell_command` spawns process each time (~100-200ms). Always prefer `send_user_command` with v1 payloads
+- **`NSRunningApplication.activate()` over `NSWorkspace.openApplication`** — `activate()` = direct IPC to WindowServer (~1ms). `openApplication` through LaunchServices (~50ms). Use `activate()` as fast path for running apps with usable window
+- **Reopen checks only for already-active apps** — apps like Messages can stay frontmost after `Cmd+W` with no visible window; `activate()` = no-op. `open_app` does expensive AX/window-state check only when target already active
+- **App cache (`appCache`)** — `KarabinerUserCommandReceiver` caches `app string → (url, bundleId)`. First call resolves, subsequent = dict hits
+- **AX menu walking** — Use `AXUIElementPerformAction(kAXPressAction)` directly (non-visual). `AXPick`/`AXShowMenu` slower. Depth-6 descendant search handles inconsistent menu structures
+- **`NSWorkspace.OpenConfiguration.activates = false`** — Opens URLs in background without stealing focus. Critical for Raycast deep links / window management
+- **Macro execution** — `menu` type → in-process AX API, not shell. Same for `application` (cached NSRunningApplication) and `url` (NSWorkspace)
+- **IntelliJ UDS over HTTP** — `intellij` connects to `/tmp/intellij-leaderkey.sock` (~1ms). Eliminates HTTP handshake (~50ms). Use `SOCK_STREAM` — JVM UDS only supports stream
+- **Always-on control socket** — Raycast/local tools send `apply-config` to `/tmp/leaderkey.sock`. Keeps apply in-process, avoids duplicate reload paths
 
 ## Common Gotchas
-- **Deleting Swift files** requires removing references from `Leader Key.xcodeproj/project.pbxproj` (use python script to remove lines by line number)
-- **Config caching** — `UserConfig.appConfigs` dict caches loaded configs. Call `reloadConfig()` to bust the cache
-- **Frontmost app does not guarantee a visible window** — Messages can stay frontmost after `Cmd+W` and still own the menu bar. If app activation logs show `activated ...` but nothing appears, check whether the app is already active with no regular window. The correct behavior is to reopen, not re-activate
-- **Shell command escaping** in Goku EDN requires two layers: shell escaping (`'\''`) then EDN escaping (`\\`, `\"`)
-- **State IDs** in `Karabiner2Exporter` — global starts at 1, fallback at 2, inactive is 0
-- **Karabiner key repeat** — Karabiner only allows key repeat for the **last** event in the `to` array. In sticky-mode shortcuts, always put key events (`:escape`, `:!Cz`, etc.) at the end and variable sets (`["leaderkey_sticky" 1]`) before them. Correct: `[["leaderkey_sticky" 1] :!Cz]`, wrong: `[:!Cz ["leaderkey_sticky" 1]]`
-- **IntelliJ plugin build requires Java 21** — System Java may be newer (25.x) which breaks the IntelliJ Gradle plugin. Use `JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build`
-- **IntelliJ UDS socket not present** = IntelliJ not running or plugin not loaded. `sendToIntelliJSocket()` fails silently (logs a warning) so Leader Key continues normally
-- **JVM UDS is stream-only** — Java's `UnixDomainSocketAddress` only supports `SOCK_STREAM`, not `SOCK_DGRAM`. Protocol must be newline-delimited (connect → write → read response → close). Leader Key uses fire-and-forget (no read)
-- **`leaderkey://` is gone** — External config apply should use the local socket (`/tmp/leaderkey.sock`). Do not add new app URL handlers for reload/apply/navigation.
-- **Some Goku builds advertise `-c` but crash** — Prefer `GOKU_EDN_CONFIG_FILE=/path/to/karabiner.edn goku` over `goku -c /path/to/karabiner.edn`. Leader Key uses the environment-variable form for compatibility.
-- **Do not hand-edit the arabshapt migration snapshot** — `karabiner.ts/configs/arabshapt/default-profile.ts` must be regenerated from Goku. If `~/.config/karabiner.edn` changes, run `cd /Users/arabshaptukaev/personalProjects/LeaderKeyapp/karabiner.ts && npm run sync:arabshapt`. Leader Key's own export only updates `karabiner.ts/configs/leaderkey/leaderkey-generated.ts`.
+- **Deleting Swift files** — remove references from `Leader Key.xcodeproj/project.pbxproj` (python script to remove lines by number)
+- **Config caching** — `UserConfig.appConfigs` dict caches loaded configs. Call `reloadConfig()` to bust
+- **Frontmost app ≠ visible window** — Messages stays frontmost after `Cmd+W`, owns menu bar. If activation logs show `activated ...` but nothing appears, check if app active with no regular window. Correct behavior: reopen, not re-activate
+- **Shell command escaping** in Goku EDN: two layers — shell (`'\''`) then EDN (`\\`, `\"`)
+- **State IDs** in `Karabiner2Exporter` — global starts at 1, fallback at 2, inactive = 0
+- **Karabiner key repeat** — only for **last** event in `to` array. In sticky-mode shortcuts, key events (`:escape`, `:!Cz`) at end, variable sets (`["leaderkey_sticky" 1]`) before. Correct: `[["leaderkey_sticky" 1] :!Cz]`, wrong: `[:!Cz ["leaderkey_sticky" 1]]`
+- **IntelliJ plugin build requires Java 21** — System Java may be newer (25.x), breaks Gradle. Use `JAVA_HOME=/Users/arabshaptukaev/Library/Java/JavaVirtualMachines/temurin-21.0.7/Contents/Home ./gradlew build`
+- **IntelliJ UDS socket missing** = IntelliJ not running or plugin not loaded. `sendToIntelliJSocket()` fails silently (logs warning), Leader Key continues
+- **JVM UDS stream-only** — Java's `UnixDomainSocketAddress` only supports `SOCK_STREAM`. Protocol: newline-delimited (connect → write → read response → close). Leader Key uses fire-and-forget (no read)
+- **`leaderkey://` gone** — external config apply → local socket (`/tmp/leaderkey.sock`). Don't add new URL handlers for reload/apply/navigation
+- **Some Goku builds advertise `-c` but crash** — prefer `GOKU_EDN_CONFIG_FILE=/path/to/karabiner.edn goku` over `goku -c /path/to/karabiner.edn`. Leader Key uses env-var form
+- **Don't hand-edit arabshapt migration snapshot** — `karabiner.ts/configs/arabshapt/default-profile.ts` must regenerate from Goku. If `~/.config/karabiner.edn` changes: `cd /Users/arabshaptukaev/personalProjects/LeaderKeyapp/karabiner.ts && npm run sync:arabshapt`. Leader Key export only updates `karabiner.ts/configs/leaderkey/leaderkey-generated.ts`

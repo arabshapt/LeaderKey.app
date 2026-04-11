@@ -105,6 +105,8 @@ final class Karabiner2InputMethod: InputMethod {
 
   private static let exportLock = NSLock()
   private static var lastExportStartTime: CFAbsoluteTime = 0
+  private static let moduleGenerationLock = NSLock()
+  private static var lastGeneratedModuleFingerprintByPath: [String: Data] = [:]
 
   func exportCurrentConfiguration(caller: String = "unknown") {
     // Debounce: skip if an export started within the last 2 seconds (from any thread/caller)
@@ -316,7 +318,7 @@ final class Karabiner2InputMethod: InputMethod {
   /// AppDelegate.runExportRefresh (caller)
   ///   calls exportCurrentConfiguration()      (steps 1-3 above)
   ///   then  loadStateMappings()                (reads file from step 3)
-  ///   then  builds actionCache from mappings
+  ///   then  clears the context-aware lazy action cache
   /// ```
   ///
   /// **IMPORTANT**: `saveStateMappings` (step 3) MUST run synchronously before this method returns.
@@ -376,9 +378,28 @@ final class Karabiner2InputMethod: InputMethod {
       DispatchQueue.global(qos: .utility).async {
         let bgStart = CFAbsoluteTimeGetCurrent()
         autoreleasepool {
+          let generatedModulePath = Self.generatedModulePathForCurrentSettings()
+          let rulesFingerprint = try? KarabinerTsExportService.stableManagedRulesData(managedRules)
+
+          if let rulesFingerprint,
+             Self.shouldSkipModuleGeneration(
+               rulesFingerprint: rulesFingerprint,
+               generatedModulePath: generatedModulePath
+             )
+          {
+            debugLog("[Benchmark] karabiner.ts background work skipped unchanged moduleSource")
+            return
+          }
+
           let moduleSource = Karabiner2Exporter.generateModuleSource(managedRules: managedRules)
           do {
             try service.writeRepoFiles(repoModuleSource: moduleSource)
+            if let rulesFingerprint {
+              Self.recordModuleGeneration(
+                rulesFingerprint: rulesFingerprint,
+                generatedModulePath: generatedModulePath
+              )
+            }
           } catch {
             debugLog("[Karabiner2InputMethod] Background: failed to write repo files: \(error)")
           }
@@ -396,8 +417,45 @@ final class Karabiner2InputMethod: InputMethod {
     let encoder = JSONEncoder()
     encoder.outputFormatting = .prettyPrinted
     let mappingData = try encoder.encode(stateMappings)
-    try mappingData.write(to: URL(fileURLWithPath: mappingFilePath))
+    let mappingURL = URL(fileURLWithPath: mappingFilePath)
+    if let existingData = try? Data(contentsOf: mappingURL),
+       existingData == mappingData
+    {
+      debugLog("[Karabiner2InputMethod] State mappings unchanged; skipped write to \(mappingFilePath)")
+      return
+    }
+
+    try mappingData.write(to: mappingURL)
     debugLog("[Karabiner2InputMethod] Exported \(stateMappings.count) state mappings to \(mappingFilePath)")
+  }
+
+  private static func generatedModulePathForCurrentSettings() -> String {
+    let repoPath = (Defaults[.karabinerTsRepoPath] as NSString).expandingTildeInPath
+    return (repoPath as NSString).appendingPathComponent(KarabinerTsExportService.generatedModuleRelativePath)
+  }
+
+  private static func shouldSkipModuleGeneration(
+    rulesFingerprint: Data,
+    generatedModulePath: String
+  ) -> Bool {
+    moduleGenerationLock.lock()
+    defer { moduleGenerationLock.unlock() }
+
+    guard FileManager.default.fileExists(atPath: generatedModulePath) else {
+      lastGeneratedModuleFingerprintByPath.removeValue(forKey: generatedModulePath)
+      return false
+    }
+
+    return lastGeneratedModuleFingerprintByPath[generatedModulePath] == rulesFingerprint
+  }
+
+  private static func recordModuleGeneration(
+    rulesFingerprint: Data,
+    generatedModulePath: String
+  ) {
+    moduleGenerationLock.lock()
+    lastGeneratedModuleFingerprintByPath[generatedModulePath] = rulesFingerprint
+    moduleGenerationLock.unlock()
   }
   
   // Helper to load an app config and merge with fallback

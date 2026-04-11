@@ -191,7 +191,7 @@ private struct OpacityPane: View {
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSocketServerDelegate {
   private struct KarabinerActivationContext {
-    enum Mode {
+    enum Mode: Hashable {
       case defaultOnly
       case appSpecificWithFallback
       case fallbackOnly
@@ -200,6 +200,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     let mode: Mode
     let bundleId: String?
     let activatedAt: Date
+  }
+
+  private struct ActionCacheKey: Hashable {
+    let stateId: Int32
+    let mode: KarabinerActivationContext.Mode
+    let bundleId: String?
   }
 
   // --- Properties ---
@@ -212,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   
   // State ID to action mapping for Karabiner 2.0
   private var stateMappings: [Int32: Karabiner2Exporter.StateMapping] = [:]
-  private var actionCache: [Int32: Action] = [:]  // Cache stateId -> Action for efficient lookup
+  private var actionCache: [ActionCacheKey: Action] = [:]
   private var stateMappingsLastLoaded: Date?
   private var cancellables = Set<AnyCancellable>()
   private let controlSocketServer = UnixSocketServer.shared
@@ -2826,17 +2832,8 @@ extension AppDelegate {
       stateMappingsLastLoaded = Date()
       debugLog("[AppDelegate] Loaded \(mappings.count) state mappings")
       
-      // Build action cache for efficient lookup
-      actionCache.removeAll()
-      for (stateId, mapping) in stateMappings {
-        if mapping.actionType == "action" {
-          if let action = findActionForMapping(mapping) {
-            actionCache[stateId] = action
-            // debugLog("[AppDelegate] Cached action for state ID \(stateId): \(action.displayName)")
-          }
-        }
-      }
-      debugLog("[AppDelegate] Built action cache with \(actionCache.count) actions")
+      // Actions are resolved lazily because appShared mappings depend on the activation context.
+      actionCache.removeAll(keepingCapacity: true)
       
     } catch {
       debugLog("[AppDelegate] Failed to load state mappings: \(error)")
@@ -2874,13 +2871,13 @@ extension AppDelegate {
   ///
   /// **Ordering dependency**: `exportCurrentConfiguration` MUST write the state mappings file
   /// synchronously before returning. `loadStateMappings()` reads that same file immediately after.
-  /// See `Karabiner2InputMethod.exportUsingKar` for the full pipeline flow diagram.
+  /// See `Karabiner2InputMethod.exportUsingKarabinerTS` for the full pipeline flow diagram.
   private func runExportRefresh() {
     debugLog("[AppDelegate] Refreshing state mappings after config change")
     let karabiner2Method = (currentInputMethod as? Karabiner2InputMethod) ?? Karabiner2InputMethod()
     karabiner2Method.exportCurrentConfiguration(caller: "refreshStateMappings")
 
-    // Reads export/leaderkey-state-mappings.json written synchronously by exportUsingKar above.
+    // Reads export/leaderkey-state-mappings.json written synchronously by exportUsingKarabinerTS above.
     DispatchQueue.main.async { [weak self] in
       self?.loadStateMappings()
     }
@@ -3028,14 +3025,16 @@ extension AppDelegate {
     }
   }
   
-  private func findActionForMapping(_ mapping: Karabiner2Exporter.StateMapping) -> Action? {
-    let rootGroup = rootGroupForMapping(mapping, activationContext: nil)
+  private func findActionForMapping(
+    _ mapping: Karabiner2Exporter.StateMapping,
+    activationContext: KarabinerActivationContext
+  ) -> Action? {
+    let rootGroup = rootGroupForMapping(mapping, activationContext: activationContext)
     
     var currentGroup = rootGroup
     
     // Navigate through path to find the group containing the action
-    for i in 0..<mapping.path.count - 1 {
-      let key = mapping.path[i]
+    for key in mapping.path.dropLast() {
       var found = false
       for item in currentGroup.actions {
         if case .group(let group) = item, group.key == key {
@@ -3061,6 +3060,28 @@ extension AppDelegate {
     }
     
     return nil
+  }
+
+  private func cachedAction(
+    for mapping: Karabiner2Exporter.StateMapping,
+    activationContext: KarabinerActivationContext
+  ) -> Action? {
+    let cacheKey = ActionCacheKey(
+      stateId: mapping.stateId,
+      mode: activationContext.mode,
+      bundleId: activationContext.mode == .appSpecificWithFallback ? activationContext.bundleId : nil
+    )
+
+    if let cachedAction = actionCache[cacheKey] {
+      return cachedAction
+    }
+
+    guard let action = findActionForMapping(mapping, activationContext: activationContext) else {
+      return nil
+    }
+
+    actionCache[cacheKey] = action
+    return action
   }
   
   private func executeActionByStateId(_ stateId: Int32, sticky: Bool = false) {
@@ -3127,8 +3148,8 @@ extension AppDelegate {
       // This is an action state - execute it
       debugLog("[AppDelegate] State ID \(stateId) is an action, executing")
 
-      // Use cached action which has all properties including macro steps
-      if let cachedAction = actionCache[stateId] {
+      // Resolve lazily so shared fallback state IDs use the current app context when needed.
+      if let cachedAction = cachedAction(for: mapping, activationContext: activationContext) {
         if sticky {
           // In sticky mode, show window if needed, then execute action
           ensureWindowVisible { [weak self] in
@@ -3150,7 +3171,7 @@ extension AppDelegate {
         }
         debugLog("[AppDelegate] Executed cached action for state ID \(stateId): \(cachedAction.value) with \(cachedAction.macroSteps?.count ?? 0) macro steps, sticky: \(sticky)")
       } else {
-        debugLog("[AppDelegate] No cached action found for state ID \(stateId). This may happen if the config changed since mappings were exported.")
+        debugLog("[AppDelegate] No action found for state ID \(stateId). This may happen if the config changed since mappings were exported.")
       }
     } else {
       debugLog("[AppDelegate] Unknown action type for state ID \(stateId): \(mapping.actionType)")

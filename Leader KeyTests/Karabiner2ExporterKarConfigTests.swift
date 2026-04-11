@@ -175,6 +175,8 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
 
     XCTAssertEqual(firstModule, secondModule)
     XCTAssertTrue(firstModule.contains("export const leaderKeyManagedRules ="))
+    XCTAssertTrue(firstModule.contains("JSON.parse("))
+    XCTAssertFalse(firstModule.contains(" as const"))
     XCTAssertTrue(firstModule.contains("export default leaderKeyManagedRules"))
   }
 

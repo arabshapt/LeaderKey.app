@@ -31,7 +31,7 @@ final class ConfigPreprocessor {
     cache.buildFromGroup(config)
 
     // Store the preprocessed cache
-    queue.async(flags: .barrier) {
+    queue.sync(flags: .barrier) {
       self.processedConfigs[identifier] = cache
       self.preprocessTimestamps[identifier] = Date()
     }
@@ -72,7 +72,7 @@ final class ConfigPreprocessor {
 
   /// Invalidate a specific preprocessed config
   func invalidateConfig(for identifier: String) {
-    queue.async(flags: .barrier) {
+    queue.sync(flags: .barrier) {
       self.processedConfigs.removeValue(forKey: identifier)
       self.preprocessTimestamps.removeValue(forKey: identifier)
     }
@@ -84,7 +84,7 @@ final class ConfigPreprocessor {
 
   /// Invalidate all preprocessed configs
   func invalidateAll() {
-    queue.async(flags: .barrier) {
+    queue.sync(flags: .barrier) {
       self.processedConfigs.removeAll()
       self.preprocessTimestamps.removeAll()
     }

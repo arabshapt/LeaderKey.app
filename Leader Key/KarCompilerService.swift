@@ -59,12 +59,23 @@ final class KarabinerTsExportService {
     try applyManagedRules(managedRules, karabinerPath: karabinerJsonPath)
   }
 
+  static func stableManagedRulesData(_ managedRules: [[String: Any]]) throws -> Data {
+    try JSONSerialization.data(withJSONObject: managedRules, options: [.sortedKeys])
+  }
+
   private func writeManagedRepoFiles(repoPath: String, repoModuleSource: String) throws {
     let managedDirectory = (repoPath as NSString).appendingPathComponent(Self.generatedDirectoryRelativePath)
     try FileManager.default.createDirectory(atPath: managedDirectory, withIntermediateDirectories: true)
 
     let generatedModulePath = (repoPath as NSString).appendingPathComponent(Self.generatedModuleRelativePath)
-    try repoModuleSource.write(toFile: generatedModulePath, atomically: true, encoding: .utf8)
+    let moduleData = Data(repoModuleSource.utf8)
+    if let existingData = try? Data(contentsOf: URL(fileURLWithPath: generatedModulePath)),
+       existingData == moduleData
+    {
+      debugLog("[Benchmark] karabiner.ts.writeRepoFiles skipped unchanged generated module")
+    } else {
+      try moduleData.write(to: URL(fileURLWithPath: generatedModulePath), options: .atomic)
+    }
 
     let bootstrapPath = (repoPath as NSString).appendingPathComponent(Self.generatedBootstrapRelativePath)
     if !FileManager.default.fileExists(atPath: bootstrapPath) {
@@ -89,17 +100,37 @@ final class KarabinerTsExportService {
     let path: String
   }
 
+  private struct AppliedManagedRulesFingerprint {
+    let path: String
+    let fileMtime: Date
+    let fileSize: UInt64
+    let managedRulesData: Data
+  }
+
   private var templateCache: KarabinerTemplateCache?
+  private var lastAppliedManagedRulesFingerprint: AppliedManagedRulesFingerprint?
 
   private func applyManagedRules(_ managedRules: [[String: Any]], karabinerPath: String? = nil) throws {
     try autoreleasepool {
       let resolvedKarabinerPath = karabinerPath ?? (NSHomeDirectory() + "/.config/karabiner/karabiner.json")
       let url = URL(fileURLWithPath: resolvedKarabinerPath)
+      let managedRulesData = try Self.stableManagedRulesData(managedRules)
 
       // Check if we can reuse the cached template.
       let fm = FileManager.default
       let fileAttrs = try fm.attributesOfItem(atPath: resolvedKarabinerPath)
       let fileMtime = fileAttrs[.modificationDate] as? Date ?? Date.distantPast
+      let fileSize = Self.fileSize(from: fileAttrs)
+
+      if let lastAppliedManagedRulesFingerprint,
+         lastAppliedManagedRulesFingerprint.path == resolvedKarabinerPath,
+         lastAppliedManagedRulesFingerprint.fileMtime == fileMtime,
+         lastAppliedManagedRulesFingerprint.fileSize == fileSize,
+         lastAppliedManagedRulesFingerprint.managedRulesData == managedRulesData
+      {
+        debugLog("[Benchmark] karabiner.ts.apply skipped unchanged managed rules")
+        return
+      }
 
       let root: [String: Any]
       if let cache = templateCache,
@@ -118,11 +149,26 @@ final class KarabinerTsExportService {
             code: 3,
             userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json structure"])
         }
-        root = try Self.patchedKarabinerRoot(parsed, compiledRules: managedRules)
 
         // Build cache from the parsed root for next time.
         templateCache = try Self.buildTemplateCache(
           from: parsed, path: resolvedKarabinerPath, mtime: fileMtime)
+
+        let selectedLeaderKeyRules = try Self.selectedLeaderKeyRules(in: parsed)
+        if !selectedLeaderKeyRules.containsLegacyManagedRules,
+           try Self.stableManagedRulesData(selectedLeaderKeyRules.managedRules) == managedRulesData
+        {
+          lastAppliedManagedRulesFingerprint = AppliedManagedRulesFingerprint(
+            path: resolvedKarabinerPath,
+            fileMtime: fileMtime,
+            fileSize: fileSize,
+            managedRulesData: managedRulesData
+          )
+          debugLog("[Benchmark] karabiner.ts.apply skipped unchanged on-disk managed rules")
+          return
+        }
+
+        root = try Self.patchedKarabinerRoot(parsed, compiledRules: managedRules)
         debugLog("[Benchmark] karabiner.ts.apply cache MISS — built new template cache")
       }
 
@@ -135,6 +181,7 @@ final class KarabinerTsExportService {
       // Update cache mtime to match what we just wrote so next call hits the cache.
       let newAttrs = try fm.attributesOfItem(atPath: resolvedKarabinerPath)
       let newMtime = newAttrs[.modificationDate] as? Date ?? Date.distantPast
+      let newSize = Self.fileSize(from: newAttrs)
       if var cache = templateCache, cache.path == resolvedKarabinerPath {
         cache = KarabinerTemplateCache(
           templateRoot: cache.templateRoot,
@@ -146,10 +193,23 @@ final class KarabinerTsExportService {
         )
         templateCache = cache
       }
+      lastAppliedManagedRulesFingerprint = AppliedManagedRulesFingerprint(
+        path: resolvedKarabinerPath,
+        fileMtime: newMtime,
+        fileSize: newSize,
+        managedRulesData: managedRulesData
+      )
 
       // Rotate backups: keep only the 2 most recent
       Self.rotateBackups(inDirectory: (resolvedKarabinerPath as NSString).deletingLastPathComponent)
     }
+  }
+
+  private static func fileSize(from attributes: [FileAttributeKey: Any]) -> UInt64 {
+    if let size = attributes[.size] as? UInt64 {
+      return size
+    }
+    return (attributes[.size] as? NSNumber)?.uint64Value ?? 0
   }
 
   /// Build a template cache from a fully parsed karabiner.json root.
@@ -203,6 +263,42 @@ final class KarabinerTsExportService {
       fileMtime: mtime,
       path: path
     )
+  }
+
+  private static func selectedLeaderKeyRules(
+    in root: [String: Any]
+  ) throws -> (managedRules: [[String: Any]], containsLegacyManagedRules: Bool) {
+    guard let profiles = root["profiles"] as? [[String: Any]] else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 5,
+        userInfo: [NSLocalizedDescriptionKey: "Invalid karabiner.json: missing profiles"])
+    }
+
+    let selectedIndex = profiles.firstIndex { ($0["selected"] as? Bool) == true } ?? 0
+    guard profiles.indices.contains(selectedIndex) else {
+      throw NSError(
+        domain: "KarabinerTsExportService",
+        code: 6,
+        userInfo: [NSLocalizedDescriptionKey: "No Karabiner profile found"])
+    }
+
+    let selectedProfile = profiles[selectedIndex]
+    let complexModifications = selectedProfile["complex_modifications"] as? [String: Any] ?? [:]
+    let existingRules = complexModifications["rules"] as? [[String: Any]] ?? []
+    var managedRules: [[String: Any]] = []
+    var containsLegacyManagedRules = false
+
+    for rule in existingRules {
+      let description = rule["description"] as? String ?? ""
+      if description.hasPrefix(managedRuleDescriptionPrefix) {
+        managedRules.append(rule)
+      } else if description.hasPrefix(legacyManagedRuleDescriptionPrefix) {
+        containsLegacyManagedRules = true
+      }
+    }
+
+    return (managedRules, containsLegacyManagedRules)
   }
 
   /// Rebuild a full karabiner.json root from a cached template + new managed rules.
