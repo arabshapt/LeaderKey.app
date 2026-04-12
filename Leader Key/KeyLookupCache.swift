@@ -1,5 +1,6 @@
 import AppKit  // For keycodes
 import Foundation
+import os
 
 /// Fast lookup structure for O(1) key validation in configs.
 /// Preprocesses a Group hierarchy into keyed maps for instant item lookup.
@@ -23,6 +24,8 @@ final class KeyLookupCache {
 
   /// Build the cache from a Group hierarchy
   func buildFromGroup(_ group: Group) {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "KeyLookupCache.build", signpostID: spid)
     var itemByKeyPerGroup: [UUID: [String: ActionOrGroup]] = [:]
     var stickyModePerGroup: [UUID: Bool] = [:]
     var childGroupsPerGroup: [UUID: [UUID]] = [:]
@@ -40,6 +43,7 @@ final class KeyLookupCache {
       self.childGroupsPerGroup = childGroupsPerGroup
       self.rootGroupId = group.id
     }
+    os_signpost(.end, log: signpostLog, name: "KeyLookupCache.build", signpostID: spid)
   }
 
   /// Recursively process a group and its children

@@ -1,5 +1,9 @@
 # Future Plans
 
+## Command Scout + UI Performance
+- Full staged implementation plan: `.claude/plans/command-scout-and-ui-performance.md`
+- Covers native Command Scout, AI/API keys, socket triggers, Raycast command, and Leader Key UI performance work
+
 ## Bidirectional Config Converter
 - Import existing goku EDN configs into Leader Key's JSON format
 - Import existing kar TypeScript configs into Leader Key's JSON format

@@ -28,6 +28,8 @@ declare namespace Preferences {
   export type RebuildIndex = ExtensionPreferences & {}
   /** Preferences accessible in the `sync-goku-profile` command */
   export type SyncGokuProfile = ExtensionPreferences & {}
+  /** Preferences accessible in the `command-scout` command */
+  export type CommandScout = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -41,5 +43,7 @@ declare namespace Arguments {
   export type RebuildIndex = {}
   /** Arguments passed to the `sync-goku-profile` command */
   export type SyncGokuProfile = {}
+  /** Arguments passed to the `command-scout` command */
+  export type CommandScout = {}
 }
 

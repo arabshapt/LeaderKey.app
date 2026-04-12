@@ -23,6 +23,10 @@ struct GeneralPane: View {
   @State private var showingAddConfigSheet = false
   @State private var keyToDelete: String?
   @State private var highlightedPath: [Int]?
+  @State private var showingCommandScout = false
+  @State private var commandScoutConfigKeyToPresent: String?
+  @State private var showingCommandScoutMissingConfigAlert = false
+  @State private var commandScoutMissingConfigAlertMessage = ""
 
   // Sorted list of config keys for the Picker
   var sortedConfigKeys: [String] {
@@ -232,6 +236,16 @@ struct GeneralPane: View {
                     config.reloadConfig()
                     // Reload will set isActivelyEditing = false automatically
                   }
+
+                  if useNativeOutlineConfigEditor,
+                    config.extractBundleId(from: config.selectedConfigKeyForEditing) != nil
+                  {
+                    Button {
+                      openCommandScout(forConfigKey: config.selectedConfigKeyForEditing)
+                    } label: {
+                      Label("Command Scout...", systemImage: "magnifyingglass")
+                    }
+                  }
                 }
 
                 Spacer()
@@ -294,6 +308,7 @@ struct GeneralPane: View {
         }
         .onAppear {
           refreshNativeSession()
+          consumePendingCommandScoutOpen()
         }
         .onReceive(
           NotificationCenter.default.publisher(for: Notification.Name("NavigateToSearchResult"))
@@ -437,8 +452,28 @@ struct GeneralPane: View {
     )
     // Sheet for creating new configs
     .sheet(isPresented: $showingAddConfigSheet) {
-      AddConfigSheet()
-        .environmentObject(config)  // Pass environment
+      AddConfigSheet(onCreateAndScout: { configKey in
+        openCommandScout(forConfigKey: configKey)
+      })
+        .environmentObject(config)
+    }
+    .sheet(isPresented: $showingCommandScout, onDismiss: {
+      commandScoutConfigKeyToPresent = nil
+    }) {
+      if let selected = commandScoutConfigKeyToPresent,
+         let appContext = CommandScoutAppContext.resolve(selectedConfigKey: selected, userConfig: config) {
+        CommandScoutView(session: nativeEditorSession, appContext: appContext)
+          .environmentObject(config)
+      }
+    }
+    .onChange(of: config.commandScoutPendingBundleId) { pendingBundleId in
+      guard pendingBundleId != nil else { return }
+      consumePendingCommandScoutOpen()
+    }
+    .alert("Command Scout", isPresented: $showingCommandScoutMissingConfigAlert) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(commandScoutMissingConfigAlertMessage)
     }
   }
 
@@ -491,6 +526,49 @@ struct GeneralPane: View {
     }
   }
 
+  private func openCommandScout(forConfigKey configKey: String) {
+    guard useNativeOutlineConfigEditor else {
+      showCommandScoutMissingConfig("Command Scout requires the native outline editor.")
+      return
+    }
+    guard config.discoveredConfigFiles[configKey] != nil,
+      config.extractBundleId(from: configKey) != nil
+    else {
+      showCommandScoutMissingConfig("Create an app-specific config before opening Command Scout.")
+      return
+    }
+
+    if config.selectedConfigKeyForEditing != configKey {
+      expandedGroups.removeAll()
+      config.loadConfigForEditing(key: configKey)
+    }
+
+    listSelection = configKey
+    keyToLoad = nil
+    refreshNativeSession()
+    commandScoutConfigKeyToPresent = configKey
+    showingCommandScout = true
+  }
+
+  private func consumePendingCommandScoutOpen() {
+    guard let bundleId = config.commandScoutPendingBundleId else { return }
+    config.commandScoutPendingBundleId = nil
+    guard let configKey = config.discoveredConfigFiles.keys.first(where: {
+      config.extractBundleId(from: $0) == bundleId
+    }) else {
+      showCommandScoutMissingConfig(
+        "No app config exists for \(bundleId). Create one first, then run Command Scout.")
+      return
+    }
+
+    openCommandScout(forConfigKey: configKey)
+  }
+
+  private func showCommandScoutMissingConfig(_ message: String) {
+    commandScoutMissingConfigAlertMessage = message
+    showingCommandScoutMissingConfigAlert = true
+  }
+
   private func refreshNativeSession() {
     guard useNativeOutlineConfigEditor else { return }
     nativeEditorSession.bind(to: config)
@@ -501,6 +579,7 @@ struct GeneralPane: View {
 private struct AddConfigSheet: View {
   @EnvironmentObject var config: UserConfig
   @Environment(\.dismiss) private var dismiss
+  let onCreateAndScout: (String) -> Void
 
   // Running applications with a bundle id & regular activation policy
   private var runningApps: [NSRunningApplication] {
@@ -610,21 +689,30 @@ private struct AddConfigSheet: View {
           createConfig()
         }
         .disabled(effectiveBundleId.isEmpty)
+        Button("Create and Scout...") {
+          createConfig(openCommandScout: true)
+        }
+        .disabled(effectiveBundleId.isEmpty)
       }
     }
     .padding(24)
     .frame(minWidth: 400)
   }
 
-  private func createConfig() {
-    let templateKey = selectedTemplate == "Empty" ? "EMPTY_TEMPLATE" : selectedTemplate
-    _ = config.createConfigForApp(
+  private func createConfig(openCommandScout: Bool = false) {
+    let templateKey = openCommandScout || selectedTemplate == "Empty" ? "EMPTY_TEMPLATE" : selectedTemplate
+    let createdKey = config.createConfigForApp(
       bundleId: effectiveBundleId,
       templateKey: templateKey,
       customName: customDisplayName.isEmpty ? nil : customDisplayName
     )
     // Dismiss regardless; success/failure alerts handled in helper
     dismiss()
+    if openCommandScout, let createdKey {
+      DispatchQueue.main.async {
+        onCreateAndScout(createdKey)
+      }
+    }
   }
 
   // Presents an NSOpenPanel allowing the user to select a .app bundle and extracts its bundle identifier

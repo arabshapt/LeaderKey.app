@@ -5,6 +5,7 @@ import Defaults
 import KeyboardShortcuts
 import Kingfisher
 import ObjectiveC
+import os
 import Settings
 import Sparkle
 import SwiftUI
@@ -885,6 +886,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   func handleActivation(
     type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil
   ) {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "handleActivation", signpostID: spid, "type=%{public}s", String(describing: type))
+    defer { os_signpost(.end, log: signpostLog, name: "handleActivation", signpostID: spid) }
     debugLog("[AppDelegate] handleActivation: Received activation request of type: \(type)")
     // Track the activation shortcut to prevent immediate command release triggers
     activeActivationShortcut = activationShortcut
@@ -1264,6 +1268,16 @@ extension AppDelegate {
     state["currentState"] = (currentInputMethod as? Karabiner2InputMethod)?.transportState ?? 0
     state["mode"] = currentInputMethod is Karabiner2InputMethod ? "karabiner2" : "app_socket"
     return state
+  }
+
+  func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String) {
+    debugLog("[AppDelegate] Command Scout open: bundleId=\(bundleId) source=\(source)")
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      // Open settings and trigger Command Scout for this bundleId
+      self.config.commandScoutPendingBundleId = bundleId
+      self.unixSocketServerDidReceiveSettings()
+    }
   }
 }
 
@@ -2188,6 +2202,9 @@ extension AppDelegate {
   // This function is called when an activation shortcut is pressed or a socket/user command arrives.
   // It sets up the initial state for a new key sequence based on the loaded config.
   private func startSequence(activationType: Controller.ActivationType, bundleId: String? = nil) {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "startSequence", signpostID: spid)
+    defer { os_signpost(.end, log: signpostLog, name: "startSequence", signpostID: spid) }
     debugLog("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
 
     // Reset sticky mode when starting any new sequence

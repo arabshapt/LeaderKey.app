@@ -182,4 +182,5 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
   func unixSocketServerDidReceiveShake()
   func unixSocketServerRequestState() -> [String: Any]
+  func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String)
 }

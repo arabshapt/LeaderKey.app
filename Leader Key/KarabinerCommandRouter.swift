@@ -18,6 +18,30 @@ enum KarabinerCommandRouter {
       return KarabinerUserCommandReceiver.listMenuItemsJSON(app: appName)
     }
 
+    if trimmedCommand.lowercased().hasPrefix("command-scout") {
+      let subParts = trimmedCommand.split(separator: " ", maxSplits: 2)
+      guard subParts.count >= 2 else {
+        return "ERROR: command-scout requires a subcommand (e.g. open)"
+      }
+      let subcommand = String(subParts[1]).lowercased()
+
+      switch subcommand {
+      case "open":
+        let payloadText = subParts.count > 2 ? String(subParts[2]) : "{}"
+        guard let payloadData = payloadText.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let bundleId = (payload["bundleId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !bundleId.isEmpty else {
+          return "ERROR: command-scout open requires JSON with bundleId"
+        }
+        let source = (payload["source"] as? String) ?? "socket"
+        delegate?.unixSocketServerDidReceiveCommandScoutOpen(bundleId: bundleId, source: source)
+        return "OK"
+      default:
+        return "ERROR: Unknown command-scout subcommand: \(subcommand)"
+      }
+    }
+
     let parts = trimmedCommand.split(separator: " ")
 
     guard !parts.isEmpty else {

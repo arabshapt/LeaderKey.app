@@ -89,3 +89,24 @@ export async function listLeaderKeyMenuItems(appName: string): Promise<LeaderKey
     );
   }
 }
+
+export async function openLeaderKeyCommandScout(payload: {
+  bundleId?: string;
+  appName?: string;
+  configKey?: string;
+  source?: "raycast";
+}): Promise<void> {
+  const bundleId = payload.bundleId ?? payload.configKey ?? "";
+  if (!bundleId) {
+    throw new Error("Command Scout requires a bundleId or configKey");
+  }
+  try {
+    await sendSocketRequest(
+      `command-scout open ${JSON.stringify({ bundleId, source: payload.source ?? "raycast" })}`,
+    );
+  } catch (error) {
+    throw new Error(
+      `Failed to open Command Scout: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}

@@ -563,6 +563,114 @@ final class ConfigEditorSession: ObservableObject {
     userConfig.validationErrors = validationErrors
   }
 
+  // MARK: - Command Scout Apply
+
+  func applyCommandScoutSuggestions(_ suggestions: [CommandScoutSuggestion]) {
+    for suggestion in suggestions {
+      guard let action = suggestion.makeAction() else { continue }
+      let tokens = suggestion.sequenceTokens
+      guard !tokens.isEmpty else { continue }
+
+      if tokens.count == 1 {
+        // Single key: insert at root
+        root.actions.append(.action(action))
+      } else {
+        // Multi-key: create/reuse intermediate groups, insert action at leaf
+        insertAtSequencePath(tokens: tokens, action: action, category: suggestion.category)
+      }
+    }
+
+    rebuildIndex(preserveExpansion: true)
+    notifyDirtyStateChanged()
+  }
+
+  private func insertAtSequencePath(tokens: [String], action: Action, category: String) {
+    // Navigate/create groups for all tokens except the last (which is the action key)
+    var currentActions = root.actions
+    var groupIndices: [Int] = []
+
+    for (i, token) in tokens.dropLast().enumerated() {
+      if let existingIndex = currentActions.firstIndex(where: {
+        if case .group(let g) = $0 { return g.key?.lowercased() == token }
+        return false
+      }) {
+        groupIndices.append(existingIndex)
+        if case .group(let g) = currentActions[existingIndex] {
+          currentActions = g.actions
+        }
+      } else {
+        // Create new group
+        let label = i == 0 ? category : nil
+        let newGroup = Group(key: token, label: label, stickyMode: nil, actions: [])
+        // Insert into the tree at the right level
+        insertGroupAtPath(groupIndices, newGroup: newGroup, remainingTokens: Array(tokens.dropLast().dropFirst(i + 1)), action: action)
+        return
+      }
+    }
+
+    // All intermediate groups exist — insert action at the deepest group
+    insertActionAtGroupPath(groupIndices, action: action)
+  }
+
+  private func insertGroupAtPath(_ parentPath: [Int], newGroup: Group, remainingTokens: [String], action: Action) {
+    // Build nested group structure from inside out
+    var innerGroup = newGroup
+    // Create remaining intermediate groups
+    for token in remainingTokens {
+      innerGroup = Group(key: innerGroup.key, label: innerGroup.label, stickyMode: nil,
+                         actions: [.group(Group(key: token, label: nil, stickyMode: nil, actions: []))])
+    }
+
+    // Find deepest existing group to add the action
+    func addActionToDeepest(_ group: inout Group) {
+      if group.actions.isEmpty {
+        group.actions.append(.action(action))
+      } else if case .group(var sub) = group.actions.last {
+        addActionToDeepest(&sub)
+        group.actions[group.actions.count - 1] = .group(sub)
+      } else {
+        group.actions.append(.action(action))
+      }
+    }
+    addActionToDeepest(&innerGroup)
+
+    // Insert at the right parent level
+    if parentPath.isEmpty {
+      root.actions.append(.group(innerGroup))
+    } else {
+      appendToGroup(at: parentPath, item: .group(innerGroup))
+    }
+  }
+
+  private func insertActionAtGroupPath(_ path: [Int], action: Action) {
+    if path.isEmpty {
+      root.actions.append(.action(action))
+      return
+    }
+    appendToGroup(at: path, item: .action(action))
+  }
+
+  private func appendToGroup(at path: [Int], item: ActionOrGroup) {
+    func appendInGroup(_ group: inout Group, remainingPath: [Int]) {
+      guard let first = remainingPath.first, first < group.actions.count else {
+        group.actions.append(item)
+        return
+      }
+      if remainingPath.count == 1 {
+        if case .group(var sub) = group.actions[first] {
+          sub.actions.append(item)
+          group.actions[first] = .group(sub)
+        }
+      } else {
+        if case .group(var sub) = group.actions[first] {
+          appendInGroup(&sub, remainingPath: Array(remainingPath.dropFirst()))
+          group.actions[first] = .group(sub)
+        }
+      }
+    }
+    appendInGroup(&root, remainingPath: path)
+  }
+
   private func finalizeStructuralChange(selectPath: [Int]) {
     rebuildIndex(preserveExpansion: true)
     select(self.nodeID(forPath: selectPath), source: .programmatic)
@@ -606,6 +714,9 @@ final class ConfigEditorSession: ObservableObject {
   }
 
   private func rebuildIndex(preserveExpansion: Bool) {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "rebuildIndex", signpostID: spid)
+    defer { os_signpost(.end, log: signpostLog, name: "rebuildIndex", signpostID: spid) }
     let previousExpanded = expanded
     let previousSelected = selectedTreeID
 

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Thread-safe cache for parsed configuration groups to avoid repeated JSON parsing
 final class ConfigCache {
@@ -99,9 +100,12 @@ final class ConfigCache {
   static func measureParsing<T>(_ label: String = "JSON Parsing", block: () throws -> T) rethrows
     -> T
   {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "ConfigCache.parse", signpostID: spid, "%{public}s", label)
     let start = CFAbsoluteTimeGetCurrent()
     defer {
       let elapsed = CFAbsoluteTimeGetCurrent() - start
+      os_signpost(.end, log: signpostLog, name: "ConfigCache.parse", signpostID: spid)
       if elapsed > 0.05 {  // Log operations taking more than 50ms
         print("[ConfigCache] \(label) took \(String(format: "%.3f", elapsed))s")
       }

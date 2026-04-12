@@ -96,6 +96,12 @@
       "title": "Sync Goku Profile",
       "description": "Ask Leader Key to migrate the current Goku EDN profile into the karabiner.ts workspace.",
       "mode": "no-view"
+    },
+    {
+      "name": "command-scout",
+      "title": "Command Scout",
+      "description": "Open Command Scout in Leader Key for an app config to discover and add shortcuts.",
+      "mode": "view"
     }
   ]
 }

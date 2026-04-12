@@ -75,6 +75,7 @@ class UserConfig: ObservableObject {
   @Published var discoveredConfigFiles: [String: String] = [:]  // Display Name -> File Path
   @Published var selectedConfigKeyForEditing: String = globalDefaultDisplayName  // Initialize with the new default key
   @Published var isActivelyEditing: Bool = false  // Track if user is actively editing vs ready to finalize
+  @Published var commandScoutPendingBundleId: String?  // Set by socket command, consumed by GeneralPane
 
   let fileName = "global-config.json"
   let appConfigPrefix = "app."

@@ -39,6 +39,13 @@
 		423632222D68CA6500878D92 /* MysteryBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632212D68CA6500878D92 /* MysteryBox.swift */; };
 		423632262D68CDBB00878D92 /* Mini.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632252D68CDBB00878D92 /* Mini.swift */; };
 		423632282D6A806700878D92 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423632272D6A806700878D92 /* Theme.swift */; };
+		AA00000B2EA0000100000011 /* CommandScoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000C2EA0000100000012 /* CommandScoutView.swift */; };
+		AA0000072EA0000100000007 /* AIProviderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000082EA0000100000008 /* AIProviderClient.swift */; };
+		AA0000092EA0000100000009 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000A2EA0000100000010 /* KeychainHelper.swift */; };
+		AA0000022EA0000100000002 /* CommandScoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000012EA0000100000001 /* CommandScoutModels.swift */; };
+		AA0000042EA0000100000004 /* CommandScoutService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000032EA0000100000003 /* CommandScoutService.swift */; };
+		AA00000E2EA0000100000014 /* SignpostLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000D2EA0000100000013 /* SignpostLog.swift */; };
+		AA0000062EA0000100000006 /* CommandScoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000052EA0000100000005 /* CommandScoutTests.swift */; };
 		42454DDB2D71CB39004E1374 /* ConfigValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDA2D71CB39004E1374 /* ConfigValidator.swift */; };
 		42454DDC2E71CB39004E1376 /* ConfigCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDB2E71CB39004E1375 /* ConfigCache.swift */; };
 		42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */; };
@@ -134,6 +141,13 @@
 		423632212D68CA6500878D92 /* MysteryBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MysteryBox.swift; sourceTree = "<group>"; };
 		423632252D68CDBB00878D92 /* Mini.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mini.swift; sourceTree = "<group>"; };
 		423632272D6A806700878D92 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		AA00000C2EA0000100000012 /* CommandScoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScoutView.swift; sourceTree = "<group>"; };
+		AA0000082EA0000100000008 /* AIProviderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderClient.swift; sourceTree = "<group>"; };
+		AA00000A2EA0000100000010 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		AA0000012EA0000100000001 /* CommandScoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScoutModels.swift; sourceTree = "<group>"; };
+		AA0000032EA0000100000003 /* CommandScoutService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScoutService.swift; sourceTree = "<group>"; };
+		AA00000D2EA0000100000013 /* SignpostLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignpostLog.swift; sourceTree = "<group>"; };
+		AA0000052EA0000100000005 /* CommandScoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScoutTests.swift; sourceTree = "<group>"; };
 		42454DDA2D71CB39004E1374 /* ConfigValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidator.swift; sourceTree = "<group>"; };
 		42454DDB2E71CB39004E1375 /* ConfigCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigCache.swift; sourceTree = "<group>"; };
 		42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidatorTests.swift; sourceTree = "<group>"; };
@@ -261,6 +275,11 @@
 				263112DE2E1C6B720077248A /* UserConfig+Deletion.swift */,
 				263112DC2E1C61CC0077248A /* UserConfig+Creation.swift */,
 				260999212E19593800CCC8DD /* ViewSizeCache.swift */,
+				AA0000082EA0000100000008 /* AIProviderClient.swift */,
+				AA00000A2EA0000100000010 /* KeychainHelper.swift */,
+				AA0000012EA0000100000001 /* CommandScoutModels.swift */,
+				AA0000032EA0000100000003 /* CommandScoutService.swift */,
+				AA00000D2EA0000100000013 /* SignpostLog.swift */,
 				42454DDA2D71CB39004E1374 /* ConfigValidator.swift */,
 				42454DDB2E71CB39004E1375 /* ConfigCache.swift */,
 				42454DDD2E71CB39004E1377 /* ThreadOptimization.swift */,
@@ -327,6 +346,7 @@
 				058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */,
 				88C62E8645370FE40FE22FAD /* Karabiner2ExporterKarConfigTests.swift */,
+				AA0000052EA0000100000005 /* CommandScoutTests.swift */,
 			);
 			path = "Leader KeyTests";
 			sourceTree = "<group>";
@@ -352,6 +372,7 @@
 				42F4CDCC2D45B13600D0DD76 /* KeyButton.swift */,
 				115AA5BE2DA521C200C17E18 /* ActionIcon.swift */,
 				DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */,
+				AA00000C2EA0000100000012 /* CommandScoutView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -538,6 +559,12 @@
 				423632222D68CA6500878D92 /* MysteryBox.swift in Sources */,
 				605385A32D523CAD00BEDB4B /* Pulsate.swift in Sources */,
 				42F4CDC92D458FF700D0DD76 /* MainMenu.swift in Sources */,
+				AA00000B2EA0000100000011 /* CommandScoutView.swift in Sources */,
+				AA0000072EA0000100000007 /* AIProviderClient.swift in Sources */,
+				AA0000092EA0000100000009 /* KeychainHelper.swift in Sources */,
+				AA0000022EA0000100000002 /* CommandScoutModels.swift in Sources */,
+				AA0000042EA0000100000004 /* CommandScoutService.swift in Sources */,
+				AA00000E2EA0000100000014 /* SignpostLog.swift in Sources */,
 				42454DDB2D71CB39004E1374 /* ConfigValidator.swift in Sources */,
 				42454DDC2E71CB39004E1376 /* ConfigCache.swift in Sources */,
 				42454DDE2E71CB39004E1378 /* ThreadOptimization.swift in Sources */,
@@ -606,6 +633,7 @@
 				E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */,
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* KeyLookupCacheTests.swift in Sources */,
 				2715D3ED4E0DDDFF875FC5B3 /* Karabiner2ExporterKarConfigTests.swift in Sources */,
+				AA0000062EA0000100000006 /* CommandScoutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

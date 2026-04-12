@@ -59,6 +59,14 @@ final class KarabinerCommandRouterTests: XCTestCase {
     func unixSocketServerRequestState() -> [String: Any] {
       state
     }
+
+    var commandScoutBundleId: String?
+    var commandScoutSource: String?
+
+    func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String) {
+      commandScoutBundleId = bundleId
+      commandScoutSource = source
+    }
   }
 
   func testRouteActivationAndDeactivationCommands() {
@@ -230,5 +238,43 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertEqual(arguments, ["-b", "com.apple.MobileSMS"])
     XCTAssertFalse(arguments.contains("/System/Applications/Messages.app"))
+  }
+
+  // MARK: - Command Scout
+
+  func testCommandScoutOpenRoute() {
+    let delegate = MockDelegate()
+    let result = KarabinerCommandRouter.route(
+      command: "command-scout open {\"bundleId\":\"com.google.Chrome\",\"source\":\"raycast\"}",
+      delegate: delegate)
+    XCTAssertEqual(result, "OK")
+    XCTAssertEqual(delegate.commandScoutBundleId, "com.google.Chrome")
+    XCTAssertEqual(delegate.commandScoutSource, "raycast")
+  }
+
+  func testCommandScoutOpenMissingBundleId() {
+    let delegate = MockDelegate()
+    let result = KarabinerCommandRouter.route(
+      command: "command-scout open {}",
+      delegate: delegate)
+    XCTAssertTrue(result.hasPrefix("ERROR:"))
+    XCTAssertNil(delegate.commandScoutBundleId)
+  }
+
+  func testCommandScoutOpenDefaultSource() {
+    let delegate = MockDelegate()
+    let result = KarabinerCommandRouter.route(
+      command: "command-scout open {\"bundleId\":\"com.apple.Safari\"}",
+      delegate: delegate)
+    XCTAssertEqual(result, "OK")
+    XCTAssertEqual(delegate.commandScoutSource, "socket")
+  }
+
+  func testCommandScoutUnknownSubcommand() {
+    let delegate = MockDelegate()
+    let result = KarabinerCommandRouter.route(
+      command: "command-scout foobar",
+      delegate: delegate)
+    XCTAssertTrue(result.hasPrefix("ERROR:"))
   }
 }
