@@ -25,6 +25,7 @@ class Controller {
   var userState: UserState
   var userConfig: UserConfig
   weak var appDelegate: AppDelegate?  // Add weak reference to AppDelegate
+  var keyLookupCache: KeyLookupCache?  // O(1) key lookup, set by AppDelegate on sequence start
 
   var window: MainWindow!
   private var cheatsheetWindow: NSWindow?
@@ -129,9 +130,7 @@ class Controller {
 
     // Get the current mouse location
     let mouseLocation = NSEvent.mouseLocation
-
-    // Find the screen containing the mouse cursor, default to main screen if not found
-    let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+    let screen = screenContainingMouse(mouseLocation)
 
     if let targetScreen = screen {
       let screenFrame = targetScreen.visibleFrame  // Use visibleFrame to account for menu bar and Dock
@@ -273,18 +272,24 @@ class Controller {
       (userState.currentGroup != nil)
       ? userState.currentGroup : activeList  // Start search from active root
 
-    let hit = list?.actions.first { item in
-      switch item {
-      case .group(let group):
-        if group.key == key {
-          return true
+    // O(1) lookup via KeyLookupCache if available, fallback to linear scan
+    let hit: ActionOrGroup?
+    if let groupId = list?.id, let cached = keyLookupCache?.getItem(forKey: key, inGroupId: groupId) {
+      hit = cached
+    } else {
+      hit = list?.actions.first { item in
+        switch item {
+        case .group(let group):
+          if group.key == key {
+            return true
+          }
+        case .action(let action):
+          if action.key == key {
+            return true
+          }
         }
-      case .action(let action):
-        if action.key == key {
-          return true
-        }
+        return false
       }
-      return false
     }
 
     switch hit {
@@ -543,7 +548,7 @@ class Controller {
 
     var calculatedOrigin: NSPoint?
     let mouseLocation = NSEvent.mouseLocation
-    let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+    let screen = screenContainingMouse(mouseLocation)
 
     if let targetScreen = screen {
       let screenFrame = targetScreen.visibleFrame
@@ -1131,6 +1136,11 @@ class Controller {
     return flags
   }
   // --- Shortcut Execution Helpers --- END ---
+
+  /// Find the screen containing the mouse cursor, fallback to main screen
+  private func screenContainingMouse(_ mouseLocation: NSPoint) -> NSScreen? {
+    NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+  }
 }
 
 class DontActivateConfiguration {

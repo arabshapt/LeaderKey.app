@@ -7,6 +7,9 @@ final class KeyLookupCache {
   /// Maps group ID to the set of valid key strings in that group
   private var validKeysPerGroup: [UUID: Set<String>] = [:]
 
+  /// Maps group ID + key to the matching ActionOrGroup for O(1) item lookup
+  private var itemByKeyPerGroup: [UUID: [String: ActionOrGroup]] = [:]
+
   /// Maps group ID to its sticky mode setting
   private var stickyModePerGroup: [UUID: Bool] = [:]
 
@@ -24,18 +27,21 @@ final class KeyLookupCache {
   /// Build the cache from a Group hierarchy
   func buildFromGroup(_ group: Group) {
     var validKeysPerGroup: [UUID: Set<String>] = [:]
+    var itemByKeyPerGroup: [UUID: [String: ActionOrGroup]] = [:]
     var stickyModePerGroup: [UUID: Bool] = [:]
     var childGroupsPerGroup: [UUID: [UUID]] = [:]
 
     Self.processGroup(
       group,
       validKeysPerGroup: &validKeysPerGroup,
+      itemByKeyPerGroup: &itemByKeyPerGroup,
       stickyModePerGroup: &stickyModePerGroup,
       childGroupsPerGroup: &childGroupsPerGroup
     )
 
     queue.sync(flags: .barrier) {
       self.validKeysPerGroup = validKeysPerGroup
+      self.itemByKeyPerGroup = itemByKeyPerGroup
       self.stickyModePerGroup = stickyModePerGroup
       self.childGroupsPerGroup = childGroupsPerGroup
       self.rootGroupId = group.id
@@ -46,10 +52,12 @@ final class KeyLookupCache {
   private static func processGroup(
     _ group: Group,
     validKeysPerGroup: inout [UUID: Set<String>],
+    itemByKeyPerGroup: inout [UUID: [String: ActionOrGroup]],
     stickyModePerGroup: inout [UUID: Bool],
     childGroupsPerGroup: inout [UUID: [UUID]]
   ) {
     var validKeys = Set<String>()
+    var itemByKey = [String: ActionOrGroup]()
     var childGroups = [UUID]()
 
     // Process all actions in this group
@@ -57,6 +65,7 @@ final class KeyLookupCache {
       // Add the key if it exists
       if let key = actionOrGroup.item.key {
         validKeys.insert(key)
+        itemByKey[key] = actionOrGroup
       }
 
       // If it's a subgroup, process it recursively
@@ -65,6 +74,7 @@ final class KeyLookupCache {
         processGroup(
           subgroup,
           validKeysPerGroup: &validKeysPerGroup,
+          itemByKeyPerGroup: &itemByKeyPerGroup,
           stickyModePerGroup: &stickyModePerGroup,
           childGroupsPerGroup: &childGroupsPerGroup
         )
@@ -73,6 +83,7 @@ final class KeyLookupCache {
 
     // Store the processed data
     validKeysPerGroup[group.id] = validKeys
+    itemByKeyPerGroup[group.id] = itemByKey
     stickyModePerGroup[group.id] = group.stickyMode ?? false
     childGroupsPerGroup[group.id] = childGroups
   }
@@ -83,6 +94,13 @@ final class KeyLookupCache {
   func hasKey(_ key: String, inGroupId groupId: UUID) -> Bool {
     queue.sync {
       validKeysPerGroup[groupId]?.contains(key) ?? false
+    }
+  }
+
+  /// Look up the ActionOrGroup for a key in a specific group (O(1) lookup)
+  func getItem(forKey key: String, inGroupId groupId: UUID) -> ActionOrGroup? {
+    queue.sync {
+      itemByKeyPerGroup[groupId]?[key]
     }
   }
 
@@ -176,6 +194,7 @@ final class KeyLookupCache {
   func clear() {
     queue.sync(flags: .barrier) {
       self.validKeysPerGroup.removeAll()
+      self.itemByKeyPerGroup.removeAll()
       self.stickyModePerGroup.removeAll()
       self.childGroupsPerGroup.removeAll()
       self.rootGroupId = nil

@@ -43,11 +43,7 @@ final class KarabinerTsExportServiceTests: XCTestCase {
       managedRules: [
         ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
       ],
-      repoModuleSource: """
-        export const leaderKeyDefaultProfileName = "Default"
-        export const leaderKeyManagedRules = [] as const
-        export default leaderKeyManagedRules
-        """,
+      repoModuleData: Data("[]".utf8),
       repoPath: repoURL.path,
       karabinerJsonPath: karabinerJSONURL.path
     )
@@ -89,15 +85,11 @@ final class KarabinerTsExportServiceTests: XCTestCase {
     let managedRules = [
       ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
     ]
-    let moduleSource = """
-      export const leaderKeyDefaultProfileName = "Default"
-      export const leaderKeyManagedRules = [] as const
-      export default leaderKeyManagedRules
-      """
+    let moduleData = Data("[]".utf8)
 
     let firstResult = KarabinerTsExportService.shared.compileAndApply(
       managedRules: managedRules,
-      repoModuleSource: moduleSource,
+      repoModuleData: moduleData,
       repoPath: repoURL.path,
       karabinerJsonPath: karabinerJSONURL.path
     )
@@ -111,7 +103,7 @@ final class KarabinerTsExportServiceTests: XCTestCase {
 
     let secondResult = KarabinerTsExportService.shared.compileAndApply(
       managedRules: managedRules,
-      repoModuleSource: moduleSource,
+      repoModuleData: moduleData,
       repoPath: repoURL.path,
       karabinerJsonPath: karabinerJSONURL.path
     )
@@ -144,7 +136,7 @@ final class KarabinerTsExportServiceTests: XCTestCase {
       managedRules: [
         ["description": "LeaderKeyManaged/NewRule", "manipulators": [["type": "basic", "from": ["key_code": "b"]]]]
       ],
-      repoModuleSource: "export default []\n",
+      repoModuleData: Data("[]".utf8),
       repoPath: invalidRepoPath,
       karabinerJsonPath: karabinerJSONURL.path
     )

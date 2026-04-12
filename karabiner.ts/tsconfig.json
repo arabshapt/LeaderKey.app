@@ -13,6 +13,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true
   },
   "include": ["src", "configs"]

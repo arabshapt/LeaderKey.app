@@ -72,7 +72,6 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     let firstSorted = Karabiner2Exporter.sortMappings(first.stateMappings)
     let secondSorted = Karabiner2Exporter.sortMappings(second.stateMappings)
     XCTAssertEqual(try encoder.encode(firstSorted), try encoder.encode(secondSorted))
-    XCTAssertEqual(first.repoModuleSource, second.repoModuleSource)
     XCTAssertEqual(try serializeJSON(first.managedRules), try serializeJSON(second.managedRules))
   }
 
@@ -169,15 +168,14 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     let first = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let second = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
 
-    // Module source generation is now deferred; generate it explicitly for the test.
-    let firstModule = Karabiner2Exporter.generateModuleSource(managedRules: first.managedRules)
-    let secondModule = Karabiner2Exporter.generateModuleSource(managedRules: second.managedRules)
+    // Module generation now produces raw JSON data
+    let firstJSON = Karabiner2Exporter.generateModuleJSON(managedRules: first.managedRules)
+    let secondJSON = Karabiner2Exporter.generateModuleJSON(managedRules: second.managedRules)
 
-    XCTAssertEqual(firstModule, secondModule)
-    XCTAssertTrue(firstModule.contains("export const leaderKeyManagedRules ="))
-    XCTAssertTrue(firstModule.contains("JSON.parse("))
-    XCTAssertFalse(firstModule.contains(" as const"))
-    XCTAssertTrue(firstModule.contains("export default leaderKeyManagedRules"))
+    XCTAssertEqual(firstJSON, secondJSON)
+    // Verify it's valid JSON array
+    let parsed = try JSONSerialization.jsonObject(with: firstJSON, options: [])
+    XCTAssertTrue(parsed is [[String: Any]])
   }
 
   func testGenerateKarabinerTSExportUsesSingleAnyKeyCatchAllMappings() throws {

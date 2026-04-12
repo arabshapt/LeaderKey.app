@@ -396,6 +396,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     stateRecoveryTimer?.invalidate()  // Stop state recovery timer
     inputMethodHealthTimer?.invalidate()  // Stop input method health timer
     permissionPollingTimer?.invalidate()  // Stop permission polling timer
+    configDirObserverTask?.cancel()
+    menuBarIconObserverTask?.cancel()
+    autoUpdateObserverTask?.cancel()
+    inputMethodPrefObserverTask?.cancel()
     print("[AppDelegate] applicationWillTerminate completed.")
   }
 
@@ -405,6 +409,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private var inputMethodHealthTimer: Timer?
   private var lastPermissionCheck: Bool? = nil
   private var permissionPollingTimer: Timer?
+  private var configDirObserverTask: Task<Void, Never>?
+  private var menuBarIconObserverTask: Task<Void, Never>?
+  private var autoUpdateObserverTask: Task<Void, Never>?
+  private var inputMethodPrefObserverTask: Task<Void, Never>?
   private var permissionPollingStartTime: Date?
 
   private func setupStateRecoveryTimer() {
@@ -414,8 +422,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
       self?.checkAndRecoverWindowState()
     }
 
-    // Check input method health every 0.5 seconds
-    inputMethodHealthTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
+    // Check input method health every 5 seconds
+    inputMethodHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) {
       [weak self] _ in
       if let currentMethod = self?.currentInputMethod {
         _ = currentMethod.checkHealth()
@@ -430,7 +438,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     if window.isVisible {
       // Check if we have a stuck sequence with no active group
       if currentSequenceGroup == nil && activeRootGroup == nil {
-        print("[AppDelegate] State Recovery: Window visible but no active sequence. Hiding window.")
+        debugLog("[AppDelegate] State Recovery: Window visible but no active sequence. Hiding window.")
         hide()
       }
     }
@@ -534,19 +542,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private func determineConfigToFocus() -> String {
     // First check if UserState has a stored config key
     if let activeConfigKey = controller.userState.activeConfigKey {
-      print("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
+      debugLog("[AppDelegate] Using stored activeConfigKey from UserState: \(activeConfigKey)")
       return activeConfigKey
     }
 
     // Fallback: check if we have an active sequence state
     if let activeRoot = self.activeRootGroup {
-      print("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
+      debugLog("[AppDelegate] Active sequence detected, determining config from activeRootGroup")
       return findConfigKeyForGroup(activeRoot)
     }
 
     // Check if the Controller's UserState has an active root (without stored key)
     if let userStateActiveRoot = controller.userState.activeRoot {
-      print("[AppDelegate] Using UserState activeRoot to determine config")
+      debugLog("[AppDelegate] Using UserState activeRoot to determine config")
       return findConfigKeyForGroup(userStateActiveRoot)
     }
 
@@ -554,7 +562,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     if let frontmostApp = NSWorkspace.shared.frontmostApplication,
       let bundleId = frontmostApp.bundleIdentifier
     {
-      print("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
+      debugLog("[AppDelegate] Using frontmost app (\(bundleId)) to determine config")
 
       // Check if an app-specific config exists for this bundle ID
       let appConfig = config.getConfig(for: bundleId)
@@ -565,7 +573,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     }
 
     // Default fallback - use global default
-    print("[AppDelegate] Falling back to global default config")
+    debugLog("[AppDelegate] Falling back to global default config")
     return globalDefaultDisplayName
   }
 
@@ -790,13 +798,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   func show(
     type: Controller.ActivationType = .appSpecificWithFallback, bundleId: String? = nil, completion: (() -> Void)? = nil
   ) {
-    print("[AppDelegate] show(type: \(type), bundleId: \(bundleId ?? "nil")) called.")
+    debugLog("[AppDelegate] show(type: \(type), bundleId: \(bundleId ?? "nil")) called.")
     controller.show(type: type, bundleId: bundleId, completion: completion)
   }
 
   // Convenience method to hide the main Leader Key window
   func hide() {
-    print("[AppDelegate] hide() called.")  // Log entry into hide()
+    debugLog("[AppDelegate] hide() called.")
 
     controller.hide(afterClose: { [weak self] in
       // Reset sequence AFTER the window is fully closed to avoid visual flash
@@ -807,7 +815,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   // Toggle sticky mode programmatically (for use in actions)
   func toggleStickyMode() {
     stickyModeToggled.toggle()
-    print("[AppDelegate] toggleStickyMode: Sticky mode toggled to \(stickyModeToggled)")
+    debugLog("[AppDelegate] toggleStickyMode: Sticky mode toggled to \(stickyModeToggled)")
 
     // Update window transparency immediately if we're in a sequence
     if currentSequenceGroup != nil {
@@ -823,7 +831,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   func activateStickyMode() {
     if !stickyModeToggled {
       stickyModeToggled = true
-      print("[AppDelegate] activateStickyMode: Sticky mode activated")
+      debugLog("[AppDelegate] activateStickyMode: Sticky mode activated")
 
       // Update window transparency immediately if we're in a sequence
       if currentSequenceGroup != nil {
@@ -839,7 +847,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private func handleCommandPressed(_ modifierFlags: NSEvent.ModifierFlags) {
     // Command key press is tracked but no action needed on press
     // We only act on release
-    print("[AppDelegate] handleCommandPressed: Command key pressed")
+    debugLog("[AppDelegate] handleCommandPressed: Command key pressed")
   }
 
   private func handleCommandReleased(_ modifierFlags: NSEvent.ModifierFlags) {
@@ -857,17 +865,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     // If we still have an active activation shortcut, this means the user hasn't
     // started using Leader Key yet, so ignore this Cmd release (it's part of the activation)
     if activeActivationShortcut != nil {
-      print(
+      debugLog(
         "[AppDelegate] handleCommandReleased: Still have active activation shortcut - user hasn't started using Leader Key yet. Ignoring."
       )
       return
     }
 
-    print(
+    debugLog(
       "[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Hiding window (state resets after close)."
     )
     DispatchQueue.main.async {
-      print("[AppDelegate] handleCommandReleased: Hiding window – state will reset after close.")
+      debugLog("[AppDelegate] handleCommandReleased: Hiding window – state will reset after close.")
       self.hide()
     }
   }
@@ -876,18 +884,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   func handleActivation(
     type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil
   ) {
-    print("[AppDelegate] handleActivation: Received activation request of type: \(type)")
+    debugLog("[AppDelegate] handleActivation: Received activation request of type: \(type)")
     // Track the activation shortcut to prevent immediate command release triggers
     activeActivationShortcut = activationShortcut
 
     // This function decides what to do when an activation shortcut is pressed.
 
     if controller.window.isVisible {  // Check if the Leader Key window is already visible
-      print("[AppDelegate] handleActivation: Window is already visible.")
+      debugLog("[AppDelegate] handleActivation: Window is already visible.")
       switch Defaults[.reactivateBehavior] {  // Check user preference for reactivation
       case .hide:
         // Preference: Hide the window if activated again while visible.
-        print(
+        debugLog(
           "[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence."
         )
         hide()
@@ -895,10 +903,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
 
       case .reset:
         // Preference: Reset the sequence if activated again while visible.
-        print("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
+        debugLog("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
         // Ensure window is visible and frontmost (but not key to avoid interfering with overlays)
         if !controller.window.isVisible {
-          print("[AppDelegate] handleActivation (Reset): Making window visible.")
+          debugLog("[AppDelegate] handleActivation (Reset): Making window visible.")
           controller.window.orderFront(nil)  // Just bring to front without making key
         }
         // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
@@ -920,26 +928,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
           }
           self.controller.userState.activeRoot = newRoot
         }
-        print("[AppDelegate] handleActivation (Reset): Starting new sequence.")
+        debugLog("[AppDelegate] handleActivation (Reset): Starting new sequence.")
         controller.repositionWindowNearMouse()
         startSequence(activationType: type)
 
       case .nothing:
         // Preference: Do nothing if activated again while visible, unless window lost focus.
-        print("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
+        debugLog("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
         // Ensure window is visible (but not key to avoid interfering with overlays)
         if !controller.window.isVisible {
-          print("[AppDelegate] handleActivation (Nothing): Making window visible.")
+          debugLog("[AppDelegate] handleActivation (Nothing): Making window visible.")
           controller.window.orderFront(nil)  // Just bring to front without making key
         }
         // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
         // This prevents restarting if the user just presses the shortcut again mid-sequence.
         if currentSequenceGroup == nil {
-          print(
+          debugLog(
             "[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
           startSequence(activationType: type)
         } else {
-          print("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
+          debugLog("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
         }
       }
     } else {
@@ -961,14 +969,14 @@ extension AppDelegate {
   // ... (setupFileMonitor, setupStatusItem, isRunningTests implementations - logs added within methods) ...
   fileprivate func setupFileMonitor() {
     print("[AppDelegate] setupFileMonitor: Setting up config directory watcher.")
-    Task {
+    configDirObserverTask = Task {
       // Observe changes to the config directory path stored in Defaults
       for await newDir in Defaults.updates(.configDir) {
         print("[AppDelegate] Config directory changed to: \(newDir). Restarting file monitor.")
         self.fileMonitor?.stopMonitoring()  // Stop previous monitor if any
-        self.fileMonitor = FileMonitor(fileURL: config.url) {  // Create new monitor for the current config URL
+        self.fileMonitor = FileMonitor(fileURL: config.url) { [weak self] in  // Create new monitor for the current config URL
           print("[AppDelegate] FileMonitor detected change in config file. Reloading...")
-          self.config.reloadConfig()
+          self?.config.reloadConfig()
         }
         self.fileMonitor.startMonitoring()
         print("[AppDelegate] FileMonitor started for: \(config.url.path)")
@@ -1012,7 +1020,7 @@ extension AppDelegate {
       }
     }
     // Observe changes to the preference for showing the menu bar icon
-    Task {
+    menuBarIconObserverTask = Task {
       for await value in Defaults.updates(.showMenuBarIcon) {
         DispatchQueue.main.async {
           print(
@@ -1071,7 +1079,7 @@ extension AppDelegate {
       Defaults[.automaticallyChecksForUpdates]
 
     // Observe changes to the auto-update preference
-    Task {
+    autoUpdateObserverTask = Task {
       for await value in Defaults.updates(.automaticallyChecksForUpdates) {
         DispatchQueue.main.async {
           print(
@@ -1083,7 +1091,7 @@ extension AppDelegate {
     }
 
     // Observe changes to input method preference
-    Task {
+    inputMethodPrefObserverTask = Task {
       for await value in Defaults.updates(.inputMethodPreference) {
         DispatchQueue.main.async { [weak self] in
           guard let self = self else { return }
@@ -2203,8 +2211,9 @@ extension AppDelegate {
     let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(
       rootGroup, for: cacheId)
     self.currentKeyLookupCache = keyLookupCache
+    self.controller.keyLookupCache = keyLookupCache
 
-    print(
+    debugLog(
       "[AppDelegate] startSequence: Preprocessed config for '\(cacheId)' with \(keyLookupCache.getCacheStats())"
     )
 
@@ -2916,6 +2925,7 @@ extension AppDelegate {
 
     let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(refreshedRoot, for: cacheId)
     currentKeyLookupCache = keyLookupCache
+    controller.keyLookupCache = keyLookupCache
 
     var refreshedNavigationPath: [Group] = [refreshedRoot]
     var currentGroup = refreshedRoot

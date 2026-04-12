@@ -77,6 +77,7 @@ final class KarabinerUserCommandReceiver {
   private let receiverQueue = DispatchQueue(label: "com.leaderkey.usercommand.receiver")
   private var socketHandle: Int32 = -1
   private var readSource: DispatchSourceRead?
+  private var recvBuffer = [UInt8](repeating: 0, count: 32 * 1024)  // Reusable receive buffer
 
   weak var delegate: UnixSocketServerDelegate?
   private(set) var isRunning = false
@@ -162,16 +163,15 @@ final class KarabinerUserCommandReceiver {
   private func receiveDatagram() {
     guard socketHandle >= 0 else { return }
 
-    var buffer = [UInt8](repeating: 0, count: 32 * 1024)
-    let bytesRead = recvfrom(socketHandle, &buffer, buffer.count, 0, nil, nil)
+    let bytesRead = recvfrom(socketHandle, &recvBuffer, recvBuffer.count, 0, nil, nil)
     guard bytesRead > 0 else { return }
 
     var endIndex = Int(bytesRead)
-    if endIndex > 0 && buffer[endIndex - 1] == 0x0A { endIndex -= 1 }
-    if endIndex > 0 && buffer[endIndex - 1] == 0x0D { endIndex -= 1 }
+    if endIndex > 0 && recvBuffer[endIndex - 1] == 0x0A { endIndex -= 1 }
+    if endIndex > 0 && recvBuffer[endIndex - 1] == 0x0D { endIndex -= 1 }
     guard endIndex > 0 else { return }
 
-    let data = Data(buffer[0..<endIndex])
+    let data = Data(recvBuffer[0..<endIndex])
     do {
       let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
       handleIncomingPayload(json)
@@ -380,9 +380,12 @@ final class KarabinerUserCommandReceiver {
     let expectedAppName = normalizedAppName(app)
     let cached = appCacheEntry(for: app)
 
+    // Cache the running apps list to avoid multiple expensive system calls
+    let allRunningApps = NSWorkspace.shared.runningApplications
+
     if let cachedPID = cached?.pid,
        cachedPID > 0,
-       let runningApp = NSWorkspace.shared.runningApplications.first(where: {
+       let runningApp = allRunningApps.first(where: {
          $0.processIdentifier == cachedPID
        }),
        isValidCachedPID(runningApp, cachedBundleId: cached?.bundleId, expectedAppName: expectedAppName) {
@@ -397,7 +400,7 @@ final class KarabinerUserCommandReceiver {
       return RunningAppLookup(runningApp: runningApp, strategy: "cached_bundle")
     }
 
-    if let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == expectedAppName }) {
+    if let runningApp = allRunningApps.first(where: { $0.localizedName == expectedAppName }) {
       updateCacheFromRunningApp(app, runningApp: runningApp)
       return RunningAppLookup(runningApp: runningApp, strategy: "name_scan")
     }

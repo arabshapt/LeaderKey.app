@@ -18,8 +18,8 @@ final class ConfigCache {
       self.fileModificationDate = fileModificationDate
     }
 
-    var isExpired: Bool {
-      Date().timeIntervalSince(timestamp) > 60  // 1 minute expiry
+    func isExpired(maxAge: TimeInterval) -> Bool {
+      Date().timeIntervalSince(timestamp) > maxAge
     }
   }
 
@@ -35,7 +35,7 @@ final class ConfigCache {
       guard let entry = cache.object(forKey: path as NSString) else { return nil }
 
       // Check if cache is expired
-      if entry.isExpired {
+      if entry.isExpired(maxAge: maxCacheAge) {
         cache.removeObject(forKey: path as NSString)
         return nil
       }

@@ -14,7 +14,7 @@ final class KarabinerTsExportService {
   static let managedRuleDescriptionPrefix = "LeaderKeyManaged/"
   static let legacyManagedRuleDescriptionPrefix = "Leader Key - "
   static let generatedDirectoryRelativePath = "configs/leaderkey"
-  static let generatedModuleRelativePath = generatedDirectoryRelativePath + "/leaderkey-generated.ts"
+  static let generatedModuleRelativePath = generatedDirectoryRelativePath + "/leaderkey-generated.json"
   static let generatedBootstrapRelativePath = generatedDirectoryRelativePath + "/index.ts"
 
   private init() {}
@@ -30,13 +30,13 @@ final class KarabinerTsExportService {
 
   func compileAndApply(
     managedRules: [[String: Any]],
-    repoModuleSource: String,
+    repoModuleData: Data,
     repoPath: String? = nil,
     karabinerJsonPath: String? = nil
   ) -> KarabinerTsExportResult {
     do {
       let resolvedRepoPath = try validatedRepoPath(repoPath)
-      try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleSource: repoModuleSource)
+      try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleData: repoModuleData)
       try applyManagedRules(managedRules, karabinerPath: karabinerJsonPath)
       return KarabinerTsExportResult(
         success: true,
@@ -47,11 +47,10 @@ final class KarabinerTsExportService {
     }
   }
 
-  /// Write repo files only (Phase 1 of split export). Allows caller to release
-  /// repoModuleSource before the heavier JSON patching phase.
-  func writeRepoFiles(repoModuleSource: String, repoPath: String? = nil) throws {
+  /// Write repo files only (Phase 1 of split export). Writes raw JSON module data.
+  func writeRepoFiles(repoModuleData: Data, repoPath: String? = nil) throws {
     let resolvedRepoPath = try validatedRepoPath(repoPath)
-    try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleSource: repoModuleSource)
+    try writeManagedRepoFiles(repoPath: resolvedRepoPath, repoModuleData: repoModuleData)
   }
 
   /// Apply managed rules to karabiner.json (Phase 2 of split export).
@@ -63,23 +62,33 @@ final class KarabinerTsExportService {
     try JSONSerialization.data(withJSONObject: managedRules, options: [.sortedKeys])
   }
 
-  private func writeManagedRepoFiles(repoPath: String, repoModuleSource: String) throws {
+  private func writeManagedRepoFiles(repoPath: String, repoModuleData: Data) throws {
     let managedDirectory = (repoPath as NSString).appendingPathComponent(Self.generatedDirectoryRelativePath)
     try FileManager.default.createDirectory(atPath: managedDirectory, withIntermediateDirectories: true)
 
     let generatedModulePath = (repoPath as NSString).appendingPathComponent(Self.generatedModuleRelativePath)
-    let moduleData = Data(repoModuleSource.utf8)
     if let existingData = try? Data(contentsOf: URL(fileURLWithPath: generatedModulePath)),
-       existingData == moduleData
+       existingData == repoModuleData
     {
       debugLog("[Benchmark] karabiner.ts.writeRepoFiles skipped unchanged generated module")
     } else {
-      try moduleData.write(to: URL(fileURLWithPath: generatedModulePath), options: .atomic)
+      try repoModuleData.write(to: URL(fileURLWithPath: generatedModulePath), options: .atomic)
     }
 
+    // Always update bootstrap to ensure it imports .json (migration from .ts)
     let bootstrapPath = (repoPath as NSString).appendingPathComponent(Self.generatedBootstrapRelativePath)
-    if !FileManager.default.fileExists(atPath: bootstrapPath) {
-      try Self.bootstrapModuleSource().write(toFile: bootstrapPath, atomically: true, encoding: .utf8)
+    let bootstrapContent = Self.bootstrapModuleSource()
+    let existingBootstrap = try? String(contentsOfFile: bootstrapPath, encoding: .utf8)
+    if existingBootstrap != bootstrapContent {
+      try bootstrapContent.write(toFile: bootstrapPath, atomically: true, encoding: .utf8)
+    }
+
+    // Clean up legacy .ts generated file if it exists
+    let legacyTsPath = (repoPath as NSString).appendingPathComponent(
+      Self.generatedDirectoryRelativePath + "/leaderkey-generated.ts")
+    if FileManager.default.fileExists(atPath: legacyTsPath) {
+      try? FileManager.default.removeItem(atPath: legacyTsPath)
+      debugLog("[KarCompilerService] Removed legacy leaderkey-generated.ts")
     }
   }
 
@@ -447,12 +456,12 @@ final class KarabinerTsExportService {
     """
     // Created once by Leader Key. You can import this path from your own karabiner.ts config.
     // This file is not overwritten after creation.
+    import type { Rule } from '../../src/karabiner/karabiner-config.ts'
+    import leaderKeyRules from './leaderkey-generated.json'
 
-    export {
-      default,
-      leaderKeyDefaultProfileName,
-      leaderKeyManagedRules,
-    } from './leaderkey-generated'
+    export const leaderKeyDefaultProfileName = "Default"
+    export const leaderKeyManagedRules = leaderKeyRules as Rule[]
+    export default leaderKeyManagedRules
     """
   }
 }

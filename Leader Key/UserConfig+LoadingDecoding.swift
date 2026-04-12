@@ -57,16 +57,12 @@ extension UserConfig {
   // Gets the fallback config with all items marked as isFromFallback
   // This is used when __FALLBACK__ is explicitly activated
   func getMarkedFallbackConfig() -> Group {
-    // Get the raw fallback config
-    let fallbackConfig = getFallbackConfig()
-    
-    // Check if we actually got a fallback config or just the default root
-    // We can check this by seeing if the cache has a fallback entry
+    // Check cache directly — getFallbackConfig() populates this
     let defaultAppKey = "app.default"
-    let hasFallbackConfig = appConfigs[defaultAppKey] != nil
-    
-    // If no fallback config exists (we got the root), return as is
-    if !hasFallbackConfig {
+    let fallbackConfig = getFallbackConfig()
+
+    // If no fallback config exists (getFallbackConfig returned root), return as is
+    guard appConfigs[defaultAppKey] != nil else {
       return root
     }
     
@@ -115,33 +111,8 @@ extension UserConfig {
       }
     }
 
-    // 2. Try fallback app config (app-fallback-config.json)
-    let defaultAppKey = "app.default"
-    // Check cache first
-    if let cachedDefaultAppConfig = appConfigs[defaultAppKey] {
-      return cachedDefaultAppConfig ?? root  // Return cached or default if nil
-    }
-
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
-      defaultAppConfigFileName)
-    if fileManager.fileExists(atPath: defaultAppConfigPath) {
-      // Attempt to load and decode app-fallback-config.json
-      if let defaultAppRoot = decodeConfig(
-        from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false)
-      {
-        appConfigs[defaultAppKey] = defaultAppRoot  // Cache successful load
-        return defaultAppRoot
-      } else {
-        appConfigs[defaultAppKey] = nil  // Cache failed load as nil
-        // Fall through to default global-config.json
-      }
-    } else {
-      // File doesn't exist, cache this fact
-      appConfigs[defaultAppKey] = nil
-    }
-
-    // 3. Fallback to default global-config.json (already loaded into self.root)
-    return root
+    // 2. Try fallback app config, then default global-config.json
+    return getFallbackConfig()
   }
 
   // Helper to decode a config file from a given path
@@ -150,7 +121,7 @@ extension UserConfig {
     from filePath: String, suppressAlerts: Bool = false, isDefaultConfig: Bool
   ) -> Group? {
     let configName = (filePath as NSString).lastPathComponent
-    print("[UserConfig] Attempting to decode config: \(configName)")
+    debugLog("[UserConfig] Attempting to decode config: \(configName)")
 
     // Check cache first
     let fileURL = URL(fileURLWithPath: filePath)
@@ -158,14 +129,14 @@ extension UserConfig {
       try? fileManager.attributesOfItem(atPath: filePath)[.modificationDate] as? Date
 
     if let cachedGroup = configCache.getConfig(for: filePath, fileModificationDate: fileModDate) {
-      print("[UserConfig] Using cached config for: \(configName)")
+      debugLog("[UserConfig] Using cached config for: \(configName)")
       return cachedGroup
     }
 
     let data: Data
     do {
       data = try Data(contentsOf: fileURL)
-      print("[UserConfig] Successfully read data from: \(configName)")
+      debugLog("[UserConfig] Successfully read data from: \(configName)")
     } catch {
       // Handle file reading errors (permissions, not found etc.)
       print("[UserConfig] Error reading file \(configName): \(error.localizedDescription)")
@@ -184,7 +155,7 @@ extension UserConfig {
     do {
       let decoder = JSONDecoder()
       let decodedRoot = try decoder.decode(Group.self, from: data)
-      print("[UserConfig] Successfully decoded JSON for: \(configName)")
+      debugLog("[UserConfig] Successfully decoded JSON for: \(configName)")
 
       // Perform validation regardless, but only show alerts/update main state for default config
       let errors = ConfigValidator.validate(group: decodedRoot)
@@ -355,32 +326,30 @@ extension UserConfig {
     mergedGroup.isFromFallback = appSpecificGroup.isFromFallback
     mergedGroup.fallbackSource = appSpecificGroup.fallbackSource
 
-    print("[UserConfig] mergeWithFallback: Merged group has \(mergedActions.count) items")
+    debugLog("[UserConfig] mergeWithFallback: Merged group has \(mergedActions.count) items")
     return mergedGroup
   }
 
   // Merges app-specific config with Fallback App Config if available
   internal func mergeConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
-    // Get the fallback app config
-    let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
-      defaultAppConfigFileName)
+    // Use getFallbackConfig() which handles caching and file existence checks
+    let fallbackConfig = getFallbackConfig()
 
-    guard fileManager.fileExists(atPath: defaultAppConfigPath),
-      let defaultAppConfig = decodeConfig(
-        from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false)
-    else {
-      print(
+    // If fallback is just root (no fallback file exists), return app config as-is
+    let defaultAppKey = "app.default"
+    guard appConfigs[defaultAppKey] != nil else {
+      debugLog(
         "[UserConfig] mergeConfigWithFallback: No fallback app config available, returning app-specific config as-is"
       )
       return appSpecificConfig
     }
 
-    print(
+    debugLog(
       "[UserConfig] mergeConfigWithFallback: Merging app-specific config for '\(bundleId)' with fallback app config"
     )
     return mergeWithFallback(
       appSpecificGroup: appSpecificConfig,
-      fallbackGroup: defaultAppConfig,
+      fallbackGroup: fallbackConfig,
       fallbackSource: defaultAppConfigDisplayName
     )
   }

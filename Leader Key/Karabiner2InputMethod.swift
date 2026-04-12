@@ -10,6 +10,11 @@ final class Karabiner2InputMethod: InputMethod {
   private var currentState: Int32 = 0
   private var lastKarabinerTsExportError: String?
 
+  // Cache pgrep result to avoid spawning process every health check
+  private var cachedGrabberRunning: Bool = false
+  private var cachedGrabberCheckTime: Date = .distantPast
+  private let grabberCacheTTL: TimeInterval = 10
+
   var isActive: Bool {
     return socketServer.getStatistics().contains("Running: true")
   }
@@ -391,9 +396,9 @@ final class Karabiner2InputMethod: InputMethod {
             return
           }
 
-          let moduleSource = Karabiner2Exporter.generateModuleSource(managedRules: managedRules)
+          let moduleData = Karabiner2Exporter.generateModuleJSON(managedRules: managedRules)
           do {
-            try service.writeRepoFiles(repoModuleSource: moduleSource)
+            try service.writeRepoFiles(repoModuleData: moduleData)
             if let rulesFingerprint {
               Self.recordModuleGeneration(
                 rulesFingerprint: rulesFingerprint,
@@ -415,7 +420,7 @@ final class Karabiner2InputMethod: InputMethod {
   private func saveStateMappings(_ stateMappings: [Karabiner2Exporter.StateMapping], outputDir: String) throws {
     let mappingFilePath = outputDir + "/leaderkey-state-mappings.json"
     let encoder = JSONEncoder()
-    encoder.outputFormatting = .prettyPrinted
+    encoder.outputFormatting = .sortedKeys
     let mappingData = try encoder.encode(stateMappings)
     let mappingURL = URL(fileURLWithPath: mappingFilePath)
     if let existingData = try? Data(contentsOf: mappingURL),
@@ -493,6 +498,11 @@ final class Karabiner2InputMethod: InputMethod {
   }
 
   private func isKarabinerGrabberRunning() -> Bool {
+    // Return cached result if within TTL
+    if Date().timeIntervalSince(cachedGrabberCheckTime) < grabberCacheTTL {
+      return cachedGrabberRunning
+    }
+
     let task = Process()
     task.launchPath = "/bin/sh"
     task.arguments = ["-c", "pgrep -x karabiner_grabber"]
@@ -504,9 +514,13 @@ final class Karabiner2InputMethod: InputMethod {
     do {
       try task.run()
       task.waitUntilExit()
-      return task.terminationStatus == 0
+      cachedGrabberRunning = task.terminationStatus == 0
+      cachedGrabberCheckTime = Date()
+      return cachedGrabberRunning
     } catch {
       debugLog("[Karabiner2InputMethod] Failed to check karabiner_grabber: \(error)")
+      cachedGrabberRunning = false
+      cachedGrabberCheckTime = Date()
       return false
     }
   }
