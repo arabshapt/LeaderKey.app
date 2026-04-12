@@ -316,12 +316,40 @@ final class KarabinerUserCommandReceiver {
       .replacingOccurrences(of: ".app", with: "")
   }
 
-  private static func updateCacheFromRunningApp(_ app: String, runningApp: NSRunningApplication) {
+  private static func normalizedBundleURL(_ url: URL) -> URL {
+    url.resolvingSymlinksInPath().standardizedFileURL
+  }
+
+  static func metadataMatchesResolvedApp(
+    bundleURL: URL?,
+    bundleId: String?,
+    resolvedURL: URL,
+    resolvedBundleId: String
+  ) -> Bool {
+    if let bundleId, bundleId == resolvedBundleId {
+      return true
+    }
+
+    if let bundleURL {
+      return normalizedBundleURL(bundleURL) == normalizedBundleURL(resolvedURL)
+    }
+
+    return false
+  }
+
+  private static func updateCacheFromRunningApp(
+    _ app: String,
+    runningApp: NSRunningApplication,
+    resolved: (url: URL, bundleId: String)? = nil
+  ) {
     updateAppCache(app) { entry in
-      if let bundleURL = runningApp.bundleURL {
+      if let resolved {
+        entry.url = resolved.url
+        entry.bundleId = resolved.bundleId
+      } else if let bundleURL = runningApp.bundleURL {
         entry.url = bundleURL
       }
-      if let bundleIdentifier = runningApp.bundleIdentifier {
+      if resolved == nil, let bundleIdentifier = runningApp.bundleIdentifier {
         entry.bundleId = bundleIdentifier
       }
       entry.pid = runningApp.processIdentifier
@@ -329,8 +357,19 @@ final class KarabinerUserCommandReceiver {
   }
 
   private static func isValidCachedPID(
-    _ runningApp: NSRunningApplication, cachedBundleId: String?, expectedAppName: String
+    _ runningApp: NSRunningApplication,
+    resolved: (url: URL, bundleId: String)?,
+    cachedBundleId: String?,
+    expectedAppName: String
   ) -> Bool {
+    if let resolved {
+      return metadataMatchesResolvedApp(
+        bundleURL: runningApp.bundleURL,
+        bundleId: runningApp.bundleIdentifier,
+        resolvedURL: resolved.url,
+        resolvedBundleId: resolved.bundleId)
+    }
+
     if let cachedBundleId, !cachedBundleId.isEmpty {
       return runningApp.bundleIdentifier == cachedBundleId
     }
@@ -339,19 +378,39 @@ final class KarabinerUserCommandReceiver {
   }
 
   private static func resolveApp(_ app: String) -> (url: URL, bundleId: String)? {
-    if let cached = appCacheEntry(for: app),
-       let url = cached.url,
-       let bundleId = cached.bundleId {
-      return (url: url, bundleId: bundleId)
-    }
-
     guard let url = resolveAppURL(app) else { return nil }
     guard let bundle = Bundle(url: url),
           let bundleId = bundle.bundleIdentifier else { return nil }
 
+    if let cached = appCacheEntry(for: app) {
+      let cacheMatches = metadataMatchesResolvedApp(
+        bundleURL: cached.url,
+        bundleId: cached.bundleId,
+        resolvedURL: url,
+        resolvedBundleId: bundleId)
+      if !cacheMatches {
+        debugLog(
+          "[KarabinerUserCommandReceiver] app: refreshing stale cache for '\(app)' cachedBundleId=\(cached.bundleId ?? "nil") resolvedBundleId=\(bundleId)"
+        )
+      }
+    }
+
     updateAppCache(app) { entry in
+      let cachedURL = entry.url
+      let cachedBundleId = entry.bundleId
+
       entry.url = url
       entry.bundleId = bundleId
+      if let existingPID = entry.pid,
+         existingPID > 0,
+         !metadataMatchesResolvedApp(
+           bundleURL: cachedURL,
+           bundleId: cachedBundleId,
+           resolvedURL: url,
+           resolvedBundleId: bundleId)
+      {
+        entry.pid = 0
+      }
     }
 
     return (url: url, bundleId: bundleId)
@@ -378,6 +437,7 @@ final class KarabinerUserCommandReceiver {
   /// Find a running app using seq-style lookup order: cached PID, cached bundle ID, then name scan.
   private static func findRunningAppLookup(_ app: String) -> RunningAppLookup? {
     let expectedAppName = normalizedAppName(app)
+    let resolved = resolveApp(app)
     let cached = appCacheEntry(for: app)
 
     // Cache the running apps list to avoid multiple expensive system calls
@@ -388,19 +448,38 @@ final class KarabinerUserCommandReceiver {
        let runningApp = allRunningApps.first(where: {
          $0.processIdentifier == cachedPID
        }),
-       isValidCachedPID(runningApp, cachedBundleId: cached?.bundleId, expectedAppName: expectedAppName) {
-      updateCacheFromRunningApp(app, runningApp: runningApp)
+       isValidCachedPID(
+         runningApp,
+         resolved: resolved,
+         cachedBundleId: cached?.bundleId,
+         expectedAppName: expectedAppName)
+    {
+      updateCacheFromRunningApp(app, runningApp: runningApp, resolved: resolved)
       return RunningAppLookup(runningApp: runningApp, strategy: "cached_pid")
     }
 
-    if let cachedBundleId = cached?.bundleId,
-       !cachedBundleId.isEmpty,
-       let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: cachedBundleId).first {
-      updateCacheFromRunningApp(app, runningApp: runningApp)
+    if let resolved,
+       let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: resolved.bundleId).first {
+      updateCacheFromRunningApp(app, runningApp: runningApp, resolved: resolved)
       return RunningAppLookup(runningApp: runningApp, strategy: "cached_bundle")
     }
 
-    if let runningApp = allRunningApps.first(where: { $0.localizedName == expectedAppName }) {
+    if let resolved,
+       let runningApp = allRunningApps.first(where: {
+         $0.localizedName == expectedAppName
+           && metadataMatchesResolvedApp(
+             bundleURL: $0.bundleURL,
+             bundleId: $0.bundleIdentifier,
+             resolvedURL: resolved.url,
+             resolvedBundleId: resolved.bundleId)
+       })
+    {
+      updateCacheFromRunningApp(app, runningApp: runningApp, resolved: resolved)
+      return RunningAppLookup(runningApp: runningApp, strategy: "name_scan")
+    }
+
+    if resolved == nil,
+       let runningApp = allRunningApps.first(where: { $0.localizedName == expectedAppName }) {
       updateCacheFromRunningApp(app, runningApp: runningApp)
       return RunningAppLookup(runningApp: runningApp, strategy: "name_scan")
     }
@@ -446,10 +525,10 @@ final class KarabinerUserCommandReceiver {
         }
 
         if Self.shouldCheckForReopen(running) && Self.runningAppNeedsReopen(running) {
-          launchAppViaOpen(resolved.url)
+          let launchMethod = launchApp(resolved)
           let action = toggle ? "open_app_toggle" : "open_app"
           debugLog(
-            "[KarabinerUserCommandReceiver] \(action): reopened '\(app)' mode=\(lookup.strategy) reason=no_regular_window"
+            "[KarabinerUserCommandReceiver] \(action): reopened '\(app)' mode=\(lookup.strategy) reason=no_regular_window via \(launchMethod)"
           )
           return
         }
@@ -465,9 +544,9 @@ final class KarabinerUserCommandReceiver {
         )
       }
 
-      launchAppViaOpen(resolved.url)
+      let launchMethod = launchApp(resolved)
       let action = toggle ? "open_app_toggle" : "open_app"
-      debugLog("[KarabinerUserCommandReceiver] \(action): launched '\(app)' via open -a")
+      debugLog("[KarabinerUserCommandReceiver] \(action): launched '\(app)' via \(launchMethod)")
     }
   }
 
@@ -547,18 +626,44 @@ final class KarabinerUserCommandReceiver {
     return !runningAppHasRegularWindow(pid: runningApp.processIdentifier, windowList: windowList)
   }
 
-  private static func launchAppViaOpen(_ appURL: URL) {
+  static func openLaunchArguments(forBundleIdentifier bundleId: String) -> [String] {
+    ["-b", bundleId]
+  }
+
+  private static func launchApp(_ resolved: (url: URL, bundleId: String)) -> String {
     let task = Process()
-    task.launchPath = "/usr/bin/open"
-    task.arguments = ["-a", appURL.path]
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    task.arguments = openLaunchArguments(forBundleIdentifier: resolved.bundleId)
+
+    let stderrPipe = Pipe()
+    task.standardError = stderrPipe
 
     do {
       try task.run()
+      task.waitUntilExit()
+      if task.terminationStatus == 0 {
+        return "open-bundle-id"
+      }
+
+      let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+      let stderrMessage = String(data: stderrData, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let details: String
+      if let stderrMessage, !stderrMessage.isEmpty {
+        details = ": \(stderrMessage)"
+      } else {
+        details = ""
+      }
+      debugLog(
+        "[KarabinerUserCommandReceiver] app: open exited \(task.terminationStatus) for bundle '\(resolved.bundleId)'\(details)"
+      )
     } catch {
-      debugLog("[KarabinerUserCommandReceiver] app: failed to launch '\(appURL.path)' via open -a: \(error)")
-      let config = NSWorkspace.OpenConfiguration()
-      NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+      debugLog("[KarabinerUserCommandReceiver] app: failed to launch bundle '\(resolved.bundleId)' via open: \(error)")
     }
+
+    let config = NSWorkspace.OpenConfiguration()
+    NSWorkspace.shared.openApplication(at: resolved.url, configuration: config)
+    return "NSWorkspace"
   }
 
   private func openWithApp(appPath: String, target: String) {

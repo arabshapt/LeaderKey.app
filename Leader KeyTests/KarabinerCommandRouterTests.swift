@@ -197,4 +197,38 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertFalse(KarabinerUserCommandReceiver.runningAppHasRegularWindow(pid: 42, windowList: windowList))
   }
+
+  func testMetadataMatchesResolvedAppRejectsMessagesAssistantExtension() {
+    let assistantURL = URL(
+      fileURLWithPath: "/System/Applications/Messages.app/Contents/PlugIns/Messages Assistant Extension.appex")
+    let messagesURL = URL(fileURLWithPath: "/System/Applications/Messages.app")
+
+    let matches = KarabinerUserCommandReceiver.metadataMatchesResolvedApp(
+      bundleURL: assistantURL,
+      bundleId: "com.apple.messages.AssistantExtension",
+      resolvedURL: messagesURL,
+      resolvedBundleId: "com.apple.MobileSMS")
+
+    XCTAssertFalse(matches)
+  }
+
+  func testMetadataMatchesResolvedAppAcceptsResolvedBundleIdentifier() {
+    let messagesURL = URL(fileURLWithPath: "/System/Applications/Messages.app")
+
+    let matches = KarabinerUserCommandReceiver.metadataMatchesResolvedApp(
+      bundleURL: nil,
+      bundleId: "com.apple.MobileSMS",
+      resolvedURL: messagesURL,
+      resolvedBundleId: "com.apple.MobileSMS")
+
+    XCTAssertTrue(matches)
+  }
+
+  func testOpenLaunchArgumentsUseBundleIdentifier() {
+    let arguments = KarabinerUserCommandReceiver.openLaunchArguments(
+      forBundleIdentifier: "com.apple.MobileSMS")
+
+    XCTAssertEqual(arguments, ["-b", "com.apple.MobileSMS"])
+    XCTAssertFalse(arguments.contains("/System/Applications/Messages.app"))
+  }
 }
