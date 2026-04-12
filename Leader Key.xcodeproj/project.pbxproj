@@ -87,6 +87,7 @@
 		9988B913EEF6F026B160CFA5 /* KarabinerCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */; };
 		A0E527BE504D1E823832C517 /* KarabinerUserCommandReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD575A024DD1637B61404740 /* KarabinerUserCommandReceiver.swift */; };
 		E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */; };
+		F1A2B3C4D5E6F7A8B9C0D1E2 /* KeyLookupCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +102,7 @@
 
 /* Begin PBXFileReference section */
 		058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarCompilerServiceTests.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyLookupCacheTests.swift; sourceTree = "<group>"; };
 		0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerCommandRouter.swift; sourceTree = "<group>"; };
 		0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerExporterTests.swift; sourceTree = "<group>"; };
 		115AA5BE2DA521C200C17E18 /* ActionIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionIcon.swift; sourceTree = "<group>"; };
@@ -323,6 +325,7 @@
 				0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */,
 				A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */,
 				058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */,
 				88C62E8645370FE40FE22FAD /* Karabiner2ExporterKarConfigTests.swift */,
 			);
 			path = "Leader KeyTests";
@@ -601,6 +604,7 @@
 				526B4503A36B284D4B6B1D80 /* KarabinerExporterTests.swift in Sources */,
 				13080407B1A7D62ED7F8C9EB /* KarabinerCommandRouterTests.swift in Sources */,
 				E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */,
+				F1A2B3C4D5E6F7A8B9C0D1E2 /* KeyLookupCacheTests.swift in Sources */,
 				2715D3ED4E0DDDFF875FC5B3 /* Karabiner2ExporterKarConfigTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
