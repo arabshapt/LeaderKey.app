@@ -34,6 +34,9 @@ struct AdvancedPane: View {
   @State private var showingAlternativeMappings = false
   @State private var karabinerTsValidationMessage: String?
   @State private var karabinerTsValidationSucceeded: Bool?
+  @State private var isSyncingGokuProfile = false
+  @State private var gokuProfileSyncMessage: String?
+  @State private var gokuProfileSyncSucceeded: Bool?
   @State private var gokuValidationMessage: String?
   @State private var gokuValidationSucceeded: Bool?
 
@@ -141,6 +144,36 @@ struct AdvancedPane: View {
                       .font(.caption)
                       .foregroundColor(karabinerTsValidationSucceeded == true ? .green : .orange)
                   }
+
+                  VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                      Button(isSyncingGokuProfile ? "Syncing Goku Profile…" : "Sync Goku EDN to karabiner.ts") {
+                        syncGokuProfileToKarabinerTs()
+                      }
+                      .disabled(isSyncingGokuProfile)
+
+                      Button("Copy Socket Shell Command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                          "printf 'sync-goku-profile\\n' | nc -U /tmp/leaderkey.sock",
+                          forType: .string
+                        )
+                      }
+
+                      Spacer()
+                    }
+
+                    Text("Raycast sends `sync-goku-profile` to `/tmp/leaderkey.sock`; shell scripts can use the copied command.")
+                      .font(.caption)
+                      .foregroundColor(.secondary)
+
+                    if let gokuProfileSyncMessage {
+                      Text(gokuProfileSyncMessage)
+                        .font(.caption)
+                        .foregroundColor(gokuProfileSyncSucceeded == true ? .green : .orange)
+                    }
+                  }
+                  .padding(.top, 6)
                 }
 
                 if karabiner2Backend.usesLegacyGoku {
@@ -531,6 +564,26 @@ struct AdvancedPane: View {
       let normalizedBackend = karabiner2Backend.normalized
       if karabiner2Backend != normalizedBackend {
         karabiner2Backend = normalizedBackend
+      }
+    }
+  }
+
+  private func syncGokuProfileToKarabinerTs() {
+    guard !isSyncingGokuProfile else { return }
+    isSyncingGokuProfile = true
+    gokuProfileSyncMessage = nil
+    gokuProfileSyncSucceeded = nil
+
+    DispatchQueue.global(qos: .utility).async {
+      let result = KarabinerTsExportService.shared.migrateGokuProfileToKarabinerTs()
+
+      DispatchQueue.main.async {
+        isSyncingGokuProfile = false
+        gokuProfileSyncSucceeded = result.success
+        gokuProfileSyncMessage = result.message
+        if result.success {
+          config.reloadConfig()
+        }
       }
     }
   }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Defaults
 import Foundation
 
@@ -15,7 +16,15 @@ final class KarabinerTsExportService {
   static let legacyManagedRuleDescriptionPrefix = "Leader Key - "
   static let generatedDirectoryRelativePath = "configs/leaderkey"
   static let generatedModuleRelativePath = generatedDirectoryRelativePath + "/leaderkey-generated.json"
+  static let legacyGeneratedModuleRelativePath = generatedDirectoryRelativePath + "/leaderkey-generated.ts"
   static let generatedBootstrapRelativePath = generatedDirectoryRelativePath + "/index.ts"
+  static let migratedGokuProfileDirectoryRelativePath = "configs/arabshapt"
+  static let migratedGokuComplexModificationsRelativePath =
+    migratedGokuProfileDirectoryRelativePath + "/default-complex-modifications.json"
+  static let migratedGokuProfileModuleRelativePath =
+    migratedGokuProfileDirectoryRelativePath + "/default-profile.ts"
+  static let migratedGokuMetadataRelativePath =
+    migratedGokuProfileDirectoryRelativePath + "/migration-metadata.json"
 
   private init() {}
 
@@ -25,6 +34,61 @@ final class KarabinerTsExportService {
       return KarabinerTsExportResult(success: true, message: "karabiner.ts workspace is available at \(resolved)")
     } catch {
       return KarabinerTsExportResult(success: false, message: error.localizedDescription)
+    }
+  }
+
+  func migrateGokuProfileToKarabinerTs(
+    repoPath: String? = nil,
+    ednPath: String? = nil,
+    profileName: String = "Default",
+    gokuBinaryPath: String? = nil
+  ) -> KarabinerTsExportResult {
+    do {
+      let resolvedRepoPath = try validatedRepoPath(repoPath)
+      let resolvedEDNPath = (ednPath ?? (NSHomeDirectory() as NSString).appendingPathComponent(".config/karabiner.edn"))
+        .trimmingCharacters(in: .whitespacesAndNewlines) as NSString
+      let expandedEDNPath = resolvedEDNPath.expandingTildeInPath
+      guard FileManager.default.fileExists(atPath: expandedEDNPath) else {
+        throw Self.error("Goku EDN config does not exist: \(expandedEDNPath)", code: 20)
+      }
+
+      let configuredGokuBinary = gokuBinaryPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let gokuBinary = configuredGokuBinary?.isEmpty == false
+        ? configuredGokuBinary!
+        : GokuCompilerService.shared.binaryPathForExecution()
+      let processOutput = try Self.runProcess(
+        launchPath: "/usr/bin/env",
+        arguments: [gokuBinary, "--dry-run"],
+        environment: gokuEnvironment(ednPath: expandedEDNPath),
+        workingDirectory: resolvedRepoPath
+      )
+
+      guard processOutput.terminationStatus == 0 else {
+        throw Self.error(
+          "goku --dry-run failed with exit code \(processOutput.terminationStatus): \(processOutput.diagnostics)",
+          code: 21
+        )
+      }
+
+      let migration = try Self.migratedGokuProfile(from: processOutput.stdout)
+      try writeMigratedGokuProfile(
+        migration,
+        repoPath: resolvedRepoPath,
+        profileName: profileName,
+        ednPath: expandedEDNPath,
+        gokuDiagnostics: processOutput.stderrText
+      )
+
+      return KarabinerTsExportResult(
+        success: true,
+        message:
+          "Migrated \(migration.ruleCount) manual Goku rules to \(Self.migratedGokuComplexModificationsRelativePath) (removed \(migration.removedLegacyLeaderKeyRules) legacy Leader Key rules)"
+      )
+    } catch {
+      return KarabinerTsExportResult(
+        success: false,
+        message: "Failed to migrate Goku profile to karabiner.ts: \(error.localizedDescription)"
+      )
     }
   }
 
@@ -62,34 +126,109 @@ final class KarabinerTsExportService {
     try JSONSerialization.data(withJSONObject: managedRules, options: [.sortedKeys])
   }
 
+  private struct MigratedGokuProfile {
+    let complexModifications: [String: Any]
+    let compactJSONData: Data
+    let sha256: String
+    let sourceRuleCount: Int
+    let ruleCount: Int
+    let removedLegacyLeaderKeyRules: Int
+    let removedLegacyLeaderKeyManipulators: Int
+  }
+
+  private struct ProcessOutput {
+    let terminationStatus: Int32
+    let stdout: Data
+    let stderr: Data
+
+    var stderrText: String {
+      String(data: stderr, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var diagnostics: String {
+      let stdoutText = String(data: stdout, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let parts = [
+        stdoutText.isEmpty ? nil : "stdout=\(stdoutText)",
+        stderrText.isEmpty ? nil : "stderr=\(stderrText)",
+      ].compactMap { $0 }
+      return parts.isEmpty ? "no output" : parts.joined(separator: "; ")
+    }
+  }
+
   private func writeManagedRepoFiles(repoPath: String, repoModuleData: Data) throws {
     let managedDirectory = (repoPath as NSString).appendingPathComponent(Self.generatedDirectoryRelativePath)
     try FileManager.default.createDirectory(atPath: managedDirectory, withIntermediateDirectories: true)
 
     let generatedModulePath = (repoPath as NSString).appendingPathComponent(Self.generatedModuleRelativePath)
-    if let existingData = try? Data(contentsOf: URL(fileURLWithPath: generatedModulePath)),
-       existingData == repoModuleData
-    {
+    if try Self.writeFileIfChanged(repoModuleData, to: generatedModulePath) {
       debugLog("[Benchmark] karabiner.ts.writeRepoFiles skipped unchanged generated module")
-    } else {
-      try repoModuleData.write(to: URL(fileURLWithPath: generatedModulePath), options: .atomic)
     }
 
-    // Always update bootstrap to ensure it imports .json (migration from .ts)
+    let legacyModulePath = (repoPath as NSString).appendingPathComponent(Self.legacyGeneratedModuleRelativePath)
+    let legacyModuleData = Data(Self.legacyCompatibilityModuleSource().utf8)
+    if try Self.writeFileIfChanged(legacyModuleData, to: legacyModulePath) {
+      debugLog("[Benchmark] karabiner.ts.writeRepoFiles skipped unchanged compatibility module")
+    }
+
     let bootstrapPath = (repoPath as NSString).appendingPathComponent(Self.generatedBootstrapRelativePath)
-    let bootstrapContent = Self.bootstrapModuleSource()
-    let existingBootstrap = try? String(contentsOfFile: bootstrapPath, encoding: .utf8)
-    if existingBootstrap != bootstrapContent {
-      try bootstrapContent.write(toFile: bootstrapPath, atomically: true, encoding: .utf8)
+    if !FileManager.default.fileExists(atPath: bootstrapPath) {
+      try Self.bootstrapModuleSource().write(toFile: bootstrapPath, atomically: true, encoding: .utf8)
+    }
+  }
+
+  private func gokuEnvironment(ednPath: String) -> [String: String] {
+    var environment = GokuCompilerService.shared.environmentForExecution()
+    environment["GOKU_EDN_CONFIG_FILE"] = ednPath
+    return environment
+  }
+
+  private func writeMigratedGokuProfile(
+    _ migration: MigratedGokuProfile,
+    repoPath: String,
+    profileName: String,
+    ednPath: String,
+    gokuDiagnostics: String
+  ) throws {
+    let outputDirectory = (repoPath as NSString).appendingPathComponent(Self.migratedGokuProfileDirectoryRelativePath)
+    try FileManager.default.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
+
+    let jsonPath = (repoPath as NSString).appendingPathComponent(Self.migratedGokuComplexModificationsRelativePath)
+    try migration.compactJSONData.write(to: URL(fileURLWithPath: jsonPath), options: .atomic)
+
+    let modulePath = (repoPath as NSString).appendingPathComponent(Self.migratedGokuProfileModuleRelativePath)
+    let moduleData = Data(Self.migratedGokuProfileModuleSource(profileName: profileName, sha256: migration.sha256).utf8)
+    try moduleData.write(to: URL(fileURLWithPath: modulePath), options: .atomic)
+
+    let metadataPath = (repoPath as NSString).appendingPathComponent(Self.migratedGokuMetadataRelativePath)
+    let metadata: [String: Any] = [
+      "profile": profileName,
+      "edn": ednPath,
+      "generated_at": ISO8601DateFormatter().string(from: Date()),
+      "sha256": migration.sha256,
+      "bytes": migration.compactJSONData.count,
+      "source_rules": migration.sourceRuleCount,
+      "rules": migration.ruleCount,
+      "removed_legacy_leaderkey_rules": migration.removedLegacyLeaderKeyRules,
+      "removed_legacy_leaderkey_manipulators": migration.removedLegacyLeaderKeyManipulators,
+      "goku_stderr": gokuDiagnostics,
+    ]
+    let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])
+    try metadataData.write(to: URL(fileURLWithPath: metadataPath), options: .atomic)
+  }
+
+  /// Writes the file only when content changed. Returns true when the write was skipped.
+  @discardableResult
+  private static func writeFileIfChanged(_ data: Data, to path: String) throws -> Bool {
+    let url = URL(fileURLWithPath: path)
+    if let existingData = try? Data(contentsOf: url),
+       existingData == data
+    {
+      return true
     }
 
-    // Clean up legacy .ts generated file if it exists
-    let legacyTsPath = (repoPath as NSString).appendingPathComponent(
-      Self.generatedDirectoryRelativePath + "/leaderkey-generated.ts")
-    if FileManager.default.fileExists(atPath: legacyTsPath) {
-      try? FileManager.default.removeItem(atPath: legacyTsPath)
-      debugLog("[KarCompilerService] Removed legacy leaderkey-generated.ts")
-    }
+    try data.write(to: url, options: .atomic)
+    return false
   }
 
   /// Cache for the non-managed portion of karabiner.json. Avoids re-reading and
@@ -409,6 +548,111 @@ final class KarabinerTsExportService {
     return patched
   }
 
+  private static func migratedGokuProfile(from stdoutData: Data) throws -> MigratedGokuProfile {
+    guard !stdoutData.isEmpty else {
+      throw error("goku --dry-run produced no JSON output", code: 22)
+    }
+
+    guard let parsed = try JSONSerialization.jsonObject(with: stdoutData) as? [String: Any] else {
+      throw error("goku --dry-run output was not a JSON object", code: 23)
+    }
+
+    var complexModifications = (parsed["complex_modifications"] as? [String: Any]) ?? parsed
+
+    guard let sourceRules = complexModifications["rules"] as? [[String: Any]] else {
+      throw error("goku --dry-run output did not include complex_modifications.rules", code: 25)
+    }
+
+    var filteredRules: [[String: Any]] = []
+    var removedLegacyLeaderKeyRules = 0
+    var removedLegacyLeaderKeyManipulators = 0
+
+    for rule in sourceRules {
+      if isLegacyLeaderKeyRule(rule) {
+        removedLegacyLeaderKeyRules += 1
+        removedLegacyLeaderKeyManipulators += (rule["manipulators"] as? [Any])?.count ?? 0
+        continue
+      }
+      filteredRules.append(rule)
+    }
+
+    complexModifications["rules"] = filteredRules
+    let compactJSONData = try JSONSerialization.data(withJSONObject: complexModifications, options: [.sortedKeys])
+    let digest = SHA256.hash(data: compactJSONData)
+    let hash = digest.map { String(format: "%02x", $0) }.joined()
+
+    return MigratedGokuProfile(
+      complexModifications: complexModifications,
+      compactJSONData: compactJSONData,
+      sha256: hash,
+      sourceRuleCount: sourceRules.count,
+      ruleCount: filteredRules.count,
+      removedLegacyLeaderKeyRules: removedLegacyLeaderKeyRules,
+      removedLegacyLeaderKeyManipulators: removedLegacyLeaderKeyManipulators
+    )
+  }
+
+  private static func isLegacyLeaderKeyRule(_ rule: [String: Any]) -> Bool {
+    let description = rule["description"] as? String ?? ""
+    return description.hasPrefix(managedRuleDescriptionPrefix)
+      || description.hasPrefix(legacyManagedRuleDescriptionPrefix)
+  }
+
+  private static func runProcess(
+    launchPath: String,
+    arguments: [String],
+    environment: [String: String],
+    workingDirectory: String
+  ) throws -> ProcessOutput {
+    let process = Process()
+    process.launchPath = launchPath
+    process.arguments = arguments
+    process.environment = environment
+    process.currentDirectoryPath = workingDirectory
+
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+
+    final class Capture {
+      var data = Data()
+    }
+
+    let stdoutCapture = Capture()
+    let stderrCapture = Capture()
+    let readGroup = DispatchGroup()
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+      stdoutCapture.data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+      readGroup.leave()
+    }
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+      stderrCapture.data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+      readGroup.leave()
+    }
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      readGroup.wait()
+    } catch {
+      try? stdoutPipe.fileHandleForReading.close()
+      try? stderrPipe.fileHandleForReading.close()
+      readGroup.wait()
+      throw error
+    }
+
+    return ProcessOutput(
+      terminationStatus: process.terminationStatus,
+      stdout: stdoutCapture.data,
+      stderr: stderrCapture.data
+    )
+  }
+
   private func validatedRepoPath(_ repoPath: String? = nil) throws -> String {
     let configuredPath = (repoPath ?? Defaults[.karabinerTsRepoPath]).trimmingCharacters(
       in: .whitespacesAndNewlines)
@@ -463,6 +707,87 @@ final class KarabinerTsExportService {
     export const leaderKeyManagedRules = leaderKeyRules as Rule[]
     export default leaderKeyManagedRules
     """
+  }
+
+  private static func legacyCompatibilityModuleSource() -> String {
+    """
+    // Generated by Leader Key. Do not edit this file directly.
+    // Compatibility wrapper for existing imports of ./leaderkey-generated.
+    import type { Rule } from '../../src/karabiner/karabiner-config.ts'
+    import leaderKeyRules from './leaderkey-generated.json'
+
+    export const leaderKeyDefaultProfileName = "Default"
+    export const leaderKeyManagedRules = leaderKeyRules as Rule[]
+    export default leaderKeyManagedRules
+    """
+  }
+
+  private static func migratedGokuProfileModuleSource(profileName: String, sha256: String) -> String {
+    let profileLiteral = jsonStringLiteral(profileName)
+    let hashLiteral = jsonStringLiteral(sha256)
+    return """
+      // Generated by Leader Key. Do not edit this file directly.
+      import type { ComplexModifications } from '../../src/karabiner/karabiner-config.ts'
+      import rawDefaultComplexModifications from './default-complex-modifications.json'
+
+      export const defaultProfileName = \(profileLiteral)
+      export const defaultComplexModificationsSha256 = \(hashLiteral)
+
+      export type KarabinerConfigLike = {
+        profiles: Array<{
+          name: string
+          [key: string]: unknown
+        }>
+        [key: string]: unknown
+      }
+
+      export const defaultComplexModifications = rawDefaultComplexModifications as ComplexModifications
+
+      export function replaceProfileComplexModifications<T extends KarabinerConfigLike>(
+        config: T,
+        profileName = defaultProfileName,
+      ): T {
+        let found = false
+
+        const profiles = config.profiles.map((profile) => {
+          if (profile.name !== profileName) {
+            return profile
+          }
+
+          found = true
+          return {
+            ...profile,
+            complex_modifications: defaultComplexModifications,
+          }
+        })
+
+        if (!found) {
+          throw new Error(`Profile ${profileName} not found`)
+        }
+
+        return {
+          ...config,
+          profiles,
+        } as T
+      }
+      """
+  }
+
+  private static func jsonStringLiteral(_ value: String) -> String {
+    guard let data = try? JSONEncoder().encode(value),
+          let literal = String(data: data, encoding: .utf8)
+    else {
+      return "\"\""
+    }
+    return literal
+  }
+
+  private static func error(_ message: String, code: Int) -> NSError {
+    NSError(
+      domain: "KarabinerTsExportService",
+      code: code,
+      userInfo: [NSLocalizedDescriptionKey: message]
+    )
   }
 }
 

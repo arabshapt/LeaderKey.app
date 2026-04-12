@@ -68,6 +68,16 @@ export async function triggerLeaderKeyConfigReload(
   }
 }
 
+export async function triggerLeaderKeyGokuProfileSync(): Promise<string> {
+  try {
+    return await sendSocketRequest("sync-goku-profile");
+  } catch (error) {
+    throw new Error(
+      `Failed to trigger Leader Key Goku profile sync through local IPC: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function listLeaderKeyMenuItems(appName: string): Promise<LeaderKeyMenuItem[]> {
   try {
     const response = await sendSocketRequest(`menu-items ${JSON.stringify({ app: appName })}`);

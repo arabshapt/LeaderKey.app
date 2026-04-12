@@ -22,6 +22,7 @@ Karabiner Elements (captures keys, detects frontmost app)
 ```
 
 ### Key Design Decisions
+- **External triggers prefer local sockets** — use `/tmp/leaderkey.sock` commands for reload/apply/migration/navigation-style app control. Do not add `leaderkey://` URL schemes or URL callbacks for new integrations; Raycast and scripts should send socket commands such as `apply-config` or `sync-goku-profile`
 - **Karabiner = single source of truth for app detection** — bundleId always from Karabiner's `activate {bundleId}` command. Never use `NSWorkspace.shared.frontmostApplication` for config loading — can't detect overlay apps like Raycast
 - **stateid self-contained** — `executeActionByStateId()` uses `mapping.bundleId` to show window with correct config if not visible
 - **Two export backends** — Goku (EDN) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`

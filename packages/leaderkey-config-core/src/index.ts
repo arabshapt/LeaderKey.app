@@ -11,7 +11,7 @@ export { configFingerprint, discoverLiveConfigs, loadGroupFromFile, loadMetadata
 export { buildEditorCommand, openInEditor } from "./editors.js";
 export { buildCachePayload, recordsForConfig } from "./indexing.js";
 export { encodeIntellijActionValue, encodeMenuActionValue, parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
-export { listLeaderKeyMenuItems, triggerLeaderKeyConfigReload } from "./leaderkey.js";
+export { listLeaderKeyMenuItems, triggerLeaderKeyConfigReload, triggerLeaderKeyGokuProfileSync } from "./leaderkey.js";
 export {
   createItemAtPath,
   appendChildToGroup,

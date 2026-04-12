@@ -224,6 +224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private let controlSocketServer = UnixSocketServer.shared
   private let exportRefreshQueue = DispatchQueue(label: "com.leaderkey.export-refresh")
   private var isExportRefreshInFlight = false
+  private var isGokuProfileSyncInFlight = false
   private var hasPendingExportRefresh = false
   private var lastExportStartTime: CFAbsoluteTime = 0
   private var karabinerActivationContext: KarabinerActivationContext?
@@ -1173,8 +1174,33 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 // MARK: - External Config Apply
 extension AppDelegate {
   private func applyExternalConfigChanges(trigger: String) {
-    print("[AppDelegate] applyExternalConfigChanges: trigger=\(trigger)")
+    debugLog("[AppDelegate] applyExternalConfigChanges: trigger=\(trigger)")
     config.reloadConfig()
+  }
+
+  private func startGokuProfileSync(trigger: String) -> String {
+    exportRefreshQueue.async { [weak self] in
+      guard let self else { return }
+      if self.isGokuProfileSyncInFlight {
+        debugLog("[AppDelegate] Goku profile sync already in flight, trigger=\(trigger)")
+        return
+      }
+
+      self.isGokuProfileSyncInFlight = true
+      let result = KarabinerTsExportService.shared.migrateGokuProfileToKarabinerTs()
+      self.isGokuProfileSyncInFlight = false
+
+      if result.success {
+        debugLog("[AppDelegate] \(result.message)")
+        DispatchQueue.main.async { [weak self] in
+          self?.applyExternalConfigChanges(trigger: "\(trigger)-goku-profile-sync")
+        }
+      } else {
+        debugLog("[AppDelegate] \(result.message)")
+      }
+    }
+
+    return "OK: sync-goku-profile started"
   }
 }
 
@@ -1193,6 +1219,11 @@ extension AppDelegate {
   func unixSocketServerDidReceiveApplyConfig() {
     debugLog("[AppDelegate] Control socket apply-config")
     inputMethodDidReceiveApplyConfig()
+  }
+
+  func unixSocketServerDidReceiveGokuProfileSync() -> String {
+    debugLog("[AppDelegate] Control socket sync-goku-profile")
+    return startGokuProfileSync(trigger: "unix-socket")
   }
 
   func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
@@ -2154,14 +2185,14 @@ extension AppDelegate {
     }
   }
 
-  // This function is called when an activation shortcut is pressed or via URL scheme.
+  // This function is called when an activation shortcut is pressed or a socket/user command arrives.
   // It sets up the initial state for a new key sequence based on the loaded config.
   private func startSequence(activationType: Controller.ActivationType, bundleId: String? = nil) {
-    print("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
+    debugLog("[AppDelegate] startSequence: Starting sequence with type: \(activationType)")
 
     // Reset sticky mode when starting any new sequence
     if stickyModeToggled {
-      print("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
+      debugLog("[AppDelegate] startSequence: Resetting sticky mode for new sequence.")
       stickyModeToggled = false
     }
 
@@ -2169,7 +2200,7 @@ extension AppDelegate {
     // UserState.activeRoot should have been set by Controller.show() just before this.
     guard let rootGroup = controller.userState.activeRoot else {
       // This should ideally not happen if Controller.show() worked correctly.
-      print(
+      debugLog(
         "[AppDelegate] startSequence: ERROR - controller.userState.activeRoot is nil! Falling back to default config root."
       )
       // Fallback logic, though this indicates a potential issue elsewhere
@@ -2177,7 +2208,7 @@ extension AppDelegate {
       self.currentSequenceGroup = config.root  // Start the sequence at this root
       // If the window is somehow visible, try to update its UI state.
       if self.controller.window.isVisible {
-        print(
+        debugLog(
           "[AppDelegate] startSequence (Fallback): Window visible, navigating UI to default root.")
         DispatchQueue.main.async {
           self.controller.userState.navigateToGroup(self.config.root)
@@ -2218,7 +2249,7 @@ extension AppDelegate {
     )
 
     // Store the root group for the current sequence and set the current level to the root.
-    print(
+    debugLog(
       "[AppDelegate] startSequence: Setting activeRootGroup and currentSequenceGroup to: '\(rootGroup.displayName)'"
     )
     self.activeRootGroup = rootGroup
@@ -2228,12 +2259,12 @@ extension AppDelegate {
     var state = callbackState
     state.stickyModeKeycodes = keyLookupCache.getValidKeycodes(forGroupId: rootGroup.id)
     callbackState = state
-    print(
+    debugLog(
       "[AppDelegate] Pre-computed \(state.stickyModeKeycodes?.count ?? 0) keycodes for sticky mode")
 
     // If the window is already visible (e.g., reactivation with .reset), update the UI state.
     if self.controller.window.isVisible {
-      print("[AppDelegate] startSequence: Window is visible, updating UI state for root group.")
+      debugLog("[AppDelegate] startSequence: Window is visible, updating UI state for root group.")
       DispatchQueue.main.async {
         // Ensure UI reflects the start of the sequence at the root group.
         self.controller.userState.navigateToGroup(rootGroup)
@@ -2241,14 +2272,14 @@ extension AppDelegate {
         self.controller.window.alphaValue = Defaults[.normalModeOpacity]
       }
     }
-    print("[AppDelegate] startSequence: Sequence setup complete.")
+    debugLog("[AppDelegate] startSequence: Sequence setup complete.")
   }
 
   // Resets the internal state variables used to track the current key sequence.
   func resetSequenceState() {
     // Only perform reset if a sequence is actually active
     if currentSequenceGroup != nil || activeRootGroup != nil {
-      print(
+      debugLog(
         "[AppDelegate] resetSequenceState: Resetting sequence state (currentSequenceGroup and activeRootGroup to nil)."
       )
       self.currentSequenceGroup = nil
@@ -2265,7 +2296,7 @@ extension AppDelegate {
 
       // Reset sticky mode toggle state
       if stickyModeToggled {
-        print("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
+        debugLog("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
         self.stickyModeToggled = false
       }
 
@@ -2277,11 +2308,11 @@ extension AppDelegate {
 
       // Also tell the UserState to clear its navigation path etc. on the main thread
       DispatchQueue.main.async {
-        print("[AppDelegate] resetSequenceState: Dispatching UserState.clear() to main thread.")
+        debugLog("[AppDelegate] resetSequenceState: Dispatching UserState.clear() to main thread.")
         self.controller.userState.clear()
       }
     } else {
-      print("[AppDelegate] resetSequenceState: No active sequence to reset.")
+      debugLog("[AppDelegate] resetSequenceState: No active sequence to reset.")
     }
   }
 

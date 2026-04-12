@@ -26,6 +26,8 @@ declare namespace Preferences {
   export type AddEditByPath = ExtensionPreferences & {}
   /** Preferences accessible in the `rebuild-index` command */
   export type RebuildIndex = ExtensionPreferences & {}
+  /** Preferences accessible in the `sync-goku-profile` command */
+  export type SyncGokuProfile = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -37,5 +39,7 @@ declare namespace Arguments {
   export type AddEditByPath = {}
   /** Arguments passed to the `rebuild-index` command */
   export type RebuildIndex = {}
+  /** Arguments passed to the `sync-goku-profile` command */
+  export type SyncGokuProfile = {}
 }
 

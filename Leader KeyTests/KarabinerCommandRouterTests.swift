@@ -6,6 +6,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
   private final class MockDelegate: UnixSocketServerDelegate {
     var activationBundleId: String?
     var applyConfigCount = 0
+    var gokuProfileSyncCount = 0
     var deactivationCount = 0
     var settingsCount = 0
     var shakeCount = 0
@@ -22,6 +23,11 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     func unixSocketServerDidReceiveApplyConfig() {
       applyConfigCount += 1
+    }
+
+    func unixSocketServerDidReceiveGokuProfileSync() -> String {
+      gokuProfileSyncCount += 1
+      return "OK: sync-goku-profile started"
     }
 
     func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
@@ -72,6 +78,22 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertEqual(KarabinerCommandRouter.route(command: "apply-config", delegate: delegate), "OK")
     XCTAssertEqual(delegate.applyConfigCount, 1)
+  }
+
+  func testRouteGokuProfileSyncCommand() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "sync-goku-profile", delegate: delegate),
+      "OK: sync-goku-profile started"
+    )
+    XCTAssertEqual(delegate.gokuProfileSyncCount, 1)
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "migrate-goku", delegate: delegate),
+      "OK: sync-goku-profile started"
+    )
+    XCTAssertEqual(delegate.gokuProfileSyncCount, 2)
   }
 
   func testRouteKeyCommandParsesCharacterAndModifiers() {

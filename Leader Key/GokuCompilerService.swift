@@ -92,6 +92,14 @@ final class GokuCompilerService {
     return GokuCompilerResult(success: true, message: message)
   }
 
+  func binaryPathForExecution() -> String {
+    resolvedGokuBinaryPath()
+  }
+
+  func environmentForExecution() -> [String: String] {
+    enrichedEnvironment()
+  }
+
   private func configuredGokuBinaryPath() -> String? {
     let configured = Defaults[.gokuBinaryPath].trimmingCharacters(in: .whitespacesAndNewlines)
     return configured.isEmpty ? nil : configured

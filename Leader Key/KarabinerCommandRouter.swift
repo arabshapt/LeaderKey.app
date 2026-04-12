@@ -36,6 +36,10 @@ enum KarabinerCommandRouter {
       delegate?.unixSocketServerDidReceiveApplyConfig()
       return "OK"
 
+    case "sync-goku-profile", "migrate-goku", "goku-migrate":
+      return delegate?.unixSocketServerDidReceiveGokuProfileSync()
+        ?? "ERROR: Leader Key app delegate is not available"
+
     case "key":
       guard parts.count > 1 else {
         return "ERROR: Key command requires keycode"

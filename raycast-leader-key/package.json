@@ -90,6 +90,12 @@
       "title": "Rebuild Index",
       "description": "Force a rebuild of the cached Leader Key shortcut index.",
       "mode": "no-view"
+    },
+    {
+      "name": "sync-goku-profile",
+      "title": "Sync Goku Profile",
+      "description": "Ask Leader Key to migrate the current Goku EDN profile into the karabiner.ts workspace.",
+      "mode": "no-view"
     }
   ]
 }

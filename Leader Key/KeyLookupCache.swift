@@ -1,12 +1,9 @@
 import AppKit  // For keycodes
 import Foundation
 
-/// Fast lookup structure for O(1) key validation in configs
-/// Pre-processes a Group hierarchy into efficient HashSets for instant key lookups
+/// Fast lookup structure for O(1) key validation in configs.
+/// Preprocesses a Group hierarchy into keyed maps for instant item lookup.
 final class KeyLookupCache {
-  /// Maps group ID to the set of valid key strings in that group
-  private var validKeysPerGroup: [UUID: Set<String>] = [:]
-
   /// Maps group ID + key to the matching ActionOrGroup for O(1) item lookup
   private var itemByKeyPerGroup: [UUID: [String: ActionOrGroup]] = [:]
 
@@ -26,21 +23,18 @@ final class KeyLookupCache {
 
   /// Build the cache from a Group hierarchy
   func buildFromGroup(_ group: Group) {
-    var validKeysPerGroup: [UUID: Set<String>] = [:]
     var itemByKeyPerGroup: [UUID: [String: ActionOrGroup]] = [:]
     var stickyModePerGroup: [UUID: Bool] = [:]
     var childGroupsPerGroup: [UUID: [UUID]] = [:]
 
     Self.processGroup(
       group,
-      validKeysPerGroup: &validKeysPerGroup,
       itemByKeyPerGroup: &itemByKeyPerGroup,
       stickyModePerGroup: &stickyModePerGroup,
       childGroupsPerGroup: &childGroupsPerGroup
     )
 
     queue.sync(flags: .barrier) {
-      self.validKeysPerGroup = validKeysPerGroup
       self.itemByKeyPerGroup = itemByKeyPerGroup
       self.stickyModePerGroup = stickyModePerGroup
       self.childGroupsPerGroup = childGroupsPerGroup
@@ -51,12 +45,10 @@ final class KeyLookupCache {
   /// Recursively process a group and its children
   private static func processGroup(
     _ group: Group,
-    validKeysPerGroup: inout [UUID: Set<String>],
     itemByKeyPerGroup: inout [UUID: [String: ActionOrGroup]],
     stickyModePerGroup: inout [UUID: Bool],
     childGroupsPerGroup: inout [UUID: [UUID]]
   ) {
-    var validKeys = Set<String>()
     var itemByKey = [String: ActionOrGroup]()
     var childGroups = [UUID]()
 
@@ -64,7 +56,6 @@ final class KeyLookupCache {
     for actionOrGroup in group.actions {
       // Add the key if it exists
       if let key = actionOrGroup.item.key {
-        validKeys.insert(key)
         itemByKey[key] = actionOrGroup
       }
 
@@ -73,7 +64,6 @@ final class KeyLookupCache {
         childGroups.append(subgroup.id)
         processGroup(
           subgroup,
-          validKeysPerGroup: &validKeysPerGroup,
           itemByKeyPerGroup: &itemByKeyPerGroup,
           stickyModePerGroup: &stickyModePerGroup,
           childGroupsPerGroup: &childGroupsPerGroup
@@ -82,7 +72,6 @@ final class KeyLookupCache {
     }
 
     // Store the processed data
-    validKeysPerGroup[group.id] = validKeys
     itemByKeyPerGroup[group.id] = itemByKey
     stickyModePerGroup[group.id] = group.stickyMode ?? false
     childGroupsPerGroup[group.id] = childGroups
@@ -93,7 +82,7 @@ final class KeyLookupCache {
   /// Check if a key exists in a specific group (O(1) lookup)
   func hasKey(_ key: String, inGroupId groupId: UUID) -> Bool {
     queue.sync {
-      validKeysPerGroup[groupId]?.contains(key) ?? false
+      itemByKeyPerGroup[groupId]?[key] != nil
     }
   }
 
@@ -107,7 +96,8 @@ final class KeyLookupCache {
   /// Get all valid keys for a group
   func getValidKeys(forGroupId groupId: UUID) -> Set<String>? {
     queue.sync {
-      validKeysPerGroup[groupId]
+      guard let itemByKey = itemByKeyPerGroup[groupId] else { return nil }
+      return Set(itemByKey.keys)
     }
   }
 
@@ -128,8 +118,8 @@ final class KeyLookupCache {
   /// Check if a key exists anywhere in the config tree (for activation keys)
   func hasKeyAnywhere(_ key: String) -> Bool {
     queue.sync {
-      for (_, keys) in validKeysPerGroup {
-        if keys.contains(key) {
+      for itemByKey in itemByKeyPerGroup.values {
+        if itemByKey[key] != nil {
           return true
         }
       }
@@ -149,7 +139,8 @@ final class KeyLookupCache {
   /// Note: This only works for keys that are in the englishKeymap/englishShiftedKeymap
   func getValidKeycodes(forGroupId groupId: UUID) -> Set<UInt16>? {
     queue.sync {
-      guard let keys = validKeysPerGroup[groupId] else { return nil }
+      guard let itemByKey = itemByKeyPerGroup[groupId] else { return nil }
+      let keys = itemByKey.keys
 
       // For now, return a basic set of common keycodes
       // A more complete implementation would need access to the full keymap
@@ -193,7 +184,6 @@ final class KeyLookupCache {
   /// Clear all cached data
   func clear() {
     queue.sync(flags: .barrier) {
-      self.validKeysPerGroup.removeAll()
       self.itemByKeyPerGroup.removeAll()
       self.stickyModePerGroup.removeAll()
       self.childGroupsPerGroup.removeAll()
@@ -204,8 +194,8 @@ final class KeyLookupCache {
   /// Get cache statistics for debugging
   func getCacheStats() -> String {
     queue.sync {
-      let groupCount = validKeysPerGroup.count
-      let totalKeys = validKeysPerGroup.values.reduce(0) { $0 + $1.count }
+      let groupCount = itemByKeyPerGroup.count
+      let totalKeys = itemByKeyPerGroup.values.reduce(0) { $0 + $1.count }
       let stickyGroups = stickyModePerGroup.values.filter { $0 }.count
 
       return """

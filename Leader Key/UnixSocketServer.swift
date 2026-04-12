@@ -174,6 +174,7 @@ final class UnixSocketServer {
 protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveActivation(bundleId: String?)
   func unixSocketServerDidReceiveApplyConfig()
+  func unixSocketServerDidReceiveGokuProfileSync() -> String
   func unixSocketServerDidReceiveKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
   func unixSocketServerDidReceiveDeactivation()
   func unixSocketServerDidReceiveSettings()
