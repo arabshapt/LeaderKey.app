@@ -96,7 +96,7 @@ function formStateToItem(state: ItemFormState, key: string, preserveItem?: Confi
 }
 
 function validateItem(item: ConfigItem): string | undefined {
-  if (!item.key?.trim()) {
+  if (item.key === undefined || item.key.length === 0) {
     return "A key is required.";
   }
 

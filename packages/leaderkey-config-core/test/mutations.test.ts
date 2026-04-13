@@ -134,6 +134,25 @@ test("createItemAtPath auto-creates missing intermediate groups before appending
   assert.equal(child?.key, "c");
 });
 
+test("createItemAtPath preserves a literal spacebar key", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const globalPath = await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+
+  await createItemAtPath(globalPath, ["s"], {
+    key: " ",
+    type: "toggleStickyMode",
+    value: "",
+  });
+
+  const savedGlobalRoot = await readJsonFile<GroupNode>(globalPath);
+  const groupS = savedGlobalRoot.actions[0] as GroupNode;
+  const child = groupS.actions[0];
+
+  assert.equal(groupS.key, "s");
+  assert.equal(child?.key, " ");
+  assert.equal(child?.type, "toggleStickyMode");
+});
+
 test("updateRecordAtPath moves an action within the same config and auto-creates destination parents", async () => {
   const configDirectory = await createTempConfigDirectory();
   const globalPath = await writeConfigFile(configDirectory, "global-config.json", {
@@ -174,6 +193,40 @@ test("updateRecordAtPath moves an action within the same config and auto-creates
   const groupX = savedRoot.actions[1] as GroupNode;
   assert.equal(groupX.key, "x");
   assert.equal(groupX.actions[0]?.key, "y");
+});
+
+test("updateRecordAtPath preserves a literal spacebar destination key", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const globalPath = await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        key: "s",
+        type: "toggleStickyMode",
+        value: "",
+      },
+    ],
+    type: "group",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const record = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "s" && candidate.kind === "action"),
+    "expected source action",
+  );
+
+  await updateRecordAtPath(record, {
+    key: "s",
+    type: "toggleStickyMode",
+    value: "",
+  }, [" "]);
+
+  payload = await buildCachePayload(configDirectory);
+  assert.equal(payload.records.some((candidate) => candidate.keySequence === "s"), false);
+  assert.equal(payload.records.some((candidate) => candidate.effectiveKeyPath[0] === " "), true);
+
+  const savedRoot = await readJsonFile<GroupNode>(globalPath);
+  assert.equal(savedRoot.actions[0]?.key, " ");
+  assert.equal(savedRoot.actions[0]?.type, "toggleStickyMode");
 });
 
 test("updateRecordAtPath moves a group and preserves its children", async () => {

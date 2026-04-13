@@ -311,7 +311,7 @@ final class Karabiner2Exporter {
 
   private static func terminalActionHasStickyMode(for node: StateNode) -> Bool {
     if case .action(let action) = node.item {
-      return node.parentGroupHasStickyMode || action.stickyMode == true
+      return node.parentGroupHasStickyMode || action.stickyMode == true || action.type == .toggleStickyMode
     }
     return node.parentGroupHasStickyMode
   }
@@ -1595,15 +1595,15 @@ final class Karabiner2Exporter {
         return $0.path.lexicographicallyPrecedes($1.path)
       }
       return ($0.originalPath.last ?? "") < ($1.originalPath.last ?? "")
-    }.compactMap { binding in
+    }.flatMap { binding -> [[String: Any]] in
       guard let key = binding.item.item.key else {
-        return nil
+        return []
       }
 
       let mapping: [String: Any]?
       switch binding.kind {
       case .group:
-        guard let stateId = binding.stateId else { return nil }
+        guard let stateId = binding.stateId else { return [] }
         let groupStickyMode: Bool
         if case .group(let group) = binding.item {
           groupStickyMode = group.stickyMode ?? false
@@ -1617,7 +1617,7 @@ final class Karabiner2Exporter {
         )
 
       case .action:
-        guard let stateId = binding.stateId else { return nil }
+        guard let stateId = binding.stateId else { return [] }
         let node = StateNode(
           path: binding.path,
           originalPath: binding.originalPath,
@@ -1626,16 +1626,47 @@ final class Karabiner2Exporter {
           isTerminal: true,
           parentGroupHasStickyMode: binding.parentGroupHasStickyMode
         )
+        let staticStickyMode = terminalActionHasStickyMode(for: node)
+        if !staticStickyMode {
+          guard
+            var stickyMapping = generateKarTerminalActionMapping(
+              key: key,
+              toState: stateId,
+              hasStickyMode: true,
+              node: node
+            ),
+            var nonStickyMapping = generateKarTerminalActionMapping(
+              key: key,
+              toState: stateId,
+              hasStickyMode: false,
+              node: node
+            )
+          else {
+            return []
+          }
+
+          stickyMapping["condition"] = [
+            variableCondition(name: "leader_state", value: binding.parentStateId),
+            variableCondition(name: "leaderkey_sticky", value: 1),
+          ]
+          nonStickyMapping["condition"] = [
+            variableCondition(name: "leader_state", value: binding.parentStateId),
+            variableUnlessCondition(name: "leaderkey_sticky", value: 1),
+          ]
+
+          return [stickyMapping, nonStickyMapping]
+        }
+
         mapping = generateKarTerminalActionMapping(
           key: key,
           toState: stateId,
-          hasStickyMode: terminalActionHasStickyMode(for: node),
+          hasStickyMode: true,
           node: node
         )
 
       case .suppress:
         guard let (keyCode, modifiers) = parseKarKeySpec(key) else {
-          return nil
+          return []
         }
         mapping = [
           "from": karFrom(keyCode: keyCode, modifiers: modifiers),
@@ -1644,10 +1675,10 @@ final class Karabiner2Exporter {
       }
 
       guard var conditioned = mapping else {
-        return nil
+        return []
       }
       conditioned["condition"] = [variableCondition(name: "leader_state", value: binding.parentStateId)]
-      return conditioned
+      return [conditioned]
     }
   }
 

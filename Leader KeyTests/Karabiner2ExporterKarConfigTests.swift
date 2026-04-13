@@ -113,11 +113,17 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
     let allManipulators = flattenManipulators(from: result.managedRules)
 
-    let targetedMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+    let targetedMappings = allManipulators.filter { manipulator in
       fromKeyCode(in: manipulator) == "k"
         && structuredPayloads(manipulator: manipulator).contains(where: {
           ($0["type"] as? String) == "keystroke" && ($0["spec"] as? String) == "Ct"
         })
+    }
+    let targetedMapping = try XCTUnwrap(targetedMappings.first(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_unless")
+    }))
+    let targetedStickyMapping = try XCTUnwrap(targetedMappings.first(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_if")
     }))
     let targetedPayload = try XCTUnwrap(
       structuredPayloads(manipulator: targetedMapping).first(where: {
@@ -129,6 +135,9 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertNil(targetedPayload["focus"])
     XCTAssertTrue(hasSendUserCommand(manipulator: targetedMapping, prefix: "deactivate"))
     XCTAssertTrue(hasSetVariable(manipulator: targetedMapping, name: "leader_state", value: 0))
+    XCTAssertFalse(hasSendUserCommand(manipulator: targetedStickyMapping, prefix: "deactivate"))
+    XCTAssertFalse(hasSetVariable(manipulator: targetedStickyMapping, name: "leader_state", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: targetedStickyMapping, name: "leaderkey_sticky", value: 1))
 
     let focusedMapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
       fromKeyCode(in: manipulator) == "f"
@@ -160,6 +169,89 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertEqual(stickyPayload["spec"] as? String, "escape")
     XCTAssertTrue(hasSetVariable(manipulator: stickyMapping, name: "leaderkey_sticky", value: 1))
     XCTAssertFalse(hasSendUserCommand(manipulator: stickyMapping, prefix: "deactivate"))
+  }
+
+  func testToggleStickyModeActionExportsAsStickyTerminalAction() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .action(
+        Action(
+          key: "s",
+          type: .toggleStickyMode,
+          label: "Toggle Sticky Mode",
+          value: "",
+          iconPath: nil,
+          activates: nil,
+          stickyMode: nil,
+          macroSteps: nil
+        )
+      )
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let globalManipulators = flattenManipulators(from: [globalRule])
+    let toggleMapping = try XCTUnwrap(globalManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "s"
+        && hasSendUserCommand(manipulator: manipulator, prefix: "stateid ")
+    }))
+    let payloads = sendUserCommandPayloads(manipulator: toggleMapping)
+
+    XCTAssertTrue(payloads.contains(where: { $0.hasPrefix("stateid ") && $0.hasSuffix(" sticky") }))
+    XCTAssertTrue(hasSetVariable(manipulator: toggleMapping, name: "leaderkey_sticky", value: 1))
+    XCTAssertFalse(hasSetVariable(manipulator: toggleMapping, name: "leader_state", value: 0))
+    XCTAssertFalse(hasSendUserCommand(manipulator: toggleMapping, prefix: "deactivate"))
+  }
+
+  func testRuntimeStickyModeKeepsNonStickyTerminalActionsActive() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .group(
+        Group(
+          key: "o",
+          label: "Options",
+          iconPath: nil,
+          stickyMode: nil,
+          actions: [
+            .action(
+              Action(
+                key: " ",
+                type: .toggleStickyMode,
+                label: "Toggle Sticky Mode",
+                value: "",
+                iconPath: nil,
+                activates: nil,
+                stickyMode: nil,
+                macroSteps: nil
+              )
+            ),
+            .action(makeCommandAction(key: "x", label: "Run Command", value: "echo x")),
+          ]
+        )
+      )
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let globalManipulators = flattenManipulators(from: [globalRule])
+    let actionMappings = globalManipulators.filter { manipulator in
+      fromKeyCode(in: manipulator) == "x"
+    }
+
+    XCTAssertTrue(actionMappings.contains(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_if")
+        && !hasSetVariable(manipulator: manipulator, name: "leader_state", value: 0)
+        && !hasSendUserCommand(manipulator: manipulator, prefix: "deactivate")
+    }))
+    XCTAssertTrue(actionMappings.contains(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_unless")
+        && hasSetVariable(manipulator: manipulator, name: "leader_state", value: 0)
+        && hasSendUserCommand(manipulator: manipulator, prefix: "deactivate")
+    }))
   }
 
   func testGenerateKarabinerTSExportProducesDeterministicRepoModuleExports() throws {
@@ -667,19 +759,25 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     var payloads: [String] = []
 
     for manipulator in flattenManipulators(from: rules) {
-      for event in (manipulator["to"] as? [Any]) ?? [] {
-          guard
-            let eventObject = event as? [String: Any],
-            let commandObject = eventObject["send_user_command"] as? [String: Any],
-            let payload = commandObject["payload"] as? String
-          else {
-            continue
-          }
-        payloads.append(payload)
-      }
+      payloads.append(contentsOf: sendUserCommandPayloads(manipulator: manipulator))
     }
 
     return payloads
+  }
+
+  private func sendUserCommandPayloads(manipulator: [String: Any]) -> [String] {
+    let events = (manipulator["to"] as? [Any]) ?? []
+    return events.compactMap { event in
+      guard
+        let eventObject = event as? [String: Any],
+        let commandObject = eventObject["send_user_command"] as? [String: Any],
+        let payload = commandObject["payload"] as? String
+      else {
+        return nil
+      }
+
+      return payload
+    }
   }
 
   private func structuredPayloads(manipulator: [String: Any]) -> [[String: Any]] {

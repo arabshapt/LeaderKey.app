@@ -34,6 +34,36 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errors.isEmpty, "Valid configuration should not have validation errors")
   }
 
+  func testToggleStickyModeAllowsEmptyValue() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "s", type: .toggleStickyMode, label: "Toggle Sticky Mode", value: ""))
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.isEmpty, "Toggle sticky mode does not require an action value")
+  }
+
+  func testSpaceKeyIsValid() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: " ", type: .toggleStickyMode, label: "Toggle Sticky Mode", value: ""))
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.isEmpty, "A single literal space is a valid spacebar key")
+  }
+
   // Test that empty keys are detected
   func testEmptyKeys() {
     let group = Group(

@@ -325,8 +325,8 @@ export async function updateRecordAtPath(
   destinationKeyPath: string[],
   mode: MutationMode = "edit-source",
 ): Promise<string> {
-  const destinationKey = destinationKeyPath.at(-1)?.trim();
-  if (!destinationKey) {
+  const destinationKey = destinationKeyPath.at(-1);
+  if (destinationKey === undefined || destinationKey.length === 0) {
     throw new Error("A full path is required.");
   }
 
@@ -420,9 +420,9 @@ export async function createItemAtPath(
   const root = await loadGroupFromFile(configFilePath);
   const group = ensureGroupPathByKeys(root, parentKeyPath);
   const normalizedItem = normalizeItemBeforeSave(item);
-  const key = normalizedItem.key?.trim();
+  const key = normalizedItem.key;
 
-  if (!key) {
+  if (key === undefined || key.length === 0) {
     throw new Error("A key is required.");
   }
 

@@ -209,8 +209,8 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
         return;
       }
 
-      const key = clipboardPayload.item.key?.trim();
-      if (!key) {
+      const key = clipboardPayload.item.key;
+      if (key === undefined || key.length === 0) {
         await showToast({
           style: Toast.Style.Failure,
           title: "Clipboard item has no key",
