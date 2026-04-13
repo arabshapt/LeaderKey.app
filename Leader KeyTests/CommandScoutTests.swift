@@ -37,7 +37,10 @@ final class CommandScoutTests: XCTestCase {
     }
 
     func testNormalizedSequence() {
-        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("t > n"), "t n")
+        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("bm"), "bm")
+        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("b m"), "bm")
+        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("b > m"), "bm")
+        XCTAssertFalse(CommandScoutSequenceNormalizer.normalizedSequence("b m").contains(" "))
     }
 
     // MARK: - Validation: Empty Sequence
@@ -207,7 +210,8 @@ final class CommandScoutTests: XCTestCase {
         suggestion.category = "Tabs"
         let result = CommandScoutService.assignSequences(to: [suggestion], existingRoot: emptyRoot())
         XCTAssertFalse(result[0].suggestedSequence.isEmpty)
-        XCTAssertTrue(result[0].suggestedSequence.hasPrefix("t "))
+        XCTAssertTrue(result[0].suggestedSequence.hasPrefix("t"))
+        XCTAssertFalse(result[0].suggestedSequence.contains(" "))
     }
 
     func testAssignSequencesAvoidsExisting() {
@@ -226,7 +230,7 @@ final class CommandScoutTests: XCTestCase {
     func testAssignSequencesPreservesExisting() {
         let suggestion = makeSuggestion(sequence: "t n", actionType: .menu, value: "App > Tab > New")
         let result = CommandScoutService.assignSequences(to: [suggestion], existingRoot: emptyRoot())
-        XCTAssertEqual(result[0].suggestedSequence, "t n")
+        XCTAssertEqual(result[0].suggestedSequence, "tn")
     }
 
     // MARK: - Menu Inventory JSON Parsing
@@ -305,6 +309,45 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertNil(CommandScoutService.parseAISuggestions("not json".data(using: .utf8)!))
     }
 
+    func testParseAISuggestionsResultReportsMalformedJSONDiagnostics() {
+        let result = CommandScoutService.parseAISuggestionsResult("not json".data(using: .utf8)!)
+        guard case .failure(let diagnostics) = result else {
+            return XCTFail("Expected parse failure")
+        }
+
+        XCTAssertTrue(diagnostics.failureMessage.contains("AI JSON parse failed"))
+        XCTAssertEqual(diagnostics.detectedShape, "invalid")
+        XCTAssertTrue(diagnostics.rawPreview.contains("not json"))
+    }
+
+    func testParseAISuggestionsSupportsTopLevelJSONString() throws {
+        let nestedJSON = #"{"suggestions":[{"title":"New Tab","actionType":"menu","actionValue":"App > File > New","suggestedSequence":"t n"}]}"#
+        let wrapped = try JSONSerialization.data(withJSONObject: nestedJSON, options: [.fragmentsAllowed])
+
+        let suggestions = try XCTUnwrap(CommandScoutService.parseAISuggestions(wrapped))
+        XCTAssertEqual(suggestions.count, 1)
+        XCTAssertEqual(suggestions[0].suggestedSequence, "tn")
+    }
+
+    func testParseAISuggestionsCapsOversizedOutput() {
+        let items = (0..<65).map { index in
+            """
+            {"title":"Command \(index)","category":"Misc","source":"ai","actionType":"menu","actionValue":"App > File > Command \(index)","suggestedSequence":"m\(index % 10)","description":"","aiDescription":"","confidence":0.8,"sourceNotes":""}
+            """
+        }.joined(separator: ",")
+        let data = #"{"suggestions":["# + items + #"]}"#
+        let result = CommandScoutService.parseAISuggestionsResult(data.data(using: .utf8)!)
+
+        guard case .success(let suggestions, let diagnostics) = result else {
+            return XCTFail("Expected parse success")
+        }
+
+        XCTAssertEqual(suggestions.count, CommandScoutService.maxAISuggestions)
+        XCTAssertEqual(diagnostics.originalCount, 65)
+        XCTAssertEqual(diagnostics.keptCount, CommandScoutService.maxAISuggestions)
+        XCTAssertTrue(diagnostics.warningMessage?.contains("showing top 60") == true)
+    }
+
     func testDebugBundleRedactsSecrets() {
         let redacted = CommandScoutService.redactSecrets(
             """
@@ -317,6 +360,260 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertFalse(redacted.contains("AIzaSECRET123456"))
         XCTAssertFalse(redacted.contains("jsonSecretValue123"))
         XCTAssertFalse(redacted.contains("googleSecretValue123"))
+    }
+
+    func testAIProviderErrorSummarizesGeminiQuotaFailure() {
+        let error = AIProviderError.httpFailure(
+            statusCode: 429,
+            body: """
+            {"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED"}}
+            """
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "Provider quota or rate limit exceeded (HTTP 429): You exceeded your current quota."
+        )
+    }
+
+    func testAIProviderErrorUserFacingGeminiQuotaMessageSuggestsFallbacks() {
+        let error = AIProviderError.httpFailure(
+            statusCode: 429,
+            body: """
+            {"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED"}}
+            """
+        )
+        let message = error.userFacingMessage(
+            provider: .gemini,
+            modelName: "gemini-3-flash-preview"
+        )
+
+        XCTAssertTrue(message.contains("Gemini quota or rate limit exceeded for gemini-3-flash-preview"))
+        XCTAssertTrue(message.contains("gemini-2.5-flash"))
+        XCTAssertFalse(message.contains(#""error""#))
+    }
+
+    func testAIProviderErrorUserFacingTimeoutSuggestsRecovery() {
+        let error = AIProviderError.requestTimedOut(seconds: 180)
+        let message = error.userFacingMessage(
+            provider: .gemini,
+            modelName: "gemma-4-31b-it"
+        )
+
+        XCTAssertTrue(message.contains("Gemini request timed out for gemma-4-31b-it after 180 seconds"))
+        XCTAssertTrue(message.contains("disable web research"))
+    }
+
+    func testProviderRetryPolicyRetriesRateLimitAndServerErrors() {
+        XCTAssertTrue(ProviderRetryPolicy.shouldRetry(statusCode: 429))
+        XCTAssertTrue(ProviderRetryPolicy.shouldRetry(statusCode: 500))
+        XCTAssertFalse(ProviderRetryPolicy.shouldRetry(statusCode: 400))
+        XCTAssertFalse(ProviderRetryPolicy.shouldRetry(statusCode: 401))
+    }
+
+    func testProviderRetryPolicyUsesBoundedExponentialDelay() {
+        XCTAssertEqual(ProviderRetryPolicy.delayNanoseconds(forAttempt: 1), 1_000_000_000)
+        XCTAssertEqual(ProviderRetryPolicy.delayNanoseconds(forAttempt: 2), 2_000_000_000)
+        XCTAssertEqual(ProviderRetryPolicy.delayNanoseconds(forAttempt: 4), 8_000_000_000)
+    }
+
+    func testProviderRetryPolicyHonorsRetryAfterWithCap() {
+        let url = URL(string: "https://example.com")!
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 429,
+            httpVersion: nil,
+            headerFields: ["Retry-After": "20"]
+        )
+
+        XCTAssertEqual(
+            ProviderRetryPolicy.delayNanoseconds(forAttempt: 1, response: response),
+            8_000_000_000
+        )
+    }
+
+    func testOpenRouterProviderUsesStrictJSONSchemaAndWebPlugin() throws {
+        let provider = OpenAIProvider(
+            apiKey: "test",
+            model: "google/gemini-3.1-flash",
+            baseURL: "https://openrouter.ai/api/v1",
+            webResearchEnabled: true
+        )
+        let body = provider.requestBody(system: "system", prompt: "prompt")
+
+        XCTAssertTrue(provider.supportsWebResearch)
+        XCTAssertEqual(body["temperature"] as? Double, 0.2)
+        XCTAssertEqual(body["max_tokens"] as? Int, 4096)
+        let providerPrefs = try XCTUnwrap(body["provider"] as? [String: Any])
+        XCTAssertEqual(providerPrefs["require_parameters"] as? Bool, true)
+
+        let responseFormat = try XCTUnwrap(body["response_format"] as? [String: Any])
+        XCTAssertEqual(responseFormat["type"] as? String, "json_schema")
+        let jsonSchema = try XCTUnwrap(responseFormat["json_schema"] as? [String: Any])
+        XCTAssertEqual(jsonSchema["strict"] as? Bool, true)
+
+        let plugins = try XCTUnwrap(body["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.first?["id"] as? String, "web")
+        XCTAssertEqual(plugins.first?["max_results"] as? Int, 3)
+    }
+
+    func testOpenRouterProviderCanBuildRelaxedFallbackRequest() throws {
+        let provider = OpenAIProvider(
+            apiKey: "test",
+            model: "google/gemini-3-flash-preview",
+            baseURL: "https://openrouter.ai/api/v1",
+            webResearchEnabled: true
+        )
+        let body = provider.requestBody(
+            system: "system",
+            prompt: "prompt",
+            openRouterMode: .relaxedJSON,
+            includeWebPlugin: false
+        )
+
+        XCTAssertEqual(body["temperature"] as? Double, 0.2)
+        XCTAssertEqual(body["max_tokens"] as? Int, 4096)
+        XCTAssertNil(body["provider"])
+        XCTAssertNil(body["plugins"])
+
+        let responseFormat = try XCTUnwrap(body["response_format"] as? [String: Any])
+        XCTAssertEqual(responseFormat["type"] as? String, "json_object")
+        XCTAssertNil(responseFormat["json_schema"])
+    }
+
+    func testGenericOpenAICompatibleProviderDoesNotClaimWebResearch() {
+        let provider = OpenAIProvider(
+            apiKey: "test",
+            model: "local/model",
+            baseURL: "https://example.com/v1",
+            webResearchEnabled: true
+        )
+        let body = provider.requestBody(system: "system", prompt: "prompt")
+
+        XCTAssertFalse(provider.supportsWebResearch)
+        XCTAssertNil(body["plugins"])
+        XCTAssertEqual((body["response_format"] as? [String: Any])?["type"] as? String, "json_object")
+    }
+
+    func testGemmaModelsSupportGeminiWebResearchTools() {
+        XCTAssertTrue(CommandScoutAIProviderKind.gemini.supportsWebResearch(modelName: "gemma-4-31b-it"))
+        XCTAssertTrue(CommandScoutAIProviderKind.gemini.supportsWebResearch(modelName: "gemini-2.5-flash"))
+
+        let gemmaProvider = GeminiProvider(apiKey: "test", model: "gemma-4-31b-it", webResearchEnabled: true)
+        XCTAssertTrue(gemmaProvider.supportsWebResearch)
+        XCTAssertNotNil(gemmaProvider.searchToolPayload["googleSearch"])
+        XCTAssertNil(gemmaProvider.generationConfigPayload["responseMimeType"])
+        XCTAssertEqual(gemmaProvider.generationConfigPayload["maxOutputTokens"] as? Int, 4096)
+
+        let geminiProvider = GeminiProvider(apiKey: "test", model: "gemini-2.5-flash", webResearchEnabled: true)
+        XCTAssertNotNil(geminiProvider.searchToolPayload["google_search"])
+    }
+
+    func testGeminiNonWebGenerationUsesJSONMimeMode() {
+        let provider = GeminiProvider(apiKey: "test", model: "gemma-4-31b-it", webResearchEnabled: false)
+
+        XCTAssertEqual(provider.generationConfigPayload["responseMimeType"] as? String, "application/json")
+        XCTAssertEqual(provider.generationConfigPayload["maxOutputTokens"] as? Int, 4096)
+    }
+
+    func testGeminiResponseParserPrefersNonThoughtParts() throws {
+        let data = """
+        {
+          "candidates": [
+            {
+              "content": {
+                "parts": [
+                  {"text": "internal reasoning", "thought": true},
+                  {"text": "{\\"ok\\":true}"}
+                ]
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(ProviderResponseParser.geminiContent(from: json), #"{"ok":true}"#)
+    }
+
+    func testGeminiResponseParserFallsBackWhenAllPartsAreVisibleText() throws {
+        let data = """
+        {
+          "candidates": [
+            {
+              "content": {
+                "parts": [
+                  {"text": "{\\"ok\\":"},
+                  {"text": "true}"}
+                ]
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(ProviderResponseParser.geminiContent(from: json), #"{"ok":true}"#)
+    }
+
+    func testGeminiResponseParserScansAllCandidatesForVisibleText() throws {
+        let data = """
+        {
+          "candidates": [
+            {
+              "finishReason": "MAX_TOKENS",
+              "content": {
+                "parts": []
+              }
+            },
+            {
+              "finishReason": "STOP",
+              "content": {
+                "parts": [
+                  {"text": "{\\"ok\\":true}"}
+                ]
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(ProviderResponseParser.geminiContent(from: json), #"{"ok":true}"#)
+    }
+
+    func testGeminiNoContentDetailsIncludesFinishReasonAndUsage() throws {
+        let data = """
+        {
+          "promptFeedback": {"blockReason": "SAFETY"},
+          "candidates": [
+            {"finishReason": "MAX_TOKENS", "content": {"parts": []}}
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 100,
+            "thoughtsTokenCount": 4096,
+            "totalTokenCount": 4196
+          }
+        }
+        """.data(using: .utf8)!
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let details = try XCTUnwrap(ProviderResponseParser.geminiNoContentDetails(from: json))
+
+        XCTAssertTrue(details.contains("prompt blocked: SAFETY"))
+        XCTAssertTrue(details.contains("finishReason: MAX_TOKENS"))
+        XCTAssertTrue(details.contains("thoughtsTokenCount: 4096"))
+    }
+
+    func testAIProviderNoContentUserMessageIncludesDetails() {
+        let error = AIProviderError.noContent(details: "finishReason: MAX_TOKENS")
+        let message = error.userFacingMessage(
+            provider: .gemini,
+            modelName: "gemma-4-31b-it"
+        )
+
+        XCTAssertTrue(message.contains("Gemini returned no text for gemma-4-31b-it"))
+        XCTAssertTrue(message.contains("finishReason: MAX_TOKENS"))
+        XCTAssertTrue(message.contains("disable web research"))
     }
 
     // MARK: - Category Guessing
@@ -335,6 +632,46 @@ final class CommandScoutTests: XCTestCase {
         // Just verify the API exists and doesn't crash
         CommandScoutService.clearMenuCache()
         CommandScoutService.clearMenuCache(appName: "Safari")
+    }
+
+    // MARK: - Apply
+
+    func testApplyCommandScoutSuggestionsCreatesCompactMultiKeyPath() throws {
+        let session = ConfigEditorSession()
+        session.load(root: emptyRoot(), validationErrors: [], selectedConfigKey: "Chrome", preserveExpansion: false)
+
+        let suggestion = makeSuggestion(
+            sequence: "b m",
+            actionType: .menu,
+            value: "Chrome > Bookmarks > Bookmark Manager",
+            title: "Bookmark Manager"
+        )
+        let result = session.applyCommandScoutSuggestions([suggestion])
+
+        XCTAssertEqual(result.insertedCount, 1)
+        XCTAssertTrue(result.skippedMessages.isEmpty)
+        guard case .group(let group) = session.root.actions.first else {
+            return XCTFail("Expected root group")
+        }
+        XCTAssertEqual(group.key, "b")
+        guard case .action(let action) = group.actions.first else {
+            return XCTFail("Expected nested action")
+        }
+        XCTAssertEqual(action.key, "m")
+        XCTAssertEqual(action.value, "Chrome > Bookmarks > Bookmark Manager")
+    }
+
+    func testApplyCommandScoutSuggestionsReportsSkippedItems() {
+        let session = ConfigEditorSession()
+        session.load(root: emptyRoot(), validationErrors: [], selectedConfigKey: "Chrome", preserveExpansion: false)
+
+        let result = session.applyCommandScoutSuggestions([
+            makeSuggestion(sequence: "", actionType: .menu, value: "Chrome > File > New", title: "Missing Sequence"),
+            makeSuggestion(sequence: "x", actionType: .unsupported, value: "noop", title: "Unsupported"),
+        ])
+
+        XCTAssertEqual(result.insertedCount, 0)
+        XCTAssertEqual(result.skippedMessages.count, 2)
     }
 
     // MARK: - Helpers

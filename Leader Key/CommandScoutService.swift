@@ -2,6 +2,7 @@ import Foundation
 import os
 
 class CommandScoutService {
+    static let maxAISuggestions = 60
 
     // MARK: - Menu Inventory Cache
 
@@ -68,10 +69,11 @@ class CommandScoutService {
 
         for var suggestion in suggestions {
             let tokens = suggestion.sequenceTokens
-            let normalizedSeq = tokens.joined(separator: " ")
+            let normalizedSeq = CommandScoutSequenceNormalizer.normalizedSequence(suggestion.suggestedSequence)
             let actionSig = actionSignature(type: suggestion.actionType, value: suggestion.actionValue)
+            suggestion.suggestedSequence = normalizedSeq
 
-            if tokens.isEmpty {
+            if !isValidSequenceTokens(tokens) {
                 suggestion.conflictStatus = .invalidSequence
             } else if existingKeys.contains(normalizedSeq) {
                 suggestion.conflictStatus = .duplicateSequence
@@ -137,11 +139,13 @@ class CommandScoutService {
         reservedKeys: [String] = []
     ) -> [CommandScoutSuggestion] {
         let existingKeys = collectExistingSequences(from: existingRoot)
-        var usedSequences = existingKeys.union(Set(reservedKeys))
+        var usedSequences = existingKeys.union(Set(reservedKeys.map(CommandScoutSequenceNormalizer.normalizedSequence)))
         var result: [CommandScoutSuggestion] = []
 
         for var suggestion in suggestions {
             if !suggestion.suggestedSequence.isEmpty {
+                suggestion.suggestedSequence = CommandScoutSequenceNormalizer.normalizedSequence(suggestion.suggestedSequence)
+                usedSequences.insert(suggestion.suggestedSequence)
                 result.append(suggestion)
                 continue
             }
@@ -150,19 +154,19 @@ class CommandScoutService {
             let mnemonic = mnemonic(for: suggestion.title)
 
             // Try: prefix + mnemonic
-            let candidate = "\(prefix) \(mnemonic)"
+            let candidate = "\(prefix)\(mnemonic)"
             if usedSequences.insert(candidate).inserted {
                 suggestion.suggestedSequence = candidate
             } else {
                 // Try: prefix + first letter of title
                 let firstLetter = String(suggestion.title.lowercased().prefix(1))
-                let fallback = "\(prefix) \(firstLetter)"
+                let fallback = "\(prefix)\(firstLetter)"
                 if usedSequences.insert(fallback).inserted {
                     suggestion.suggestedSequence = fallback
                     suggestion.reviewNotes = "Mnemonic '\(candidate)' taken, using '\(fallback)'"
                 } else {
                     // 3-key fallback
-                    let threeKey = "\(prefix) \(firstLetter) \(mnemonic)"
+                    let threeKey = "\(prefix)\(firstLetter)\(mnemonic)"
                     if usedSequences.insert(threeKey).inserted {
                         suggestion.suggestedSequence = threeKey
                         suggestion.reviewNotes = "Collision: using 3-key sequence"
@@ -209,13 +213,13 @@ class CommandScoutService {
             switch item {
             case .action(let action):
                 if let key = action.key, !key.isEmpty {
-                    let seq = (prefix + [key.lowercased()]).joined(separator: " ")
+                    let seq = (prefix + [key.lowercased()]).joined()
                     sequences.insert(seq)
                 }
             case .group(let subgroup):
                 if let key = subgroup.key, !key.isEmpty {
                     let subPrefix = prefix + [key.lowercased()]
-                    let seq = subPrefix.joined(separator: " ")
+                    let seq = subPrefix.joined()
                     sequences.insert(seq)
                     sequences.formUnion(collectExistingSequences(from: subgroup, prefix: subPrefix))
                 }
@@ -255,6 +259,13 @@ class CommandScoutService {
             return true
         case .macro, .unsupported:
             return false
+        }
+    }
+
+    private static func isValidSequenceTokens(_ tokens: [String]) -> Bool {
+        guard !tokens.isEmpty, tokens.count <= 3 else { return false }
+        return tokens.allSatisfy { token in
+            token.count == 1 && token.allSatisfy { $0.isLetter || $0.isNumber }
         }
     }
 
@@ -334,43 +345,42 @@ class CommandScoutService {
     // MARK: - AI Parsing and Debug Bundle
 
     static func parseAISuggestions(_ data: Data) -> [CommandScoutSuggestion]? {
-        struct AIResponse: Codable {
-            var suggestions: [AISuggestionItem]?
+        if case .success(let suggestions, _) = parseAISuggestionsResult(data) {
+            return suggestions
+        }
+        return nil
+    }
+
+    static func parseAISuggestionsResult(_ data: Data) -> CommandScoutAIParseResult {
+        let rawPreview = redactedPreview(from: data)
+
+        guard let top = parseTopLevelJSON(from: data) else {
+            return .failure(CommandScoutAIParseDiagnostics(
+                reason: "response is not valid JSON and no embedded JSON block was found",
+                detectedShape: "invalid",
+                rawPreview: rawPreview,
+                originalCount: 0,
+                keptCount: 0
+            ))
         }
 
-        struct AISuggestionItem: Codable {
-            var id: String?
-            var title: String?
-            var category: String?
-            var source: String?
-            var actionType: String?
-            var actionValue: String?
-            var description: String?
-            var aiDescription: String?
-            var confidence: Double?
-            var sourceNotes: String?
-        }
-
-        let jsonData = normalizedJSONData(from: data)
-        let items: [AISuggestionItem]
-        if let response = try? JSONDecoder().decode(AIResponse.self, from: jsonData),
-           let suggestions = response.suggestions {
-            items = suggestions
-        } else if let array = try? JSONDecoder().decode([AISuggestionItem].self, from: jsonData) {
-            items = array
-        } else {
-            return nil
+        guard let rawItems = suggestionItems(from: top) else {
+            return .failure(CommandScoutAIParseDiagnostics(
+                reason: "expected a suggestions array or direct array",
+                detectedShape: shapeDescription(for: top),
+                rawPreview: rawPreview,
+                originalCount: 0,
+                keptCount: 0
+            ))
         }
 
         var usedIDs = Set<String>()
-        return items.compactMap { item -> CommandScoutSuggestion? in
-            guard let title = item.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !title.isEmpty,
-                  let value = item.actionValue?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !value.isEmpty
-            else { return nil }
+        let suggestions = rawItems.compactMap { item -> CommandScoutSuggestion? in
+            let title = (item["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = (item["actionValue"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let title, !title.isEmpty, let value, !value.isEmpty else { return nil }
 
-            let proposedID = item.id?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let proposedID = (item["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             let id: String
             if let proposedID, !proposedID.isEmpty, !usedIDs.contains(proposedID) {
                 id = proposedID
@@ -382,20 +392,42 @@ class CommandScoutService {
             return CommandScoutSuggestion(
                 id: id,
                 title: title,
-                category: item.category?.nilIfBlank ?? "Misc",
-                source: CommandScoutSuggestionSource(rawValue: item.source ?? "") ?? .ai,
-                actionType: CommandScoutActionType(rawValue: item.actionType ?? "") ?? .unsupported,
+                category: (item["category"] as? String)?.nilIfBlank ?? "Misc",
+                source: CommandScoutSuggestionSource(rawValue: item["source"] as? String ?? "") ?? .ai,
+                actionType: CommandScoutActionType(rawValue: (item["actionType"] as? String ?? "").lowercased()) ?? .unsupported,
                 actionValue: value,
                 menuFallbackPaths: [],
-                description: item.description ?? "",
-                aiDescription: item.aiDescription ?? "",
-                suggestedSequence: "",
-                alternatives: [],
-                confidence: item.confidence ?? 0.6,
+                description: item["description"] as? String ?? "",
+                aiDescription: item["aiDescription"] as? String ?? "",
+                suggestedSequence: CommandScoutSequenceNormalizer.normalizedSequence(
+                    (item["suggestedSequence"] as? String)?.nilIfBlank ?? ""
+                ),
+                alternatives: parseAlternatives(item["alternatives"]),
+                confidence: parseConfidence(item["confidence"]),
                 conflictStatus: .clear,
-                reviewNotes: item.sourceNotes ?? ""
+                reviewNotes: item["sourceNotes"] as? String ?? ""
             )
         }
+
+        guard !suggestions.isEmpty else {
+            return .failure(CommandScoutAIParseDiagnostics(
+                reason: "no usable suggestions contained title and actionValue",
+                detectedShape: shapeDescription(for: top),
+                rawPreview: rawPreview,
+                originalCount: rawItems.count,
+                keptCount: 0
+            ))
+        }
+
+        let capped = cappedSuggestions(suggestions)
+        let diagnostics = CommandScoutAIParseDiagnostics(
+            reason: "parsed",
+            detectedShape: shapeDescription(for: top),
+            rawPreview: rawPreview,
+            originalCount: suggestions.count,
+            keptCount: capped.count
+        )
+        return .success(suggestions: capped, diagnostics: diagnostics)
     }
 
     static func debugBundle(
@@ -404,13 +436,23 @@ class CommandScoutService {
         statusMessage: String,
         scanError: String?,
         providerSettings: CommandScoutProviderSettings,
-        suggestions: [CommandScoutSuggestion]
+        suggestions: [CommandScoutSuggestion],
+        aiParseDiagnostics: CommandScoutAIParseDiagnostics? = nil
     ) -> String {
         let payload: [String: Any] = [
             "appName": appName,
             "bundleId": bundleId,
             "statusMessage": statusMessage,
             "scanError": scanError ?? "",
+            "aiParseDiagnostics": aiParseDiagnostics.map { diagnostics in
+                [
+                    "reason": diagnostics.reason,
+                    "detectedShape": diagnostics.detectedShape,
+                    "originalCount": diagnostics.originalCount,
+                    "keptCount": diagnostics.keptCount,
+                    "rawPreview": diagnostics.rawPreview,
+                ] as [String: Any]
+            } ?? [:],
             "provider": providerSettings.providerKind.rawValue,
             "model": providerSettings.effectiveModelName,
             "webResearchEnabled": providerSettings.webResearchEnabled,
@@ -454,17 +496,166 @@ class CommandScoutService {
         return result
     }
 
+    /// Parse confidence from AI response — handles Double (0.9), String ("0.9"), or word ("high").
+    private static func parseConfidence(_ value: Any?) -> Double {
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let s = value as? String {
+            if let d = Double(s) { return d }
+            switch s.lowercased() {
+            case "high": return 0.9
+            case "medium": return 0.6
+            case "low": return 0.3
+            default: return 0.6
+            }
+        }
+        return 0.6
+    }
+
+    private static func parseAlternatives(_ value: Any?) -> [String] {
+        guard let alternatives = value as? [String] else { return [] }
+        return alternatives
+            .map(CommandScoutSequenceNormalizer.normalizedSequence)
+            .filter { !$0.isEmpty }
+    }
+
+    private static func parseTopLevelJSON(from data: Data) -> Any? {
+        if let top = parseJSONObject(from: data) {
+            return top
+        }
+
+        let jsonData = normalizedJSONData(from: data)
+        guard jsonData != data else { return nil }
+        return parseJSONObject(from: jsonData)
+    }
+
+    private static func parseJSONObject(from data: Data) -> Any? {
+        guard let top = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return nil }
+        if let string = top as? String {
+            let stringData = Data(string.utf8)
+            if let nested = parseJSONObject(from: stringData) {
+                return nested
+            }
+
+            let normalizedStringData = normalizedJSONData(from: stringData)
+            if normalizedStringData != stringData,
+               let nested = parseJSONObject(from: normalizedStringData) {
+                return nested
+            }
+        }
+        return top
+    }
+
+    private static func suggestionItems(from top: Any) -> [[String: Any]]? {
+        if let dict = top as? [String: Any], let arr = dict["suggestions"] as? [[String: Any]] {
+            return arr
+        }
+        if let arr = top as? [[String: Any]] {
+            return arr
+        }
+        return nil
+    }
+
+    private static func cappedSuggestions(_ suggestions: [CommandScoutSuggestion]) -> [CommandScoutSuggestion] {
+        guard suggestions.count > maxAISuggestions else { return suggestions }
+
+        let grouped = Dictionary(grouping: suggestions.sorted { lhs, rhs in
+            if lhs.confidence == rhs.confidence {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.confidence > rhs.confidence
+        }, by: \.category)
+        let categories = grouped.keys.sorted()
+        var offsets = Dictionary(uniqueKeysWithValues: categories.map { ($0, 0) })
+        var capped: [CommandScoutSuggestion] = []
+
+        while capped.count < maxAISuggestions {
+            var addedThisRound = false
+            for category in categories where capped.count < maxAISuggestions {
+                let offset = offsets[category] ?? 0
+                guard let categorySuggestions = grouped[category], offset < categorySuggestions.count else {
+                    continue
+                }
+                capped.append(categorySuggestions[offset])
+                offsets[category] = offset + 1
+                addedThisRound = true
+            }
+            if !addedThisRound { break }
+        }
+
+        return capped
+    }
+
+    private static func redactedPreview(from data: Data, limit: Int = 500) -> String {
+        let text = String(data: data, encoding: .utf8) ?? "<binary>"
+        return String(redactSecrets(text).prefix(limit))
+    }
+
+    private static func shapeDescription(for value: Any) -> String {
+        if let dict = value as? [String: Any] {
+            return "object(keys: \(dict.keys.sorted().joined(separator: ",")))"
+        }
+        if let array = value as? [Any] {
+            return "array(count: \(array.count))"
+        }
+        if value is String {
+            return "string"
+        }
+        return String(describing: type(of: value))
+    }
+
     private static func normalizedJSONData(from data: Data) -> Data {
         guard let text = String(data: data, encoding: .utf8) else { return data }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("```") else { return data }
 
-        let lines = trimmed.components(separatedBy: .newlines)
-        let body = lines
-            .dropFirst()
-            .dropLast(lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "```" ? 1 : 0)
-            .joined(separator: "\n")
-        return body.data(using: .utf8) ?? data
+        // 1. Strip markdown fences if whole response is wrapped
+        if trimmed.hasPrefix("```") {
+            let lines = trimmed.components(separatedBy: .newlines)
+            let body = lines
+                .dropFirst()
+                .dropLast(lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "```" ? 1 : 0)
+                .joined(separator: "\n")
+            if let d = body.data(using: .utf8) { return d }
+        }
+
+        // 2. Already valid JSON
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+            return data
+        }
+
+        // 3. Extract JSON from prose (e.g., Gemma with web research returns text around JSON)
+        if let extracted = extractJSONBlock(from: trimmed) {
+            return extracted
+        }
+
+        return data
+    }
+
+    /// Find the outermost JSON object or array in a string that may contain surrounding prose.
+    private static func extractJSONBlock(from text: String) -> Data? {
+        // Try markdown fenced block first (```json ... ```)
+        if let fenceRange = text.range(of: "```json"),
+           let endFence = text.range(of: "```", range: fenceRange.upperBound..<text.endIndex) {
+            let body = text[fenceRange.upperBound..<endFence.lowerBound]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let d = body.data(using: .utf8) { return d }
+        }
+
+        // Try finding first { matched with last }, or first [ with last ]
+        for (open, close) in [("{" as Character, "}" as Character), ("[", "]")] {
+            guard let start = text.firstIndex(of: open),
+                  let end = text.lastIndex(of: close),
+                  start < end
+            else { continue }
+            let candidate = String(text[start...end])
+            // Quick validation: must parse as JSON
+            if let d = candidate.data(using: .utf8),
+               (try? JSONSerialization.jsonObject(with: d)) != nil {
+                return d
+            }
+        }
+
+        return nil
     }
 }
 

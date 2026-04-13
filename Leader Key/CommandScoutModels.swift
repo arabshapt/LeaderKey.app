@@ -37,6 +37,16 @@ enum CommandScoutAIProviderKind: String, Codable, Defaults.Serializable, CaseIte
     }
   }
 
+  func supportsWebResearch(modelName: String) -> Bool {
+    guard supportsWebResearch else { return false }
+    switch self {
+    case .gemini:
+      return true
+    case .openAI, .anthropic, .openAICompatible:
+      return false
+    }
+  }
+
   var keychainAccount: String {
     "command-scout.\(rawValue)"
   }
@@ -242,6 +252,26 @@ struct CommandScoutProviderSettings: Equatable {
     let trimmedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmedModel.isEmpty ? providerKind.defaultModel : trimmedModel
   }
+
+  var isOpenRouterBaseURL: Bool {
+    let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+          let url = URL(string: trimmed),
+          let host = url.host?.lowercased()
+    else {
+      return false
+    }
+    return host == "openrouter.ai" || host.hasSuffix(".openrouter.ai")
+  }
+
+  var supportsWebResearch: Bool {
+    switch providerKind {
+    case .openAICompatible:
+      return isOpenRouterBaseURL
+    case .gemini, .openAI, .anthropic:
+      return providerKind.supportsWebResearch(modelName: effectiveModelName)
+    }
+  }
 }
 
 struct CommandScoutScanResult: Equatable {
@@ -254,6 +284,28 @@ struct CommandScoutScanResult: Equatable {
 struct CommandScoutApplyResult: Equatable {
   var insertedCount: Int
   var skippedMessages: [String]
+}
+
+struct CommandScoutAIParseDiagnostics: Equatable {
+  var reason: String
+  var detectedShape: String
+  var rawPreview: String
+  var originalCount: Int
+  var keptCount: Int
+
+  var warningMessage: String? {
+    guard originalCount > keptCount else { return nil }
+    return "AI returned \(originalCount) suggestions; showing top \(keptCount)."
+  }
+
+  var failureMessage: String {
+    "AI JSON parse failed: \(reason). Shape: \(detectedShape). Preview: \(rawPreview)"
+  }
+}
+
+enum CommandScoutAIParseResult: Equatable {
+  case success(suggestions: [CommandScoutSuggestion], diagnostics: CommandScoutAIParseDiagnostics)
+  case failure(CommandScoutAIParseDiagnostics)
 }
 
 enum CommandScoutError: LocalizedError {
@@ -296,7 +348,7 @@ enum CommandScoutSequenceNormalizer {
   }
 
   static func normalizedSequence(_ sequence: String) -> String {
-    tokens(from: sequence).joined(separator: " ")
+    tokens(from: sequence).joined()
   }
 
   private static func shouldSplitCompactSequence(_ token: String) -> Bool {
@@ -307,7 +359,18 @@ enum CommandScoutSequenceNormalizer {
 
 enum CommandScoutPrompts {
   static let systemPrompt = """
-    You are Command Scout for Leader Key. Return strict JSON only. Suggest useful app commands for a keyboard-driven launcher. Prefer menu actions when the menu inventory contains the command. Use shortcuts or keystrokes only when the command is not available in the menu and the shortcut is reliable. Do not invent shortcuts. Mark uncertain data as low confidence. Do not suggest shell commands unless explicitly requested. Use short mnemonic Leader Key sequences, avoid collisions with existing sequences, and explain each sequence choice.
+    You are Command Scout for Leader Key, a keyboard-driven launcher for macOS. Return strict JSON only — no markdown, no prose.
+
+    Your job: suggest the most useful app commands and assign mnemonic key sequences for a Leader Key config. A sequence is 1-3 compact keys pressed in order (e.g. "tn" = Tabs → New, "tx" = Tabs → Close). Sequences should be short, intuitive, grouped by category prefix, and must never contain spaces.
+
+    Rules:
+    - Include BOTH menu commands from the live inventory AND shortcuts/keystrokes not in the menu.
+    - Do NOT invent shortcuts. Only suggest well-known, reliable shortcuts for the app. Mark uncertain ones as low confidence.
+    - For menu actions, actionValue = "AppName > Menu > Item" exactly matching the inventory.
+    - For each suggestion, include a suggestedSequence as a compact 1-3 character string (e.g. "tn" for new tab, "wc" for close window, "nb" for back). Do not return "t n" or any value with a space.
+    - Category prefixes: t=Tabs, w=Windows, n=Navigation, e=Editing, v=View, d=Developer, b=Bookmarks, s=Search, h=History, f=File, p=Privacy, m=Misc.
+    - Avoid collisions between sequences. If two commands share a prefix, use 2-3 keys.
+    - Aim for 15-30 suggestions covering the app's most valuable workflows.
     """
 
   static func inventoryPrompt(
@@ -327,9 +390,13 @@ enum CommandScoutPrompts {
     Allowed action types: menu, shortcut, keystroke, url
     Web research enabled: \(webResearchEnabled)
 
-    Find useful commands missing from the current Leader Key config. Include common menu commands, important shortcuts not exposed in the menu, and app-specific high-value workflows. Return JSON with:
-    suggestions: [{title, category, source, actionType, actionValue, description, aiDescription, confidence, sourceNotes}]
-    For menu actions, actionValue must be "\(appName) > <menu path>". For shortcuts, include the exact shortcut string and source.
+    Return JSON: {"suggestions": [{title, category, source, actionType, actionValue, suggestedSequence, description, aiDescription, confidence, sourceNotes}]}
+
+    - source: "liveMenu" if from the menu inventory, "ai" if from your knowledge
+    - suggestedSequence: compact mnemonic key path like "tn" (tabs → new). Use category prefix + meaningful letter. Spaces are invalid.
+    - confidence: number 0-1 (0.9 = very sure, 0.5 = uncertain)
+    - For menu actions, actionValue must be "\(appName) > <exact menu path>"
+    - Include the most useful 15-30 commands. Prioritize daily-use actions.
     """
   }
 
@@ -340,7 +407,7 @@ enum CommandScoutPrompts {
   ) -> String {
     """
     Given these suggestions and this existing sequence tree, assign Leader Key sequences.
-    Rules: prefer 1-2 keys, allow 3 keys for conflicts, use mnemonic category prefixes, never overwrite existing sequences, avoid reserved keys, keep related commands near each other, and provide 2 alternatives for each conflict.
+    Rules: prefer 1-2 compact keys, allow 3 keys for conflicts, use mnemonic category prefixes, never overwrite existing sequences, avoid reserved keys, keep related commands near each other, and provide 2 alternatives for each conflict. Return compact sequences without spaces.
     Return JSON with:
     [{suggestionId, suggestedSequence, alternatives, collisionReason, mnemonicReason}]
     Existing sequence tree: \(sequenceTree)

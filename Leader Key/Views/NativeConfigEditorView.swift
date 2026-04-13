@@ -565,11 +565,20 @@ final class ConfigEditorSession: ObservableObject {
 
   // MARK: - Command Scout Apply
 
-  func applyCommandScoutSuggestions(_ suggestions: [CommandScoutSuggestion]) {
+  func applyCommandScoutSuggestions(_ suggestions: [CommandScoutSuggestion]) -> CommandScoutApplyResult {
+    var insertedCount = 0
+    var skippedMessages: [String] = []
+
     for suggestion in suggestions {
-      guard let action = suggestion.makeAction() else { continue }
+      guard let action = suggestion.makeAction() else {
+        skippedMessages.append("\(suggestion.title): invalid action")
+        continue
+      }
       let tokens = suggestion.sequenceTokens
-      guard !tokens.isEmpty else { continue }
+      guard !tokens.isEmpty else {
+        skippedMessages.append("\(suggestion.title): invalid sequence")
+        continue
+      }
 
       if tokens.count == 1 {
         // Single key: insert at root
@@ -578,10 +587,15 @@ final class ConfigEditorSession: ObservableObject {
         // Multi-key: create/reuse intermediate groups, insert action at leaf
         insertAtSequencePath(tokens: tokens, action: action, category: suggestion.category)
       }
+      insertedCount += 1
     }
 
-    rebuildIndex(preserveExpansion: true)
-    notifyDirtyStateChanged()
+    if insertedCount > 0 {
+      rebuildIndex(preserveExpansion: true)
+      notifyDirtyStateChanged()
+    }
+
+    return CommandScoutApplyResult(insertedCount: insertedCount, skippedMessages: skippedMessages)
   }
 
   private func insertAtSequencePath(tokens: [String], action: Action, category: String) {

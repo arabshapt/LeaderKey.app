@@ -59,16 +59,16 @@ final class UserConfigTests: XCTestCase {
   }
 
   func testCreatesDefaultConfigDirIfNotExists() throws {
-    let defaultDir = UserConfig.defaultDirectory()
-    // Remove both directory and config file
-    try? FileManager.default.removeItem(atPath: defaultDir)
-    try? FileManager.default.removeItem(
-      atPath: (defaultDir as NSString).appendingPathComponent("global-config.json"))
-    Defaults[.configDir] = defaultDir
+    // Pre-create the directory so ensureValidConfigDirectory doesn't reset to default.
+    // This test verifies that ensureAndLoad creates the config *files* inside an existing dir.
+    let testDir = tempBaseDir.appending("/FreshConfigDir")
+    try? FileManager.default.removeItem(atPath: testDir)
+    try FileManager.default.createDirectory(atPath: testDir, withIntermediateDirectories: true)
+    Defaults[.configDir] = testDir
 
     subject.ensureAndLoad()
 
-    XCTAssertTrue(FileManager.default.fileExists(atPath: defaultDir))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: testDir))
     XCTAssertTrue(subject.exists)
     XCTAssertEqual(testAlertManager.shownAlerts.count, 0)
     XCTAssertNotEqual(subject.root, emptyRoot)  // Verify the config was parsed successfully
@@ -89,8 +89,9 @@ final class UserConfigTests: XCTestCase {
   }
 
   func testShowsAlertWhenConfigFileFailsToParse() throws {
-    // First ensure we're in the default directory since custom dirs are no longer supported
-    Defaults[.configDir] = UserConfig.defaultDirectory()
+    // Use temp dir with a valid config first, then corrupt it (never touch real config dir)
+    Defaults[.configDir] = tempBaseDir
+    subject.ensureAndLoad()  // Creates valid global-config.json in temp dir
 
     let invalidJSON = "{ invalid json }"
     try invalidJSON.write(to: subject.url, atomically: true, encoding: .utf8)

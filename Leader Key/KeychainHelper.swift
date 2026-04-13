@@ -8,7 +8,10 @@ enum KeychainHelper {
     static func save(account: String, key: String) -> Bool {
         delete(account: account)
 
-        guard let data = key.data(using: .utf8) else { return false }
+        guard let data = key.data(using: .utf8) else {
+            debugLog("[Keychain] save: failed to encode key for account=\(account)")
+            return false
+        }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -18,6 +21,9 @@ enum KeychainHelper {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            debugLog("[Keychain] save failed: account=\(account) status=\(status) (\(SecCopyErrorMessageString(status, nil) as String? ?? "unknown"))")
+        }
         return status == errSecSuccess
     }
 
@@ -36,7 +42,12 @@ enum KeychainHelper {
         guard status == errSecSuccess,
               let data = result as? Data,
               let key = String(data: data, encoding: .utf8)
-        else { return nil }
+        else {
+            if status != errSecItemNotFound {
+                debugLog("[Keychain] load failed: account=\(account) status=\(status) (\(SecCopyErrorMessageString(status, nil) as String? ?? "unknown"))")
+            }
+            return nil
+        }
 
         return key
     }
