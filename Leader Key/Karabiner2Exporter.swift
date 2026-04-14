@@ -815,6 +815,14 @@ final class Karabiner2Exporter {
           ]
         ]
 
+      case .shortcut:
+        if hasStickyMode, let shortcutEvents = karShortcutEvents(for: action.value) {
+          return [
+            "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+            "to": [karSetVariable(name: "leaderkey_sticky", value: 1)] + shortcutEvents
+          ]
+        }
+
       default:
         break
       }
@@ -881,6 +889,43 @@ final class Karabiner2Exporter {
 
   private static func karSendUserCommand(_ command: String) -> [String: Any] {
     ["send_user_command": ["payload": command]]
+  }
+
+  private static func karShortcutEvents(for shortcutSequence: String) -> [Any]? {
+    let shortcutParts = shortcutSequence.split(separator: " ").map(String.init)
+    guard !shortcutParts.isEmpty else { return nil }
+
+    var events: [Any] = []
+    for shortcutPart in shortcutParts {
+      let normalizedPart = shortcutPart.trimmingCharacters(in: .whitespacesAndNewlines)
+      let lowercasedPart = normalizedPart.lowercased()
+
+      if lowercasedPart.hasPrefix("delay:")
+        || lowercasedPart.hasPrefix("keydown:")
+        || lowercasedPart.hasPrefix("keyup:")
+      {
+        return nil
+      }
+
+      if lowercasedPart == "vk_none" || lowercasedPart == "release_modifiers" {
+        events.append(["key_code": "vk_none"])
+        continue
+      }
+
+      guard CompactShortcut.parse(normalizedPart) != nil,
+        let (keyCode, modifiers) = parseKarKeySpec(normalizedPart)
+      else {
+        return nil
+      }
+
+      var event: [String: Any] = ["key_code": keyCode]
+      if !modifiers.isEmpty {
+        event["modifiers"] = modifiers
+      }
+      events.append(event)
+    }
+
+    return events
   }
 
   /// Generate Goku EDN for send_user_command (e.g. {:send_user_command "deactivate"})

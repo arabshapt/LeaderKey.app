@@ -171,6 +171,101 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertFalse(hasSendUserCommand(manipulator: stickyMapping, prefix: "deactivate"))
   }
 
+  func testStickyShortcutExportsKeyEventLastForRepeat() throws {
+    let config = UserConfig()
+    let stickyShortcut = Action(
+      key: "m",
+      type: .shortcut,
+      label: "Sticky Shortcut",
+      value: "Ct",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: true,
+      macroSteps: nil
+    )
+    config.root.actions = [.action(stickyShortcut)]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let allManipulators = flattenManipulators(from: [globalRule])
+    let mapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "m" && hasKeyCodeEvent(manipulator, keyCode: "t")
+    }))
+    let events = toEvents(in: mapping)
+
+    XCTAssertFalse(hasSendUserCommand(manipulator: mapping, prefix: "stateid "))
+    XCTAssertLessThan(
+      try XCTUnwrap(indexOfSetVariableEvent(events, name: "leaderkey_sticky", value: 1)),
+      try XCTUnwrap(indexOfKeyCodeEvent(events, keyCode: "t"))
+    )
+    XCTAssertEqual(lastKeyCodeEvent(in: mapping)?["key_code"] as? String, "t")
+    XCTAssertEqual(lastKeyCodeEvent(in: mapping)?["modifiers"] as? [String], ["command"])
+  }
+
+  func testRuntimeStickyShortcutBranchExportsKeyEventLastAndNonStickyBranchResets() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .action(makeShortcutAction(key: "m", label: "Runtime Sticky Shortcut", value: "Ct"))
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let allManipulators = flattenManipulators(from: [globalRule])
+    let mappings = allManipulators.filter { fromKeyCode(in: $0) == "m" }
+    let stickyMapping = try XCTUnwrap(mappings.first(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_if")
+    }))
+    let nonStickyMapping = try XCTUnwrap(mappings.first(where: { manipulator in
+      hasVariableCondition(manipulator, name: "leaderkey_sticky", value: 1, type: "variable_unless")
+    }))
+    let stickyEvents = toEvents(in: stickyMapping)
+
+    XCTAssertFalse(hasSendUserCommand(manipulator: stickyMapping, prefix: "stateid "))
+    XCTAssertLessThan(
+      try XCTUnwrap(indexOfSetVariableEvent(stickyEvents, name: "leaderkey_sticky", value: 1)),
+      try XCTUnwrap(indexOfKeyCodeEvent(stickyEvents, keyCode: "t"))
+    )
+    XCTAssertEqual(lastKeyCodeEvent(in: stickyMapping)?["key_code"] as? String, "t")
+    XCTAssertEqual(lastKeyCodeEvent(in: stickyMapping)?["modifiers"] as? [String], ["command"])
+    XCTAssertTrue(hasSendUserCommand(manipulator: nonStickyMapping, prefix: "stateid "))
+    XCTAssertTrue(hasSetVariable(manipulator: nonStickyMapping, name: "leader_state", value: 0))
+  }
+
+  func testComplexStickyShortcutFallsBackToStateIdCommand() throws {
+    let config = UserConfig()
+    let complexShortcut = Action(
+      key: "m",
+      type: .shortcut,
+      label: "Complex Sticky Shortcut",
+      value: "Ct delay:500 Ot",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: true,
+      macroSteps: nil
+    )
+    config.root.actions = [.action(complexShortcut)]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let allManipulators = flattenManipulators(from: [globalRule])
+    let mapping = try XCTUnwrap(allManipulators.first(where: { manipulator in
+      fromKeyCode(in: manipulator) == "m"
+        && sendUserCommandPayloads(manipulator: manipulator).contains(where: {
+          $0.hasPrefix("stateid ") && $0.hasSuffix(" sticky")
+        })
+    }))
+
+    XCTAssertTrue(hasSetVariable(manipulator: mapping, name: "leaderkey_sticky", value: 1))
+    XCTAssertFalse(hasKeyCodeEvent(mapping, keyCode: "t"))
+    XCTAssertFalse(hasKeyCodeEvent(mapping, keyCode: "o"))
+  }
+
   func testToggleStickyModeActionExportsAsStickyTerminalAction() throws {
     let config = UserConfig()
     config.root.actions = [
@@ -793,6 +888,38 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
 
       return payload
     }
+  }
+
+  private func toEvents(in manipulator: [String: Any]) -> [Any] {
+    (manipulator["to"] as? [Any]) ?? []
+  }
+
+  private func indexOfSetVariableEvent(_ events: [Any], name: String, value: Int) -> Int? {
+    events.firstIndex { event in
+      guard
+        let eventObject = event as? [String: Any],
+        let variableObject = eventObject["set_variable"] as? [String: Any],
+        let variableName = variableObject["name"] as? String,
+        let variableValue = variableObject["value"] as? NSNumber
+      else {
+        return false
+      }
+
+      return variableName == name && variableValue.intValue == value
+    }
+  }
+
+  private func indexOfKeyCodeEvent(_ events: [Any], keyCode: String) -> Int? {
+    events.firstIndex { event in
+      guard let eventObject = event as? [String: Any] else {
+        return false
+      }
+      return eventObject["key_code"] as? String == keyCode
+    }
+  }
+
+  private func lastKeyCodeEvent(in manipulator: [String: Any]) -> [String: Any]? {
+    toEvents(in: manipulator).last as? [String: Any]
   }
 
   private func fromKeyCode(in manipulator: [String: Any]) -> String? {
