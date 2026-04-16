@@ -19,10 +19,22 @@ export interface IntelliJActionExplain {
     needsGit?: boolean;
     needsProject?: boolean;
   };
+  metadataRoundTripMs?: number;
   shortcuts?: string[];
   smartDelay?: number;
   text?: string;
   [key: string]: unknown;
+}
+
+export interface IntelliJActionStats {
+  actionId?: string;
+  averageTimeMs?: number;
+  commonlyChainedWith?: Record<string, number>;
+  error?: string;
+  executionCount?: number;
+  failureCount?: number;
+  lastUsed?: string;
+  successCount?: number;
 }
 
 const INTELLIJ_ACTIONS_BASE_URL = "http://localhost:63343/api/intellij-actions";
@@ -151,6 +163,43 @@ function rankIntelliJActionMatches(
 
 export async function explainIntelliJAction(actionId: string): Promise<IntelliJActionExplain> {
   return await fetchIntelliJJson<IntelliJActionExplain>(`/explain?action=${encodeURIComponent(actionId)}`);
+}
+
+export async function explainIntelliJActionWithTiming(actionId: string): Promise<IntelliJActionExplain> {
+  const start = Date.now();
+  const explain = await explainIntelliJAction(actionId);
+  return {
+    ...explain,
+    metadataRoundTripMs: Math.max(0, Date.now() - start),
+  };
+}
+
+export async function getIntelliJActionStats(actionId: string): Promise<IntelliJActionStats> {
+  return await fetchIntelliJJson<IntelliJActionStats>(`/stats?action=${encodeURIComponent(actionId)}`);
+}
+
+export function estimateIntelliJChainDelayMs(explain: Pick<IntelliJActionExplain, "category" | "smartDelay">): number {
+  if (explain.category === "dialog" || explain.category === "instant") {
+    return 0;
+  }
+
+  if (explain.category === "async") {
+    return 500;
+  }
+
+  if (explain.category === "tree-list") {
+    return 150;
+  }
+
+  if (explain.category === "tool-window") {
+    return 100;
+  }
+
+  if (explain.category === "quick-ui") {
+    return 50;
+  }
+
+  return explain.smartDelay && explain.smartDelay > 0 ? explain.smartDelay : 50;
 }
 
 export function intellijActionSearchQueries(query: string): string[] {

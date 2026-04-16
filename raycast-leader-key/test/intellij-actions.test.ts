@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   clearIntelliJActionListCacheForTests,
+  estimateIntelliJChainDelayMs,
   humanizeIntelliJActionId,
   intellijActionClassName,
   intellijActionSearchQueries,
@@ -24,6 +25,11 @@ test("IntelliJ action fuzzy matching handles compact CamelCase gaps", () => {
 test("IntelliJ action display derives readable names from action IDs", () => {
   assert.equal(intellijActionClassName("dev.nx.console.run.actions.NxRunAnythingAction"), "NxRunAnythingAction");
   assert.equal(humanizeIntelliJActionId("dev.nx.console.run.actions.NxRunAnythingAction"), "Nx Run Anything");
+});
+
+test("IntelliJ timing estimates distinguish last-action delay from chain delay", () => {
+  assert.equal(estimateIntelliJChainDelayMs({ category: "async", smartDelay: 0 }), 500);
+  assert.equal(estimateIntelliJChainDelayMs({ category: "instant", smartDelay: 0 }), 0);
 });
 
 test("IntelliJ action search fuzzes against the full action list", async () => {

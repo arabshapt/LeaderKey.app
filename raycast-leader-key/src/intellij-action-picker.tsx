@@ -2,10 +2,13 @@ import { Action, ActionPanel, Icon, List, useNavigation } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  explainIntelliJAction,
+  estimateIntelliJChainDelayMs,
+  explainIntelliJActionWithTiming,
+  getIntelliJActionStats,
   humanizeIntelliJActionId,
   intellijActionClassName,
   searchIntelliJActions,
+  type IntelliJActionStats,
   type IntelliJActionExplain,
 } from "./intellij-actions.js";
 
@@ -55,6 +58,7 @@ function extraMetadataMarkdown(explain: IntelliJActionExplain): string[] {
     "exists",
     "group",
     "name",
+    "metadataRoundTripMs",
     "pluginId",
     "pluginName",
     "presentation",
@@ -78,6 +82,7 @@ function extraMetadataMarkdown(explain: IntelliJActionExplain): string[] {
 function explainMarkdown(
   actionId: string,
   explain: IntelliJActionExplain | undefined,
+  stats: IntelliJActionStats | undefined,
   currentActionIds: string[],
   currentDelayMs: number | undefined,
 ): string {
@@ -109,11 +114,13 @@ function explainMarkdown(
     `**Category**: ${explain.category ?? "Unknown"}`,
     `**Group**: ${explain.group ?? "Unknown"}`,
     `**Plugin**: ${explain.pluginName ?? explain.pluginId ?? "Unknown"}`,
-    `**Recommended Delay**: ${explain.smartDelay ?? 0} ms`,
+    `**Reported Last-Action Delay**: ${explain.smartDelay ?? 0} ms`,
     `**Shortcuts**: ${explain.shortcuts?.length ? explain.shortcuts.join(", ") : "None known"}`,
     "",
     description,
   );
+
+  lines.push(...timingMarkdown(explain, stats, currentDelayMs));
 
   if (explain.requirements) {
     lines.push(
@@ -132,6 +139,38 @@ function explainMarkdown(
   return lines.join("\n");
 }
 
+function timingMarkdown(
+  explain: IntelliJActionExplain,
+  stats: IntelliJActionStats | undefined,
+  currentDelayMs: number | undefined,
+): string[] {
+  const estimatedChainDelayMs = estimateIntelliJChainDelayMs(explain);
+  const effectiveChainDelayMs = currentDelayMs ?? estimatedChainDelayMs;
+  const lines = [
+    "",
+    "## Timing",
+    `- Metadata round trip: ${explain.metadataRoundTripMs ?? "Unknown"} ms`,
+    `- Shortcut delay baseline: 0 ms between shortcut key events`,
+    `- Last-action delay: ${explain.smartDelay ?? 0} ms when this action is the only or final IntelliJ action`,
+    `- Estimated next-action delay: ${estimatedChainDelayMs} ms before a following IntelliJ action`,
+    `- Current configured chain delay: ${currentDelayMs === undefined ? "Smart delay" : `${currentDelayMs} ms`}`,
+    `- Effective next-action delay vs 0 ms shortcut: +${effectiveChainDelayMs} ms`,
+  ];
+
+  if (stats?.averageTimeMs !== undefined && stats.executionCount !== undefined) {
+    lines.push(
+      `- Historical plugin execution average: ${stats.averageTimeMs} ms over ${stats.executionCount} run${stats.executionCount === 1 ? "" : "s"}`,
+      `- Historical success/failure: ${stats.successCount ?? 0}/${stats.failureCount ?? 0}`,
+    );
+  } else {
+    lines.push("- Historical plugin execution average: No recorded runs yet");
+  }
+
+  lines.push("- Measurement note: metadata and stats are safe reads; the action is not executed while loading details.");
+  lines.push("- Delay note: smart delay is only inserted between chained IntelliJ actions, not after the final action.");
+  return lines;
+}
+
 export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
   const { currentActionIds, currentDelayMs, onAppend, title } = props;
   const [searchText, setSearchText] = useState("");
@@ -140,6 +179,7 @@ export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
   const [error, setError] = useState<string>();
   const [selectedActionId, setSelectedActionId] = useState<string>();
   const [explainById, setExplainById] = useState<Record<string, IntelliJActionExplain>>({});
+  const [statsById, setStatsById] = useState<Record<string, IntelliJActionStats>>({});
   const { pop } = useNavigation();
 
   useEffect(() => {
@@ -198,7 +238,7 @@ export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
     }
 
     let isMounted = true;
-    void explainIntelliJAction(actionId)
+    void explainIntelliJActionWithTiming(actionId)
       .then((nextExplain) => {
         if (isMounted) {
           setExplainById((current) => ({ ...current, [actionId]: nextExplain }));
@@ -220,6 +260,30 @@ export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
       isMounted = false;
     };
   }, [explainById, selectedActionId]);
+
+  useEffect(() => {
+    const actionId = selectedActionId?.trim();
+    if (!actionId || statsById[actionId]) {
+      return;
+    }
+
+    let isMounted = true;
+    void getIntelliJActionStats(actionId)
+      .then((nextStats) => {
+        if (isMounted) {
+          setStatsById((current) => ({ ...current, [actionId]: nextStats }));
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setStatsById((current) => ({ ...current, [actionId]: { actionId, error: "No statistics available" } }));
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedActionId, statsById]);
 
   const duplicateCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -279,7 +343,7 @@ export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
               ? [{ text: `${explainById[actionId]!.smartDelay}ms` }]
               : []),
           ]}
-          detail={<List.Item.Detail markdown={explainMarkdown(actionId, explainById[actionId], currentActionIds, currentDelayMs)} />}
+          detail={<List.Item.Detail markdown={explainMarkdown(actionId, explainById[actionId], statsById[actionId], currentActionIds, currentDelayMs)} />}
           icon={Icon.Bolt}
           id={actionId}
           key={actionId}
