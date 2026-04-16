@@ -106,6 +106,7 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
           target={
             <IntelliJActionPicker
               currentActionIds={parsedIntellij.actionIds}
+              currentDelayMs={parsedIntellij.delayMs}
               onAppend={(actionId) =>
                 setFormState((current) => {
                   const parsed = parseIntellijActionValue(current.intellijValue);
