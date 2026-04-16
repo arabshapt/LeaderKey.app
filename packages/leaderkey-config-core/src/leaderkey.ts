@@ -1,6 +1,8 @@
 import net from "node:net";
 
 const LEADERKEY_SOCKET_PATH = "/tmp/leaderkey.sock";
+const DEFAULT_SOCKET_TIMEOUT_MS = 1500;
+const MENU_ITEMS_SOCKET_TIMEOUT_MS = 10000;
 
 export interface LeaderKeyMenuItem {
   appName: string;
@@ -9,7 +11,11 @@ export interface LeaderKeyMenuItem {
   title: string;
 }
 
-async function sendSocketRequest(command: string, socketPath = LEADERKEY_SOCKET_PATH): Promise<string> {
+async function sendSocketRequest(
+  command: string,
+  socketPath = LEADERKEY_SOCKET_PATH,
+  timeoutMs = DEFAULT_SOCKET_TIMEOUT_MS,
+): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const client = net.createConnection(socketPath);
     let response = "";
@@ -24,7 +30,7 @@ async function sendSocketRequest(command: string, socketPath = LEADERKEY_SOCKET_
     };
 
     client.setEncoding("utf8");
-    client.setTimeout(1500);
+    client.setTimeout(timeoutMs);
 
     client.once("connect", () => {
       client.write(command);
@@ -80,7 +86,11 @@ export async function triggerLeaderKeyGokuProfileSync(): Promise<string> {
 
 export async function listLeaderKeyMenuItems(appName: string): Promise<LeaderKeyMenuItem[]> {
   try {
-    const response = await sendSocketRequest(`menu-items ${JSON.stringify({ app: appName })}`);
+    const response = await sendSocketRequest(
+      `menu-items ${JSON.stringify({ app: appName })}`,
+      LEADERKEY_SOCKET_PATH,
+      MENU_ITEMS_SOCKET_TIMEOUT_MS,
+    );
     const parsed = JSON.parse(response) as { items?: LeaderKeyMenuItem[] };
     return Array.isArray(parsed.items) ? parsed.items : [];
   } catch (error) {

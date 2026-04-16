@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 final class UnixSocketServer {
@@ -107,6 +108,8 @@ final class UnixSocketServer {
       return
     }
 
+    disableSigPipe(for: clientSocket)
+
     queue.async { [weak self] in
       self?.handleClient(socket: clientSocket)
     }
@@ -155,9 +158,28 @@ final class UnixSocketServer {
       }
 
       guard sent > 0 else {
+        let sendError = errno
+        if sendError != EPIPE && sendError != ECONNRESET {
+          debugLog("[UnixSocketServer] Failed to send response: \(String(cString: strerror(sendError)))")
+        }
         break
       }
       totalSent += sent
+    }
+  }
+
+  private func disableSigPipe(for socket: Int32) {
+    var noSigPipe: Int32 = 1
+    let result = setsockopt(
+      socket,
+      SOL_SOCKET,
+      SO_NOSIGPIPE,
+      &noSigPipe,
+      socklen_t(MemoryLayout.size(ofValue: noSigPipe))
+    )
+
+    if result != 0 {
+      debugLog("[UnixSocketServer] Failed to disable SIGPIPE: \(String(cString: strerror(errno)))")
     }
   }
 

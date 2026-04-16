@@ -30,7 +30,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { formStateToActionNode, validateActionNode } from "./action-form.js";
-import { ActionValueFieldActions, ActionValueFields } from "./action-value-fields.js";
+import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
 import {
   emptyFormState,
@@ -38,6 +38,7 @@ import {
   itemToFormState,
   parseTokenizedFullPath,
   replaceMenuAppPrefix,
+  menuAppPrefix,
   recordToFormState,
   type ItemFormState,
 } from "./form-utils.js";
@@ -73,7 +74,21 @@ function keyPathMatches(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((segment, index) => segment === right[index]);
 }
 
-function formStateToItem(state: ItemFormState, key: string, preserveItem?: ConfigItem): ConfigItem {
+function selectedMenuAppNameFor(state: ItemFormState, defaultMenuAppName: string | undefined, installedApps: Array<{ bundlePath: string; name: string }>): string | undefined {
+  if (state.type !== "menu") {
+    return undefined;
+  }
+
+  return menuAppPrefix(state.menuValue, knownMenuAppNamesFor(defaultMenuAppName, installedApps, state.menuValue))
+    ?? defaultMenuAppName;
+}
+
+function formStateToItem(
+  state: ItemFormState,
+  key: string,
+  preserveItem?: ConfigItem,
+  menuAppName?: string,
+): ConfigItem {
   if (state.type === "group") {
     const preservedGroup = preserveItem?.type === "group" ? preserveItem : undefined;
     return {
@@ -87,6 +102,7 @@ function formStateToItem(state: ItemFormState, key: string, preserveItem?: Confi
   }
 
   const action = formStateToActionNode(state, {
+    menuAppName,
     preserveAction: preserveItem?.type === "group" ? undefined : preserveItem,
   });
   return {
@@ -285,10 +301,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     ? `Overrides stay at ${formatFullPath(targetRecord.effectiveKeyPath)}.`
     : undefined;
   const destinationKey = destinationKeyPath.at(-1) ?? "";
-  const tentativeItem = destinationKey
-    ? formStateToItem(formState, destinationKey, preservedItem)
-    : undefined;
-  const valueError = tentativeItem ? validateItem(tentativeItem) : undefined;
   const macroSummary = useMemo(
     () => macroStepSummary({
       key: undefined,
@@ -383,9 +395,11 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       await showToast({ style: Toast.Style.Failure, title: "A full path is required." });
       return;
     }
-    const nextItem = formStateToItem(formState, destinationKey, preservedItem);
-    if (valueError) {
-      await showToast({ style: Toast.Style.Failure, title: valueError });
+    const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
+    const nextItem = formStateToItem(formState, destinationKey, preservedItem, nextMenuAppName);
+    const nextValueError = validateItem(nextItem);
+    if (nextValueError) {
+      await showToast({ style: Toast.Style.Failure, title: nextValueError });
       return;
     }
 
@@ -541,7 +555,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           : undefined,
       ].filter(Boolean).join("\n")
     : fixedPathInfo;
-  const valueFieldError = valueError;
 
   useEffect(() => {
     if (formState.type !== "menu" || !defaultMenuAppName) {
@@ -679,7 +692,6 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         formState={formState}
         installedApps={installedApps}
         setFormState={setFormState}
-        valueFieldError={valueError}
       />
       {formState.type !== "group" ? (
         <Form.TextField

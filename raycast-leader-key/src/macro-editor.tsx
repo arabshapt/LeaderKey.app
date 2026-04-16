@@ -20,8 +20,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { type MacroStepActionType, cloneMacroSteps, createEmptyMacroStep, formStateToActionNode, validateActionNode } from "./action-form.js";
-import { ActionValueFieldActions, ActionValueFields } from "./action-value-fields.js";
-import { itemToFormState, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
+import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
+import { itemToFormState, menuAppPrefix, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
 
 const MACRO_STEP_TYPE_OPTIONS: Array<{ title: string; value: MacroStepActionType }> = [
   { title: "Application", value: "application" },
@@ -90,6 +90,19 @@ function delayErrorText(delayText: string): string | undefined {
   }
 
   return undefined;
+}
+
+function selectedMenuAppNameFor(
+  formState: ItemFormState,
+  defaultMenuAppName: string | undefined,
+  installedApps: InstalledApp[],
+): string | undefined {
+  if (formState.type !== "menu") {
+    return undefined;
+  }
+
+  return menuAppPrefix(formState.menuValue, knownMenuAppNamesFor(defaultMenuAppName, installedApps, formState.menuValue))
+    ?? defaultMenuAppName;
 }
 
 function stepTitle(step: MacroStep): string {
@@ -294,12 +307,7 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
     });
   }, [defaultMenuAppName, formState.type]);
 
-  const stepAction = useMemo(
-    () => formStateToActionNode(formState, { preserveAction: preservedAction, preserveHiddenMetadata: true }),
-    [formState, preservedAction],
-  );
   const delayError = delayErrorText(delayText);
-  const valueError = validateActionNode(stepAction);
 
   async function handleSubmit(): Promise<void> {
     if (delayError) {
@@ -307,13 +315,20 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
       return;
     }
 
-    if (valueError) {
-      await showToast({ style: Toast.Style.Failure, title: valueError });
+    const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
+    const nextStepAction = formStateToActionNode(formState, {
+      menuAppName: nextMenuAppName,
+      preserveAction: preservedAction,
+      preserveHiddenMetadata: true,
+    });
+    const nextValueError = validateActionNode(nextStepAction);
+    if (nextValueError) {
+      await showToast({ style: Toast.Style.Failure, title: nextValueError });
       return;
     }
 
     onSave({
-      action: stepAction,
+      action: nextStepAction,
       delay: Number(delayText.trim()),
       enabled,
     });
@@ -397,7 +412,6 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
         formState={formState}
         installedApps={installedApps}
         setFormState={setFormState}
-        valueFieldError={valueError}
       />
     </Form>
   );

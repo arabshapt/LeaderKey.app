@@ -5,7 +5,7 @@ import {
   parseIntellijActionValue,
   type InstalledApp,
 } from "@leaderkey/config-core";
-import { useMemo, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, type Dispatch, type SetStateAction } from "react";
 
 import { IntelliJActionPicker } from "./intellij-action-picker.js";
 import { MenuFallbackPathsEditor } from "./menu-fallbacks-editor.js";
@@ -31,28 +31,34 @@ function normalizeCommaSeparatedActions(value: string): string[] {
   return value.split(",").map((action) => action.trim()).filter(Boolean);
 }
 
+export function knownMenuAppNamesFor(defaultMenuAppName: string | undefined, installedApps: InstalledApp[], menuValue: string): string[] {
+  const names = new Set<string>();
+  for (const app of installedApps) {
+    names.add(app.name);
+  }
+  if (defaultMenuAppName) {
+    names.add(defaultMenuAppName);
+  }
+
+  if (menuValue.trim().endsWith(">")) {
+    const rawAppName = menuAppPrefix(menuValue);
+    if (rawAppName) {
+      names.add(rawAppName);
+    }
+  }
+
+  return Array.from(names);
+}
+
 export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
   const { defaultMenuAppName, formState, installedApps, setFormState } = props;
-  const knownMenuAppNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const app of installedApps) {
-      names.add(app.name);
-    }
-    if (defaultMenuAppName) {
-      names.add(defaultMenuAppName);
-    }
-    const literalParts = formState.menuValue.split(" > ").map((part) => part.trim()).filter(Boolean);
-    if (literalParts.length > 2 || formState.menuValue.trim().endsWith(">")) {
-      const rawAppName = menuAppPrefix(formState.menuValue);
-      if (rawAppName) {
-        names.add(rawAppName);
-      }
-    }
-    return Array.from(names);
-  }, [defaultMenuAppName, formState.menuValue, installedApps]);
+  const knownMenuAppNames = useMemo(
+    () => knownMenuAppNamesFor(defaultMenuAppName, installedApps, formState.menuValue),
+    [defaultMenuAppName, formState.menuValue, installedApps],
+  );
   const selectedMenuAppName = useMemo(
-    () => menuAppPrefix(formState.menuValue, knownMenuAppNames),
-    [formState.menuValue, knownMenuAppNames],
+    () => menuAppPrefix(formState.menuValue, knownMenuAppNames) ?? defaultMenuAppName,
+    [defaultMenuAppName, formState.menuValue, knownMenuAppNames],
   );
   const parsedIntellij = useMemo(() => parseIntellijActionValue(formState.intellijValue), [formState.intellijValue]);
 
@@ -124,25 +130,12 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
 export function ActionValueFields(props: ActionValueFieldsProps) {
   const { defaultMenuAppName, formState, installedApps, setFormState, valueFieldError } = props;
 
-  const knownMenuAppNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const app of installedApps) {
-      names.add(app.name);
-    }
-    if (defaultMenuAppName) {
-      names.add(defaultMenuAppName);
-    }
-    const literalParts = formState.menuValue.split(" > ").map((part) => part.trim()).filter(Boolean);
-    if (literalParts.length > 2 || formState.menuValue.trim().endsWith(">")) {
-      const rawAppName = menuAppPrefix(formState.menuValue);
-      if (rawAppName) {
-        names.add(rawAppName);
-      }
-    }
-    return Array.from(names).sort((left, right) => left.localeCompare(right));
-  }, [defaultMenuAppName, formState.menuValue, installedApps]);
+  const knownMenuAppNames = useMemo(
+    () => knownMenuAppNamesFor(defaultMenuAppName, installedApps, formState.menuValue).sort((left, right) => left.localeCompare(right)),
+    [defaultMenuAppName, formState.menuValue, installedApps],
+  );
   const parsedIntellij = useMemo(() => parseIntellijActionValue(formState.intellijValue), [formState.intellijValue]);
-  const selectedMenuAppName = menuAppPrefix(formState.menuValue, knownMenuAppNames);
+  const selectedMenuAppName = menuAppPrefix(formState.menuValue, knownMenuAppNames) ?? defaultMenuAppName;
   const selectedMenuPath = menuPathValue(formState.menuValue, selectedMenuAppName);
   const selectedMenuAppValue = selectedMenuAppName
     ? installedApps.find((app) => app.name === selectedMenuAppName)?.bundlePath ?? `__current__:${selectedMenuAppName}`
@@ -150,6 +143,28 @@ export function ActionValueFields(props: ActionValueFieldsProps) {
   const fallbackSummary = formState.menuFallbackPaths.length > 0
     ? formState.menuFallbackPaths.map((path, index) => `${index + 1}. ${path}`).join("\n")
     : "No fallback menu paths.";
+
+  useEffect(() => {
+    if (formState.type !== "menu" || !defaultMenuAppName || !formState.menuValue.trim()) {
+      return;
+    }
+
+    setFormState((current) => {
+      if (current.type !== "menu" || !current.menuValue.trim()) {
+        return current;
+      }
+
+      const currentKnownNames = knownMenuAppNamesFor(defaultMenuAppName, installedApps, current.menuValue);
+      if (menuAppPrefix(current.menuValue, currentKnownNames)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        menuValue: replaceMenuAppPrefix(current.menuValue, defaultMenuAppName),
+      };
+    });
+  }, [defaultMenuAppName, formState.menuValue, formState.type, installedApps, setFormState]);
 
   return (
     <>

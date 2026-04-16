@@ -7,7 +7,7 @@ import {
   type MacroStep,
 } from "@leaderkey/config-core";
 
-import { encodeKeystrokeRawValue, type ItemFormState } from "./form-utils.js";
+import { encodeKeystrokeRawValue, menuPathValue, type ItemFormState } from "./form-utils.js";
 
 export type MacroStepActionType = Exclude<ConfigItem["type"], "group">;
 
@@ -44,6 +44,7 @@ export function createEmptyMacroStep(type: MacroStepActionType = "shortcut"): Ma
 }
 
 interface ActionFromFormStateOptions {
+  menuAppName?: string;
   preserveAction?: ActionNode;
   preserveHiddenMetadata?: boolean;
 }
@@ -93,12 +94,16 @@ export function formStateToActionNode(
     case "menu":
       {
         const parsedMenu = parseMenuActionValue(state.menuValue);
+        const appName = options.menuAppName?.trim() || parsedMenu.appName;
+        const path = options.menuAppName
+          ? menuPathValue(state.menuValue, options.menuAppName)
+          : parsedMenu.path;
       return {
         ...baseAction,
         menuFallbackPaths: state.menuFallbackPaths.map((path) => path.trim()).filter(Boolean),
         value: encodeMenuActionValue({
-          appName: parsedMenu.appName,
-          path: parsedMenu.path,
+          appName,
+          path,
         }),
       };
       }

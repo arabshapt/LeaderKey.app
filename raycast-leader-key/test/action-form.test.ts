@@ -183,3 +183,11 @@ test("menu actions normalize in-progress draft spacing on save", () => {
   const menuAction = formStateToActionNode(menuState);
   assert.equal(menuAction.value, "Codex > file > open");
 });
+
+test("menu actions use selected app context for path-only drafts", () => {
+  const menuState = emptyFormState("menu");
+  menuState.menuValue = "Go > Home > Desktop";
+
+  const menuAction = formStateToActionNode(menuState, { menuAppName: "Path Finder" });
+  assert.equal(menuAction.value, "Path Finder > Go > Home > Desktop");
+});
