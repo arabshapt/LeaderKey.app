@@ -51,23 +51,28 @@ extension UserConfig {
           continue
         }
 
-        // Check for fallback app config
-        if currentFileName == defaultAppConfigFileName {
+        switch configFileKind(forFileName: currentFileName) {
+        case .appFallback:
           let displayName = getDisplayName(for: filePath, defaultName: defaultAppConfigDisplayName)
           discovered[displayName] = filePath
+
+        case .normalFallback:
+          let displayName = getDisplayName(for: filePath, defaultName: normalFallbackConfigDisplayName)
+          discovered[displayName] = filePath
+
+        case .app(let bundleId):
+          let defaultAppDisplayName = "App: \(bundleId)"
+          let displayName = getDisplayName(for: filePath, defaultName: defaultAppDisplayName)
+          discovered[displayName] = filePath
+
+        case .normalApp(let bundleId):
+          let defaultNormalDisplayName = "Normal: \(bundleId)"
+          let displayName = getDisplayName(for: filePath, defaultName: defaultNormalDisplayName)
+          discovered[displayName] = filePath
+
+        case .global, .unknown:
+          break
         }
-        // Check for other app-specific configs
-        else if currentFileName.hasPrefix(appConfigPrefix) && currentFileName.hasSuffix(".json") {
-          // Extract bundle ID
-          let bundleId = String(
-            currentFileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
-          if !bundleId.isEmpty && bundleId != "default" {  // Exclude app-fallback-config.json here
-            let defaultAppDisplayName = "App: \(bundleId)"  // Corrected interpolation
-            let displayName = getDisplayName(for: filePath, defaultName: defaultAppDisplayName)
-            discovered[displayName] = filePath
-          }
-        }
-        // Future: Handle other types of config files if needed
       }
     } catch {
       let errorMessage = "Failed to list contents of config directory: \(configDir)"
@@ -86,6 +91,8 @@ extension UserConfig {
       if name2 == globalDefaultDisplayName { return false }
       if name1 == defaultAppConfigDisplayName { return true }
       if name2 == defaultAppConfigDisplayName { return false }
+      if name1 == normalFallbackConfigDisplayName { return true }
+      if name2 == normalFallbackConfigDisplayName { return false }
       return name1.localizedCompare(name2) == .orderedAscending
     }.reduce(into: [String: String]()) { (dict, pair) in
       dict[pair.key] = pair.value

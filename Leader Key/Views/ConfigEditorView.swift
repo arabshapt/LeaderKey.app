@@ -557,6 +557,9 @@ struct ActionRow: View {
           Text("IntelliJ").tag(Type.intellij)
           Text("Keystroke").tag(Type.keystroke)
           Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+          Text("Normal Mode Enable").tag(Type.normalModeEnable)
+          Text("Normal Mode Input").tag(Type.normalModeInput)
+          Text("Normal Mode Disable").tag(Type.normalModeDisable)
           Text("Macro").tag(Type.macro)
         }
         .frame(width: 110)
@@ -797,7 +800,7 @@ struct ActionRow: View {
               action.value = newValue
             }
           ))
-        case .toggleStickyMode:
+        case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
           Text("No value required")
             .foregroundColor(.secondary)
             .font(.caption)
@@ -843,8 +846,7 @@ struct ActionRow: View {
           }
         }
 
-        // Add sticky mode checkbox for all action types except Toggle Sticky Mode
-        if action.type != .toggleStickyMode {
+        if !action.type.isModeControlAction {
           Toggle(
             "SM",
             isOn: Binding(
@@ -855,6 +857,23 @@ struct ActionRow: View {
           .toggleStyle(.checkbox)
           .frame(width: 40)
           .help("Sticky Mode: Keep window open after executing this action")
+        }
+
+        if !action.type.isModeControlAction {
+          Picker(
+            "Normal Mode After",
+            selection: Binding(
+              get: { action.normalModeAfter ?? .normal },
+              set: { action.normalModeAfter = $0 == .normal ? nil : $0 }
+            )
+          ) {
+            Text("Normal").tag(NormalModeAfter.normal)
+            Text("Input").tag(NormalModeAfter.input)
+            Text("Disabled").tag(NormalModeAfter.disabled)
+          }
+          .frame(width: 90)
+          .labelsHidden()
+          .help("Normal Mode After: state after this action runs from normal mode")
         }
 
         Spacer()
@@ -1598,7 +1617,7 @@ struct MacroStepRow: View {
               step.action.value = newValue
             }
           ))
-        case .toggleStickyMode:
+        case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
           Text("No value required")
             .foregroundColor(.secondary)
             .font(.caption)

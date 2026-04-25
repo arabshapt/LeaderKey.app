@@ -112,6 +112,14 @@ enum KarabinerCommandRouter {
       delegate?.unixSocketServerDidReceiveStateId(stateId, sticky: sticky)
       return "OK"
 
+    case "normal_on":
+      delegate?.unixSocketServerDidReceiveNormalModeStatus(active: true)
+      return "OK"
+
+    case "normal_off":
+      delegate?.unixSocketServerDidReceiveNormalModeStatus(active: false)
+      return "OK"
+
     case "state":
       if let state = delegate?.unixSocketServerRequestState() {
         return formatState(state)

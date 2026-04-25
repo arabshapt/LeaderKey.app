@@ -226,7 +226,7 @@ struct CommandScoutAppContext: Equatable {
   let appDisplayName: String
 
   static func resolve(selectedConfigKey: String, userConfig: UserConfig) -> CommandScoutAppContext? {
-    guard let bundleId = userConfig.extractBundleId(from: selectedConfigKey) else { return nil }
+    guard let bundleId = userConfig.extractRegularAppBundleId(from: selectedConfigKey) else { return nil }
 
     let runningApp = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleId }
     let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)

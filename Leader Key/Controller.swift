@@ -99,14 +99,11 @@ class Controller {
           // Look for the display name that matches this bundle ID in discovered configs
           var foundConfigKey: String? = nil
           for (displayKey, _) in userConfig.discoveredConfigFiles {
-            if displayKey != globalDefaultDisplayName && displayKey != defaultAppConfigDisplayName {
-              // Check if this key is for the current bundle ID
-              if let extractedId = userConfig.extractBundleId(from: displayKey),
-                extractedId == bundleId
-              {
-                foundConfigKey = displayKey
-                break
-              }
+            if let extractedId = userConfig.extractRegularAppBundleId(from: displayKey),
+              extractedId == bundleId
+            {
+              foundConfigKey = displayKey
+              break
             }
           }
           configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
@@ -459,6 +456,20 @@ class Controller {
       } else {
         debugLog("[Controller] runAction: Cannot toggle sticky mode - appDelegate is nil")
       }
+    case .normalModeEnable:
+      if let appDelegate = appDelegate {
+        appDelegate.setNormalModeStatus(active: true)
+      } else {
+        debugLog("[Controller] runAction: Cannot enable normal mode status - appDelegate is nil")
+      }
+    case .normalModeInput:
+      debugLog("[Controller] runAction: Normal mode input transition is handled by Karabiner")
+    case .normalModeDisable:
+      if let appDelegate = appDelegate {
+        appDelegate.setNormalModeStatus(active: false)
+      } else {
+        debugLog("[Controller] runAction: Cannot disable normal mode status - appDelegate is nil")
+      }
     case .macro:
       runMacro(action)
     case .menu:
@@ -491,7 +502,7 @@ class Controller {
     }
 
     // Check if this action has sticky mode enabled (except for Toggle Sticky Mode action)
-    if action.type != .toggleStickyMode && action.stickyMode == true {
+    if !action.type.isModeControlAction && action.stickyMode == true {
       if let appDelegate = appDelegate {
         appDelegate.activateStickyMode()
         debugLog("[Controller] runAction: Activated sticky mode for action with stickyMode enabled")

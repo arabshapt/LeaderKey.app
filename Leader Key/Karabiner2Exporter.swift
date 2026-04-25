@@ -28,6 +28,9 @@ final class Karabiner2Exporter {
       case appOverride
       case appSuppress
       case fallbackOnly
+      case normalShared
+      case normalOverride
+      case normalSuppress
     }
 
     let stateId: Int32
@@ -53,7 +56,7 @@ final class Karabiner2Exporter {
     let config: UserConfig
   }
 
-  private enum ManagedBindingKind {
+  private enum ManagedBindingKind: Equatable {
     case group
     case action
     case suppress
@@ -174,6 +177,10 @@ final class Karabiner2Exporter {
   private static let globalInitialStateId: Int32 = 1
   private static let fallbackInitialStateId: Int32 = 2
   private static let inactiveStateId: Int32 = 0
+  private static let normalModeBaseStateId: Int32 = 0
+  private static let normalModeEnabledVariable = "leaderkey_normal_enabled"
+  private static let normalModeInputVariable = "leaderkey_normal_input"
+  private static let normalModeStateVariable = "leaderkey_normal_state"
   private static let appStartMarker = ";;; LEADERKEY_APPLICATIONS_START"
   private static let appEndMarker = ";;; LEADERKEY_APPLICATIONS_END"
   private static let mainStartMarker = ";;; LEADERKEY_MAIN_START"
@@ -220,13 +227,15 @@ final class Karabiner2Exporter {
   // Returns: (ednContent, stateMappings)
   static func generateUnifiedGokuEDNHierarchical(
     globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) throws -> (edn: String, stateMappings: [StateMapping]) {
     debugLog("[Karabiner2Exporter] generateUnifiedGokuEDNHierarchical called with \(appConfigs.count) app configs")
 
     let managedModel = try buildManagedExportModel(
       globalConfig: globalConfig,
-      appConfigs: appConfigs
+      appConfigs: appConfigs,
+      normalAppConfigs: normalAppConfigs
     )
     let managedRules = applyKarAlternativeMappings(to: compileKarIntermediateRules(managedModel.rules))
     let applications = generateApplicationsSectionFromAliases(
@@ -245,12 +254,14 @@ final class Karabiner2Exporter {
   // Returns: (ednContent, stateMappings)
   static func generateUnifiedGokuEDN(
     globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) -> (edn: String, stateMappings: [StateMapping]) {
     do {
       return try generateUnifiedGokuEDNHierarchical(
         globalConfig: globalConfig,
-        appConfigs: appConfigs
+        appConfigs: appConfigs,
+        normalAppConfigs: normalAppConfigs
       )
     } catch {
       debugLog("[Karabiner2Exporter] Failed to generate unified Goku EDN: \(error)")
@@ -263,12 +274,14 @@ final class Karabiner2Exporter {
 
   static func generateKarabinerTSExport(
     globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) throws -> KarabinerTSExport {
     let tStart = CFAbsoluteTimeGetCurrent()
     let managedModel = try buildManagedExportModel(
       globalConfig: globalConfig,
-      appConfigs: appConfigs
+      appConfigs: appConfigs,
+      normalAppConfigs: normalAppConfigs
     )
     let tModel = CFAbsoluteTimeGetCurrent()
 
@@ -393,6 +406,7 @@ final class Karabiner2Exporter {
           guard mapping.originalKey == keyCode else { return false }
           guard let appAlias = mapping.appAlias else { return true }
           return description.contains("/AppMode/\(appAlias)")
+            || description.contains("/NormalAppMode/\(appAlias)")
         } ?? []
 
         for mapping in matchingMappings {
@@ -680,6 +694,17 @@ final class Karabiner2Exporter {
     }
 
     if case .action(let action) = node.item {
+      if let controlEvents = normalModeControlEvents(for: action.type) {
+        var toEvents: [Any] = [karSetVariable(name: "leaderkey_sticky", value: 0)]
+        toEvents.append(contentsOf: controlEvents)
+        toEvents.append(karSendUserCommand("deactivate"))
+        toEvents.append(karSetVariable(name: "leader_state", value: inactiveStateId))
+        return [
+          "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+          "to": toEvents,
+        ]
+      }
+
       switch action.type {
       case .url:
         let background = shouldUseBackgroundExecution(for: action)
@@ -1267,6 +1292,12 @@ final class Karabiner2Exporter {
       return "app_suppress.\(bundleId ?? "unknown")"
     case .fallbackOnly:
       return "fallback_only"
+    case .normalShared:
+      return "normal_shared"
+    case .normalOverride:
+      return "normal_override.\(bundleId ?? "unknown")"
+    case .normalSuppress:
+      return "normal_suppress.\(bundleId ?? "unknown")"
     }
   }
 
@@ -1297,6 +1328,24 @@ final class Karabiner2Exporter {
 
   private static func isSuppressionAction(_ action: Action) -> Bool {
     action.type == .shortcut && action.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "vk_none"
+  }
+
+  private static func suppressionScope(for scope: StateMapping.Scope) -> StateMapping.Scope {
+    switch scope {
+    case .normalShared, .normalOverride, .normalSuppress:
+      return .normalSuppress
+    case .global, .appShared, .appOverride, .appSuppress, .fallbackOnly:
+      return .appSuppress
+    }
+  }
+
+  private static func isNormalModeScope(_ scope: StateMapping.Scope) -> Bool {
+    switch scope {
+    case .normalShared, .normalOverride, .normalSuppress:
+      return true
+    case .global, .appShared, .appOverride, .appSuppress, .fallbackOnly:
+      return false
+    }
   }
 
   private static func keyedItems(_ items: [ActionOrGroup]) -> [String: ActionOrGroup] {
@@ -1366,6 +1415,7 @@ final class Karabiner2Exporter {
     switch item {
     case .action(let action):
       if isSuppressionAction(action) {
+        let suppressScope = suppressionScope(for: scope)
         collections.bindings.append(
           ManagedBinding(
             parentStateId: parentStateId,
@@ -1375,7 +1425,7 @@ final class Karabiner2Exporter {
             item: item,
             kind: .suppress,
             parentGroupHasStickyMode: parentGroupHasStickyMode,
-            scope: .appSuppress,
+            scope: suppressScope,
             appAlias: appAlias,
             bundleId: bundleId
           ))
@@ -1436,18 +1486,20 @@ final class Karabiner2Exporter {
           appAlias: appAlias,
           bundleId: bundleId
         ))
-      collections.stateMappings.append(
-        makeStateMapping(
-          stateId: groupStateId,
-          path: originalPath,
-          scope: scope,
-          appAlias: appAlias,
-          bundleId: bundleId,
-          actionType: "group",
-          actionTypeRaw: nil,
-          actionValue: nil,
-          actionLabel: group.label
-        ))
+      if !isNormalModeScope(scope) {
+        collections.stateMappings.append(
+          makeStateMapping(
+            stateId: groupStateId,
+            path: originalPath,
+            scope: scope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            actionType: "group",
+            actionTypeRaw: nil,
+            actionValue: nil,
+            actionLabel: group.label
+          ))
+      }
 
       for child in group.actions {
         try appendFullBinding(
@@ -1500,6 +1552,9 @@ final class Karabiner2Exporter {
     fallbackGroup: Group,
     appAlias: String,
     bundleId: String,
+    sharedScope: StateMapping.Scope = .appShared,
+    overrideScope: StateMapping.Scope = .appOverride,
+    suppressScope: StateMapping.Scope = .appSuppress,
     parentStateId: Int32,
     parentPath: [String],
     originalParentPath: [String],
@@ -1522,10 +1577,10 @@ final class Karabiner2Exporter {
 
         if groupMetadataMatches(appSubgroup, fallbackSubgroup) {
           let sharedStateId = try registry.makeStateId(
-            namespace: stateIdNamespace(for: .appShared, bundleId: nil),
+            namespace: stateIdNamespace(for: sharedScope, bundleId: nil),
             path: path,
             kind: "group.\(groupSignature(for: fallbackSubgroup))",
-            scope: .appShared,
+            scope: sharedScope,
             bundleId: nil
           )
           try collectAppDeltaBindings(
@@ -1533,6 +1588,9 @@ final class Karabiner2Exporter {
             fallbackGroup: fallbackSubgroup,
             appAlias: appAlias,
             bundleId: bundleId,
+            sharedScope: sharedScope,
+            overrideScope: overrideScope,
+            suppressScope: suppressScope,
             parentStateId: sharedStateId,
             parentPath: path,
             originalParentPath: originalPath,
@@ -1542,7 +1600,7 @@ final class Karabiner2Exporter {
         } else {
           try appendFullBinding(
             item: .group(appSubgroup),
-            scope: .appOverride,
+            scope: overrideScope,
             appAlias: appAlias,
             bundleId: bundleId,
             parentStateId: parentStateId,
@@ -1558,7 +1616,7 @@ final class Karabiner2Exporter {
         if isSuppressionAction(appAction) {
           try appendFullBinding(
             item: .action(appAction),
-            scope: .appSuppress,
+            scope: suppressScope,
             appAlias: appAlias,
             bundleId: bundleId,
             parentStateId: parentStateId,
@@ -1571,7 +1629,7 @@ final class Karabiner2Exporter {
         } else if appAction != fallbackAction {
           try appendFullBinding(
             item: .action(appAction),
-            scope: .appOverride,
+            scope: overrideScope,
             appAlias: appAlias,
             bundleId: bundleId,
             parentStateId: parentStateId,
@@ -1586,9 +1644,9 @@ final class Karabiner2Exporter {
       case let (.some(item), .none):
         let scope: StateMapping.Scope
         if case .action(let action) = item, isSuppressionAction(action) {
-          scope = .appSuppress
+          scope = suppressScope
         } else {
-          scope = .appOverride
+          scope = overrideScope
         }
         try appendFullBinding(
           item: item,
@@ -1606,9 +1664,9 @@ final class Karabiner2Exporter {
       case let (.some(item), .some(_)):
         let scope: StateMapping.Scope
         if case .action(let action) = item, isSuppressionAction(action) {
-          scope = .appSuppress
+          scope = suppressScope
         } else {
-          scope = .appOverride
+          scope = overrideScope
         }
         try appendFullBinding(
           item: item,
@@ -1744,11 +1802,178 @@ final class Karabiner2Exporter {
     ]
   }
 
+  private static func normalModeConditions(parentStateId: Int32) -> [[String: Any]] {
+    [
+      variableCondition(name: "leader_state", value: inactiveStateId),
+      variableCondition(name: normalModeEnabledVariable, value: 1),
+      variableUnlessCondition(name: normalModeInputVariable, value: 1),
+      variableCondition(name: normalModeStateVariable, value: parentStateId),
+    ]
+  }
+
+  private static func normalModeControlEvents(for type: Type) -> [Any]? {
+    switch type {
+    case .normalModeEnable:
+      return [
+        karSetVariable(name: normalModeEnabledVariable, value: 1),
+        karSetVariable(name: normalModeInputVariable, value: 0),
+        karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSendUserCommand("normal_on"),
+      ]
+    case .normalModeInput:
+      return [
+        karSetVariable(name: normalModeInputVariable, value: 1),
+        karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+      ]
+    case .normalModeDisable:
+      return [
+        karSetVariable(name: normalModeEnabledVariable, value: 0),
+        karSetVariable(name: normalModeInputVariable, value: 0),
+        karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSendUserCommand("normal_off"),
+      ]
+    default:
+      return nil
+    }
+  }
+
+  private static func normalModeTerminalEvents(stateId: Int32, action: Action) -> [Any] {
+    if let controlEvents = normalModeControlEvents(for: action.type) {
+      return controlEvents
+    }
+
+    var events: [Any] = [
+      karSendUserCommand("stateid \(stateId)"),
+      karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+    ]
+
+    switch action.normalModeAfter ?? .normal {
+    case .normal:
+      events.append(karSetVariable(name: normalModeInputVariable, value: 0))
+    case .input:
+      events.append(karSetVariable(name: normalModeInputVariable, value: 1))
+    case .disabled:
+      events.append(karSetVariable(name: normalModeEnabledVariable, value: 0))
+      events.append(karSetVariable(name: normalModeInputVariable, value: 0))
+      events.append(karSendUserCommand("normal_off"))
+    }
+
+    return events
+  }
+
+  private static func isReservedNormalModeControlKey(_ key: String) -> Bool {
+    guard let (keyCode, modifiers) = parseKarKeySpec(key), modifiers.isEmpty else {
+      return false
+    }
+    return keyCode == "escape" || keyCode == "caps_lock"
+  }
+
+  private static func karNormalIntermediateMappings(
+    from bindings: [ManagedBinding]
+  ) -> [[String: Any]] {
+    bindings.sorted {
+      if $0.parentStateId != $1.parentStateId {
+        return $0.parentStateId < $1.parentStateId
+      }
+      if $0.path != $1.path {
+        return $0.path.lexicographicallyPrecedes($1.path)
+      }
+      return ($0.originalPath.last ?? "") < ($1.originalPath.last ?? "")
+    }.compactMap { binding -> [String: Any]? in
+      guard let key = binding.item.item.key, !isReservedNormalModeControlKey(key),
+            let (keyCode, modifiers) = parseKarKeySpec(key)
+      else {
+        return nil
+      }
+
+      let toEvents: [Any]
+      switch binding.kind {
+      case .group:
+        guard let stateId = binding.stateId else { return nil }
+        toEvents = [karSetVariable(name: normalModeStateVariable, value: stateId)]
+
+      case .action:
+        guard let stateId = binding.stateId,
+              case .action(let action) = binding.item
+        else {
+          return nil
+        }
+        toEvents = normalModeTerminalEvents(stateId: stateId, action: action)
+
+      case .suppress:
+        toEvents = ["vk_none"]
+      }
+
+      return [
+        "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+        "to": toEvents,
+        "condition": normalModeConditions(parentStateId: binding.parentStateId),
+      ]
+    }
+  }
+
+  private static func normalPendingCatchAllMappings(from bindings: [ManagedBinding]) -> [[String: Any]] {
+    let pendingStateIds = Set(bindings.compactMap { binding -> Int32? in
+      guard binding.kind == .group else { return nil }
+      return binding.stateId
+    })
+
+    return pendingStateIds.sorted().map { stateId in
+      [
+        "from": [
+          "any": "key_code",
+          "modifiers": "any",
+        ],
+        "to": [
+          karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+          "vk_none",
+        ],
+        "condition": normalModeConditions(parentStateId: stateId),
+      ]
+    }
+  }
+
+  private static func normalModeEscapeCascadeMappings() -> [[String: Any]] {
+    ["escape", "caps_lock"].flatMap { keyCode -> [[String: Any]] in
+      [
+        [
+          "from": keyCode,
+          "to": [karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId)],
+          "condition": [
+            variableCondition(name: "leader_state", value: inactiveStateId),
+            variableCondition(name: normalModeEnabledVariable, value: 1),
+            variableUnlessCondition(name: normalModeInputVariable, value: 1),
+            variableUnlessCondition(name: normalModeStateVariable, value: normalModeBaseStateId),
+          ],
+        ],
+        [
+          "from": keyCode,
+          "to": [
+            karSetVariable(name: normalModeEnabledVariable, value: 0),
+            karSetVariable(name: normalModeInputVariable, value: 0),
+            karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+            karSendUserCommand("normal_off"),
+          ],
+          "condition": [
+            variableCondition(name: "leader_state", value: inactiveStateId),
+            variableCondition(name: normalModeEnabledVariable, value: 1),
+            variableUnlessCondition(name: normalModeInputVariable, value: 1),
+            variableCondition(name: normalModeStateVariable, value: normalModeBaseStateId),
+          ],
+        ],
+      ]
+    }
+  }
+
   private static func buildManagedExportModel(
     globalConfig: UserConfig,
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) throws -> ManagedExportModel {
-    let appAliases = buildAppAliases(appConfigs: appConfigs)
+    let regularBundleIds = Set(appConfigs.map(\.bundleId))
+    let aliasInputs = appConfigs + normalAppConfigs.filter { !regularBundleIds.contains($0.bundleId) }
+    let appAliases = buildAppAliases(appConfigs: aliasInputs)
+    let appAliasByBundleId = Dictionary(uniqueKeysWithValues: appAliases.map { ($0.bundleId, $0) })
     let registry = StateIdRegistry()
 
     try registry.reserve(
@@ -1886,10 +2111,11 @@ final class Karabiner2Exporter {
     let sharedMappings = karIntermediateMappings(from: sharedCollections.bindings)
 
     var appBindingsByAlias: [String: [ManagedBinding]] = [:]
-    for aliasConfig in appAliases {
+    for appConfig in appConfigs {
+      guard let aliasConfig = appAliasByBundleId[appConfig.bundleId] else { continue }
       var deltaCollections = ManagedBindingCollections()
       try collectAppDeltaBindings(
-        appGroup: aliasConfig.config.root,
+        appGroup: appConfig.config.root,
         fallbackGroup: fallbackRoot,
         appAlias: aliasConfig.alias,
         bundleId: aliasConfig.bundleId,
@@ -1912,6 +2138,71 @@ final class Karabiner2Exporter {
             condition: [["app": aliasConfig.bundleId]]
           ))
       }
+    }
+
+    let normalFallbackRoot = globalConfig.getNormalFallbackConfig()
+    let normalSharedCollections = try collectFullBindings(
+      from: normalFallbackRoot,
+      scope: .normalShared,
+      appAlias: nil,
+      bundleId: nil,
+      rootStateId: normalModeBaseStateId,
+      registry: registry
+    )
+    stateMappings.append(contentsOf: normalSharedCollections.stateMappings)
+    let normalSharedMappings = karNormalIntermediateMappings(from: normalSharedCollections.bindings)
+
+    var allNormalBindings = normalSharedCollections.bindings
+    for normalAppConfig in normalAppConfigs {
+      guard let aliasConfig = appAliasByBundleId[normalAppConfig.bundleId] else { continue }
+      var deltaCollections = ManagedBindingCollections()
+      try collectAppDeltaBindings(
+        appGroup: normalAppConfig.config.root,
+        fallbackGroup: normalFallbackRoot,
+        appAlias: aliasConfig.alias,
+        bundleId: aliasConfig.bundleId,
+        sharedScope: .normalShared,
+        overrideScope: .normalOverride,
+        suppressScope: .normalSuppress,
+        parentStateId: normalModeBaseStateId,
+        parentPath: [],
+        originalParentPath: [],
+        registry: registry,
+        collections: &deltaCollections
+      )
+
+      stateMappings.append(contentsOf: deltaCollections.stateMappings)
+      allNormalBindings.append(contentsOf: deltaCollections.bindings)
+
+      let normalAppMappings = karNormalIntermediateMappings(from: deltaCollections.bindings)
+      if !normalAppMappings.isEmpty {
+        rules.append(
+          makeKarRule(
+            description: "\(managedRuleDescriptionPrefix)NormalAppMode/\(aliasConfig.alias)",
+            mappings: normalAppMappings,
+            condition: [["app": aliasConfig.bundleId]]
+          ))
+      }
+    }
+
+    if !normalSharedMappings.isEmpty {
+      rules.append(
+        makeKarRule(
+          description: "\(managedRuleDescriptionPrefix)NormalFallbackMode",
+          mappings: normalSharedMappings))
+    }
+
+    rules.append(
+      makeKarRule(
+        description: "\(managedRuleDescriptionPrefix)NormalControls",
+        mappings: normalModeEscapeCascadeMappings()))
+
+    let normalCatchAllMappings = normalPendingCatchAllMappings(from: allNormalBindings)
+    if !normalCatchAllMappings.isEmpty {
+      rules.append(
+        makeKarRule(
+          description: "\(managedRuleDescriptionPrefix)NormalCatchAll",
+          mappings: normalCatchAllMappings))
     }
 
     if !sharedMappings.isEmpty {
@@ -2298,6 +2589,12 @@ final class Karabiner2Exporter {
       return "Leader Key - Global Mode"
     case "FallbackMode":
       return "Leader Key - Fallback Mode"
+    case "NormalFallbackMode":
+      return "Leader Key - Normal Fallback Mode"
+    case "NormalControls":
+      return "Leader Key - Normal Mode Controls"
+    case "NormalCatchAll":
+      return "Leader Key - Normal Mode Catch All"
     case "CatchAll":
       return "Leader Key - Catch All"
     default:
@@ -2310,6 +2607,14 @@ final class Karabiner2Exporter {
         return "Leader Key - \(appAlias.customName ?? appAlias.alias)"
       }
       return "Leader Key - \(alias)"
+    }
+
+    if suffix.hasPrefix("NormalAppMode/") {
+      let alias = String(suffix.dropFirst("NormalAppMode/".count))
+      if let appAlias = appAliases.first(where: { $0.alias == alias }) {
+        return "Leader Key - Normal - \(appAlias.customName ?? appAlias.alias)"
+      }
+      return "Leader Key - Normal - \(alias)"
     }
 
     return description
@@ -2395,9 +2700,12 @@ final class Karabiner2Exporter {
   }
 
   private static func canonicalActivationManagedRule(
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) -> [String: Any] {
-    let appAliases = buildAppAliases(appConfigs: appConfigs)
+    let regularBundleIds = Set(appConfigs.map(\.bundleId))
+    let aliasInputs = appConfigs + normalAppConfigs.filter { !regularBundleIds.contains($0.bundleId) }
+    let appAliases = buildAppAliases(appConfigs: aliasInputs)
     var activationMappings: [[String: Any]] = []
 
     for aliasConfig in appAliases {
@@ -2485,9 +2793,13 @@ final class Karabiner2Exporter {
   }
 
   static func generateCanonicalSpecificConfigRules(
-    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)]
+    appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
   ) -> String {
-    let activationRule = canonicalActivationManagedRule(appConfigs: appConfigs)
+    let activationRule = canonicalActivationManagedRule(
+      appConfigs: appConfigs,
+      normalAppConfigs: normalAppConfigs
+    )
     let compiledRule = compileKarIntermediateRule(activationRule)
     let manipulators = compiledRule?["manipulators"] as? [[String: Any]] ?? []
 

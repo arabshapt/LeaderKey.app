@@ -37,6 +37,8 @@ struct GeneralPane: View {
       // Prioritize Fallback App Config
       if key1 == defaultAppConfigDisplayName { return true }
       if key2 == defaultAppConfigDisplayName { return false }
+      if key1 == normalFallbackConfigDisplayName { return true }
+      if key2 == normalFallbackConfigDisplayName { return false }
       // Sort remaining app-specific keys alphabetically
       return key1 < key2
     }
@@ -56,7 +58,7 @@ struct GeneralPane: View {
     }  // Fallback is implicitly handled if path is nil
 
     messageText +=
-      "\n\nReserved names '\(globalDefaultDisplayName)' and '\(defaultAppConfigDisplayName)' are not allowed."
+      "\n\nReserved names '\(globalDefaultDisplayName)', '\(defaultAppConfigDisplayName)', and '\(normalFallbackConfigDisplayName)' are not allowed."
     return messageText
   }
 
@@ -90,7 +92,7 @@ struct GeneralPane: View {
                     .truncationMode(.middle)
                   Spacer()
                   // Simple Rename Button - could be improved with context menu later
-                  if key != globalDefaultDisplayName && key != defaultAppConfigDisplayName {
+                  if !config.isProtectedConfig(displayKey: key) {
                     Button {
                       // Get current custom name or default name to pre-fill
                       if let filePath = config.discoveredConfigFiles[key] {
@@ -238,7 +240,7 @@ struct GeneralPane: View {
                   }
 
                   if useNativeOutlineConfigEditor,
-                    config.extractBundleId(from: config.selectedConfigKeyForEditing) != nil
+                    config.extractRegularAppBundleId(from: config.selectedConfigKeyForEditing) != nil
                   {
                     Button {
                       openCommandScout(forConfigKey: config.selectedConfigKeyForEditing)
@@ -383,7 +385,8 @@ struct GeneralPane: View {
           // Now use if let for the dictionary lookup and combine other checks
           if !newConfigNameInput.isEmpty,
             newConfigNameInput != globalDefaultDisplayName,
-            newConfigNameInput != defaultAppConfigDisplayName
+            newConfigNameInput != defaultAppConfigDisplayName,
+            newConfigNameInput != normalFallbackConfigDisplayName
           {
             // Check for name collisions
             let existingDefaultNamePaths = config.discoveredConfigFiles.filter {
@@ -532,7 +535,7 @@ struct GeneralPane: View {
       return
     }
     guard config.discoveredConfigFiles[configKey] != nil,
-      config.extractBundleId(from: configKey) != nil
+      config.extractRegularAppBundleId(from: configKey) != nil
     else {
       showCommandScoutMissingConfig("Create an app-specific config before opening Command Scout.")
       return
@@ -554,7 +557,7 @@ struct GeneralPane: View {
     guard let bundleId = config.commandScoutPendingBundleId else { return }
     config.commandScoutPendingBundleId = nil
     guard let configKey = config.discoveredConfigFiles.keys.first(where: {
-      config.extractBundleId(from: $0) == bundleId
+      config.extractRegularAppBundleId(from: $0) == bundleId
     }) else {
       showCommandScoutMissingConfig(
         "No app config exists for \(bundleId). Create one first, then run Command Scout.")
@@ -593,6 +596,7 @@ private struct AddConfigSheet: View {
   @State private var manualBundleId = ""
   @State private var customDisplayName = ""
   @State private var selectedTemplate = "Empty"
+  @State private var createsNormalModeConfig = false
 
   private var effectiveBundleId: String {
     if showManualEntry {
@@ -610,6 +614,8 @@ private struct AddConfigSheet: View {
         if key2 == globalDefaultDisplayName { return false }
         if key1 == defaultAppConfigDisplayName { return true }
         if key2 == defaultAppConfigDisplayName { return false }
+        if key1 == normalFallbackConfigDisplayName { return true }
+        if key2 == normalFallbackConfigDisplayName { return false }
         return key1 < key2
       })
     return options
@@ -657,6 +663,9 @@ private struct AddConfigSheet: View {
         presentOpenPanel()
       }
 
+      Toggle("Create normal mode config", isOn: $createsNormalModeConfig)
+        .toggleStyle(.checkbox)
+
       Divider()
 
       // Template selection
@@ -692,7 +701,7 @@ private struct AddConfigSheet: View {
         Button("Create and Scout...") {
           createConfig(openCommandScout: true)
         }
-        .disabled(effectiveBundleId.isEmpty)
+        .disabled(effectiveBundleId.isEmpty || createsNormalModeConfig)
       }
     }
     .padding(24)
@@ -704,7 +713,8 @@ private struct AddConfigSheet: View {
     let createdKey = config.createConfigForApp(
       bundleId: effectiveBundleId,
       templateKey: templateKey,
-      customName: customDisplayName.isEmpty ? nil : customDisplayName
+      customName: customDisplayName.isEmpty ? nil : customDisplayName,
+      normalMode: createsNormalModeConfig
     )
     // Dismiss regardless; success/failure alerts handled in helper
     dismiss()
@@ -746,7 +756,9 @@ struct GeneralPane_Previews: PreviewProvider {
     previewConfig.discoveredConfigFiles = [
       globalDefaultDisplayName: "/path/to/global-config.json",
       defaultAppConfigDisplayName: "/path/to/app-fallback-config.json",
+      normalFallbackConfigDisplayName: "/path/to/normal-fallback-config.json",
       "App: com.app.example": "/path/to/app.com.app.example.json",
+      "Normal: com.app.example": "/path/to/normal-app.com.app.example.json",
       "App: com.another.app": "/path/to/app.com.another.app.json",
     ]
     previewConfig.currentlyEditingGroup = previewConfig.root  // Set initial editing group for preview

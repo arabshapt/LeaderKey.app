@@ -30,6 +30,10 @@ Karabiner Elements (captures keys, detects frontmost app)
 - **Config merging** — app-specific configs merged with fallback via `mergeConfigWithFallback()`
 - **Goku = personal Karabiner source of truth** — `~/.config/karabiner.edn` canonical for arabshapt's setup. `karabiner.ts/configs/arabshapt/default-profile.ts` = generated migration snapshot, not hand-edited. Re-sync: `cd karabiner.ts && npm run sync:arabshapt`
 
+### Normal Mode Work In Progress
+
+For the current Vim-like normal-mode implementation, design decisions, touched files, tests, and continuation prompt, see `tasks/normal-mode-handoff.md`.
+
 ### Config Files (in `~/Library/Application Support/Leader Key/`)
 - `global-config.json` — default global config (always loaded as `root`)
 - `app-fallback-config.json` — fallback merged into every app config

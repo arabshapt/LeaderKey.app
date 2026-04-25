@@ -12,6 +12,7 @@ class StatusItem {
   enum ResolvedAppearance: Equatable {
     case normal
     case active
+    case normalMode
     case reloadSuccess
   }
 
@@ -29,6 +30,11 @@ class StatusItem {
   var statusItem: NSStatusItem?
   var reloadSuccessFeedbackTiming = ReloadSuccessFeedbackTiming()
   private(set) var isShowingReloadSuccessFeedback = false
+  var normalModeActive = false {
+    didSet {
+      updateStatusItemAppearance()
+    }
+  }
   private(set) var renderedAppearance: ResolvedAppearance = .normal
   private var cancellables = Set<AnyCancellable>()
   private var reloadSuccessResetWorkItem: DispatchWorkItem?
@@ -213,6 +219,8 @@ class StatusItem {
     switch resolvedAppearance {
     case .normal, .active:
       button.contentTintColor = nil
+    case .normalMode:
+      button.contentTintColor = NSColor.systemBlue
     case .reloadSuccess:
       button.contentTintColor = NSColor.systemGreen
     }
@@ -221,6 +229,10 @@ class StatusItem {
   private func currentResolvedAppearance() -> ResolvedAppearance {
     if isShowingReloadSuccessFeedback {
       return .reloadSuccess
+    }
+
+    if normalModeActive && appearance == .normal {
+      return .normalMode
     }
 
     switch appearance {
@@ -235,7 +247,7 @@ class StatusItem {
     switch appearance {
     case .normal:
       return NSImage(named: NSImage.Name("StatusItem"))
-    case .active, .reloadSuccess:
+    case .active, .normalMode, .reloadSuccess:
       return NSImage(named: NSImage.Name("StatusItem-filled"))
     }
   }

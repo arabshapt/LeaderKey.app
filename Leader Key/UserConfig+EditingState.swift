@@ -8,11 +8,11 @@ extension UserConfig {
   private func extractBundleIdFromKey(key: String) -> String {
     // If the key matches discovered config patterns, extract bundle ID from the file path
     if let filePath = discoveredConfigFiles[key] {
-      let fileName = (filePath as NSString).lastPathComponent
-      if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
-        let withoutPrefix = String(fileName.dropFirst(appConfigPrefix.count))
-        let withoutSuffix = String(withoutPrefix.dropLast(".json".count))
-        return withoutSuffix
+      switch configFileKind(forPath: filePath) {
+      case .app(let bundleId), .normalApp(let bundleId):
+        return bundleId
+      case .global, .appFallback, .normalFallback, .unknown:
+        break
       }
     }
     // Fallback: assume the key is the bundle ID if it contains dots
@@ -44,7 +44,7 @@ extension UserConfig {
       return
     }
 
-    print("[UserConfig loadConfigForEditing] Loading app config. Key: \(key), Path: \(filePath)")
+    print("[UserConfig loadConfigForEditing] Loading config. Key: \(key), Path: \(filePath)")
     // For non-default configs, set an empty root first to clear any state
     // then load from disk with error handling
     currentlyEditingGroup = emptyRoot
@@ -56,19 +56,24 @@ extension UserConfig {
     {
       // Apply fallback merging for app-specific configs, just like getConfig(for:) does
       let mergedGroup: Group
-      if filePath.contains(appConfigPrefix) && !filePath.contains(defaultAppConfigFileName) {
-        // This is an app-specific config, merge with fallback app config fallback
-        // Extract bundle ID from the key or filename for merging
-        let bundleId = extractBundleIdFromKey(key: key)
+      switch configFileKind(forPath: filePath) {
+      case .app(let bundleId):
         let rawMergedGroup = mergeConfigWithFallback(
           appSpecificConfig: loadedGroup, bundleId: bundleId)
-        // Sort the merged result to ensure app-specific and fallback items are properly intermixed
         mergedGroup = sortGroupRecursively(group: rawMergedGroup)
         print(
           "[UserConfig loadConfigForEditing] Applied fallback merging and sorting for app config '\(key)'"
         )
-      } else {
-        // This is the fallback app config or other config, use as-is
+
+      case .normalApp(let bundleId):
+        let rawMergedGroup = mergeNormalConfigWithFallback(
+          appSpecificConfig: loadedGroup, bundleId: bundleId)
+        mergedGroup = sortGroupRecursively(group: rawMergedGroup)
+        print(
+          "[UserConfig loadConfigForEditing] Applied fallback merging and sorting for normal app config '\(key)'"
+        )
+
+      case .global, .appFallback, .normalFallback, .unknown:
         mergedGroup = loadedGroup
       }
 

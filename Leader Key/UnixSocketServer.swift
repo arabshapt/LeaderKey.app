@@ -202,6 +202,7 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveSettings()
   func unixSocketServerDidReceiveSequence(_ sequence: String)
   func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
+  func unixSocketServerDidReceiveNormalModeStatus(active: Bool)
   func unixSocketServerDidReceiveShake()
   func unixSocketServerRequestState() -> [String: Any]
   func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String)

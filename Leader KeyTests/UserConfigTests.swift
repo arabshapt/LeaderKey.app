@@ -55,7 +55,49 @@ final class UserConfigTests: XCTestCase {
 
     XCTAssertNotEqual(subject.root, emptyRoot)
     XCTAssertTrue(subject.exists)
+    XCTAssertTrue(
+      FileManager.default.fileExists(
+        atPath: (Defaults[.configDir] as NSString).appendingPathComponent("normal-fallback-config.json")
+      )
+    )
     XCTAssertEqual(testAlertManager.shownAlerts.count, 0)
+  }
+
+  func testDiscoversNormalModeConfigsAndMergesFallback() throws {
+    let normalFallback = Group(
+      key: nil,
+      label: "Normal Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(Action(key: "f", type: .command, label: "Fallback", value: "echo fallback", iconPath: nil, activates: nil, stickyMode: nil, macroSteps: nil))]
+    )
+    let normalApp = Group(
+      key: nil,
+      label: "Chrome Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(Action(key: "b", type: .command, label: "Browser", value: "echo browser", iconPath: nil, activates: nil, stickyMode: nil, macroSteps: nil))]
+    )
+    let encoder = JSONEncoder()
+    try encoder.encode(normalFallback).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("normal-fallback-config.json"))
+    )
+    try encoder.encode(normalApp).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("normal-app.com.google.Chrome.json"))
+    )
+
+    subject.ensureAndLoad()
+
+    XCTAssertNotNil(subject.discoveredConfigFiles[normalFallbackConfigDisplayName])
+    XCTAssertNotNil(subject.discoveredConfigFiles["Normal: com.google.Chrome"])
+    XCTAssertEqual(subject.extractNormalAppBundleId(from: "Normal: com.google.Chrome"), "com.google.Chrome")
+
+    let mergedNormal = subject.getNormalConfig(for: "com.google.Chrome")
+    XCTAssertTrue(mergedNormal.actions.contains(where: { $0.item.key == "b" }))
+    XCTAssertTrue(mergedNormal.actions.contains(where: {
+      guard case .action(let action) = $0 else { return false }
+      return action.key == "f" && action.fallbackSource == normalFallbackConfigDisplayName
+    }))
   }
 
   func testCreatesDefaultConfigDirIfNotExists() throws {

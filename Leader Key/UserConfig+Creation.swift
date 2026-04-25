@@ -14,7 +14,8 @@ extension UserConfig {
   func createConfigForApp(
     bundleId: String,
     templateKey: String? = nil,
-    customName: String? = nil
+    customName: String? = nil,
+    normalMode: Bool = false
   ) -> String? {
     let trimmedId = bundleId.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedId.isEmpty else {
@@ -22,13 +23,15 @@ extension UserConfig {
       return nil
     }
 
-    // Destination path  e.g.  app.<bundleId>.json
-    let destFileName = "\(appConfigPrefix)\(trimmedId).json"
+    // Destination path  e.g.  app.<bundleId>.json or normal-app.<bundleId>.json
+    let destFileName = "\(normalMode ? normalAppConfigPrefix : appConfigPrefix)\(trimmedId).json"
     let destPath = (Defaults[.configDir] as NSString).appendingPathComponent(destFileName)
 
     if fileManager.fileExists(atPath: destPath) {
+      let modeLabel = normalMode ? "normal mode " : ""
       alertHandler.showAlert(
-        style: .warning, message: "A configuration for '\(trimmedId)' already exists.")
+        style: .warning,
+        message: "A \(modeLabel)configuration for '\(trimmedId)' already exists.")
       return nil
     }
 
@@ -76,7 +79,7 @@ extension UserConfig {
     self.reloadConfig()
 
     // Calculate the final display key (may include custom name)
-    let defaultDisplay = "App: \(trimmedId)"
+    let defaultDisplay = normalMode ? "Normal: \(trimmedId)" : "App: \(trimmedId)"
 
     let finalDisplayName: String
     if let custom = customName, !custom.isEmpty {

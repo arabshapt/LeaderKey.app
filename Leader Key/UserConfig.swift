@@ -65,6 +65,16 @@ class ClipboardManager: ObservableObject {
 let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actions: [])
 let globalDefaultDisplayName = "Global"
 let defaultAppConfigDisplayName = "Fallback App Config"
+let normalFallbackConfigDisplayName = "Normal Fallback Config"
+
+enum UserConfigFileKind: Equatable {
+  case global
+  case appFallback
+  case app(bundleId: String)
+  case normalFallback
+  case normalApp(bundleId: String)
+  case unknown
+}
 
 class UserConfig: ObservableObject {
   // Root for the default config (global-config.json)
@@ -80,6 +90,8 @@ class UserConfig: ObservableObject {
   let fileName = "global-config.json"
   let appConfigPrefix = "app."
   let defaultAppConfigFileName = "app-fallback-config.json"  // Added default app config filename
+  let normalAppConfigPrefix = "normal-app."
+  let normalFallbackConfigFileName = "normal-fallback-config.json"
   var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
   let alertHandler: AlertHandler
   let fileManager: FileManager
@@ -104,32 +116,94 @@ class UserConfig: ObservableObject {
 
   // MARK: - Public Interface
 
-  // Helper function to extract bundle ID from config filename or display name
+  func configFileKind(forFileName fileName: String) -> UserConfigFileKind {
+    if fileName == self.fileName {
+      return .global
+    }
+
+    if fileName == defaultAppConfigFileName {
+      return .appFallback
+    }
+
+    if fileName == normalFallbackConfigFileName {
+      return .normalFallback
+    }
+
+    if fileName.hasPrefix(normalAppConfigPrefix) && fileName.hasSuffix(".json") {
+      let bundleId = String(fileName.dropFirst(normalAppConfigPrefix.count).dropLast(".json".count))
+      return bundleId.isEmpty ? .unknown : .normalApp(bundleId: bundleId)
+    }
+
+    if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
+      let bundleId = String(fileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
+      guard !bundleId.isEmpty && bundleId != "fallback-config" else { return .unknown }
+      return .app(bundleId: bundleId)
+    }
+
+    return .unknown
+  }
+
+  func configFileKind(forPath filePath: String) -> UserConfigFileKind {
+    configFileKind(forFileName: URL(fileURLWithPath: filePath).lastPathComponent)
+  }
+
+  func configFileKind(forDisplayKey displayName: String) -> UserConfigFileKind {
+    if let filePath = discoveredConfigFiles[displayName] {
+      return configFileKind(forPath: filePath)
+    }
+
+    if displayName == globalDefaultDisplayName {
+      return .global
+    }
+    if displayName == defaultAppConfigDisplayName {
+      return .appFallback
+    }
+    if displayName == normalFallbackConfigDisplayName {
+      return .normalFallback
+    }
+
+    if displayName.hasPrefix("App: ") {
+      let bundleId = String(displayName.dropFirst("App: ".count))
+      return bundleId.isEmpty ? .unknown : .app(bundleId: bundleId)
+    }
+    if displayName.hasPrefix("Normal: ") {
+      let bundleId = String(displayName.dropFirst("Normal: ".count))
+      return bundleId.isEmpty ? .unknown : .normalApp(bundleId: bundleId)
+    }
+
+    return .unknown
+  }
+
+  func isProtectedConfig(displayKey: String) -> Bool {
+    switch configFileKind(forDisplayKey: displayKey) {
+    case .global, .appFallback, .normalFallback:
+      return true
+    case .app, .normalApp, .unknown:
+      return false
+    }
+  }
+
+  // Helper function to extract bundle ID from regular or normal app config filename/display name.
   func extractBundleId(from displayName: String) -> String? {
-    // Check if this is an app-specific config
-    guard displayName != globalDefaultDisplayName && displayName != defaultAppConfigDisplayName
-    else {
+    switch configFileKind(forDisplayKey: displayName) {
+    case .app(let bundleId), .normalApp(let bundleId):
+      return bundleId
+    case .global, .appFallback, .normalFallback, .unknown:
       return nil
     }
+  }
 
-    // First check if we have the file path for this display name
-    if let filePath = discoveredConfigFiles[displayName] {
-      let url = URL(fileURLWithPath: filePath)
-      let filename = url.lastPathComponent
-
-      // Extract bundle ID from filename (app.bundleId.json)
-      if filename.hasPrefix(appConfigPrefix) && filename.hasSuffix(".json") {
-        let bundleId = String(filename.dropFirst(appConfigPrefix.count).dropLast(".json".count))
-
-        return bundleId.isEmpty ? nil : bundleId
-      }
+  func extractRegularAppBundleId(from displayName: String) -> String? {
+    if case .app(let bundleId) = configFileKind(forDisplayKey: displayName) {
+      return bundleId
     }
+    return nil
+  }
 
-    // Fallback: try to extract from display name if it starts with "App: "
-    if displayName.hasPrefix("App: ") {
-      return String(displayName.dropFirst("App: ".count))
+  func extractNormalAppBundleId(from displayName: String) -> String? {
+    if case .normalApp(let bundleId) = configFileKind(forDisplayKey: displayName) {
+      return bundleId
     }
-
     return nil
   }
 
@@ -169,6 +243,7 @@ class UserConfig: ObservableObject {
     self.ensureValidConfigDirectory()
     self.ensureConfigFileExists()  // Ensures default global-config.json exists
     self.ensureDefaultAppConfigExists()  // Ensures default app-fallback-config.json exists
+    self.ensureNormalFallbackConfigExists()
     self.discoverConfigFiles()  // Discover after ensuring both files exist
     self.loadConfig()  // Loads the default config into 'root'
     // Initially, load the default config for editing
@@ -747,6 +822,26 @@ enum Type: String, Codable {
   case menu
   case intellij
   case keystroke
+  case normalModeEnable
+  case normalModeInput
+  case normalModeDisable
+}
+
+extension Type {
+  var isModeControlAction: Bool {
+    switch self {
+    case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
+      return true
+    default:
+      return false
+    }
+  }
+}
+
+enum NormalModeAfter: String, Codable, CaseIterable {
+  case normal
+  case input
+  case disabled
 }
 
 struct MacroStep: Codable, Equatable, Identifiable {
@@ -781,13 +876,14 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var menuFallbackPaths: [String]? = nil
   var stickyMode: Bool?
   var macroSteps: [MacroStep]?
+  var normalModeAfter: NormalModeAfter? = nil
 
   // Metadata for fallback system (not persisted to JSON)
   var isFromFallback: Bool = false
   var fallbackSource: String?
 
   enum CodingKeys: String, CodingKey {
-    case key, type, label, description, aiDescription, value, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps
+    case key, type, label, description, aiDescription, value, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter
     // Exclude isFromFallback and fallbackSource from JSON persistence
   }
 
@@ -802,7 +898,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
       && lhs.description == rhs.description && lhs.aiDescription == rhs.aiDescription
       && lhs.value == rhs.value && lhs.iconPath == rhs.iconPath && lhs.activates == rhs.activates
       && lhs.menuFallbackPaths == rhs.menuFallbackPaths && lhs.stickyMode == rhs.stickyMode
-      && lhs.macroSteps == rhs.macroSteps
+      && lhs.macroSteps == rhs.macroSteps && lhs.normalModeAfter == rhs.normalModeAfter
     // Intentionally exclude isFromFallback and fallbackSource from equality comparison
   }
 
@@ -839,6 +935,14 @@ struct Action: Item, Codable, Equatable, Identifiable {
         return "\(app): \(keystrokeValue.spec)\(suffix)"
       }
       return "Keystroke: \(keystrokeValue.spec)"
+    case .normalModeEnable:
+      return "Enable Normal Mode"
+    case .normalModeInput:
+      return "Normal Mode Input"
+    case .normalModeDisable:
+      return "Disable Normal Mode"
+    case .toggleStickyMode:
+      return "Toggle Sticky Mode"
     default:
       return value
     }
@@ -896,7 +1000,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps
+    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter
   }
 
   init(from decoder: Decoder) throws {
@@ -910,6 +1014,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
     let menuFallbackPaths = try container.decodeIfPresent([String].self, forKey: .menuFallbackPaths)
     let stickyMode = try container.decodeIfPresent(Bool.self, forKey: .stickyMode)
+    let normalModeAfter = try container.decodeIfPresent(NormalModeAfter.self, forKey: .normalModeAfter)
 
     switch type {
     case .group:
@@ -917,13 +1022,14 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       self = .group(
         Group(key: key, label: label, iconPath: iconPath, stickyMode: stickyMode, actions: actions))
     default:
-      let value = try container.decode(String.self, forKey: .value)
+      let value = try container.decodeIfPresent(String.self, forKey: .value) ?? ""
       let macroSteps = try container.decodeIfPresent([MacroStep].self, forKey: .macroSteps)
       self = .action(
         Action(
           key: key, type: type, label: label, description: description, aiDescription: aiDescription,
           value: value, iconPath: iconPath,
-          activates: activates, menuFallbackPaths: menuFallbackPaths, stickyMode: stickyMode, macroSteps: macroSteps))
+          activates: activates, menuFallbackPaths: menuFallbackPaths, stickyMode: stickyMode, macroSteps: macroSteps,
+          normalModeAfter: normalModeAfter))
     }
   }
 
@@ -948,6 +1054,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       try container.encodeIfPresent(action.menuFallbackPaths, forKey: .menuFallbackPaths)
       try container.encodeIfPresent(action.stickyMode, forKey: .stickyMode)
       try container.encodeIfPresent(action.macroSteps, forKey: .macroSteps)
+      try container.encodeIfPresent(action.normalModeAfter, forKey: .normalModeAfter)
     case .group(let group):
       try container.encode(group.key, forKey: .key)
       try container.encode(Type.group, forKey: .type)
@@ -984,7 +1091,8 @@ extension ActionOrGroup {
               delay: step.delay,
               enabled: step.enabled
             )
-          }
+          },
+          normalModeAfter: action.normalModeAfter
         ))
     case .group(let group):
       return .group(

@@ -104,6 +104,18 @@ extension UserConfig {
     }
   }
 
+  internal func ensureNormalFallbackConfigExists() {
+    let normalFallbackConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+      normalFallbackConfigFileName)
+    guard !fileManager.fileExists(atPath: normalFallbackConfigPath) else { return }
+
+    do {
+      try bootstrapNormalFallbackConfig()
+    } catch {
+      handleError(error, critical: false)
+    }
+  }
+
   private func bootstrapConfig() throws {
     guard let data = defaultConfig.data(using: .utf8) else {
       throw NSError(
@@ -126,6 +138,16 @@ extension UserConfig {
     let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
       defaultAppConfigFileName)
     try data.write(to: URL(fileURLWithPath: defaultAppConfigPath))
+  }
+
+  private func bootstrapNormalFallbackConfig() throws {
+    let emptyConfig = Group(key: nil, label: "Normal Fallback", iconPath: nil, stickyMode: nil, actions: [])
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+    let data = try encoder.encode(emptyConfig)
+    let normalFallbackConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+      normalFallbackConfigFileName)
+    try data.write(to: URL(fileURLWithPath: normalFallbackConfigPath))
   }
 
   private func writeFile(data: Data) throws {

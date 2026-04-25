@@ -610,7 +610,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
 
       // Look for an app-specific config key pattern
       for key in config.discoveredConfigFiles.keys {
-        if key.contains(bundleId) {
+        if config.extractRegularAppBundleId(from: key) == bundleId {
           return key
         }
       }
@@ -752,15 +752,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
       let loadedGroup = config.decodeConfig(
         from: filePath, suppressAlerts: true, isDefaultConfig: false)
     {
-      // Apply the same merging logic as loadConfigForEditing
-      // Check if this is an app-specific config (not the fallback)
-      if filePath.contains("app.") && !filePath.contains("app-fallback-config.json") {
-        // Extract bundle ID from the display name
-        let bundleId = config.extractBundleId(from: configKey) ?? ""
+      switch config.configFileKind(forPath: filePath) {
+      case .app(let bundleId):
         let rawMergedGroup = config.mergeConfigWithFallback(
           appSpecificConfig: loadedGroup, bundleId: bundleId)
         rootGroup = config.sortGroupRecursively(group: rawMergedGroup)
-      } else {
+      case .normalApp(let bundleId):
+        let rawMergedGroup = config.mergeNormalConfigWithFallback(
+          appSpecificConfig: loadedGroup, bundleId: bundleId)
+        rootGroup = config.sortGroupRecursively(group: rawMergedGroup)
+      case .global, .appFallback, .normalFallback, .unknown:
         rootGroup = loadedGroup
       }
     } else {
@@ -1258,6 +1259,11 @@ extension AppDelegate {
     inputMethodDidReceiveStateId(stateId, sticky: sticky)
   }
 
+  func unixSocketServerDidReceiveNormalModeStatus(active: Bool) {
+    debugLog("[AppDelegate] Control socket normal mode status: \(active)")
+    setNormalModeStatus(active: active)
+  }
+
   func unixSocketServerDidReceiveShake() {
     debugLog("[AppDelegate] Control socket shake")
     inputMethodDidReceiveShake()
@@ -1277,6 +1283,12 @@ extension AppDelegate {
       // Open settings and trigger Command Scout for this bundleId
       self.config.commandScoutPendingBundleId = bundleId
       self.unixSocketServerDidReceiveSettings()
+    }
+  }
+
+  func setNormalModeStatus(active: Bool) {
+    DispatchQueue.main.async { [weak self] in
+      self?.statusItem.normalModeActive = active
     }
   }
 }
@@ -3052,6 +3064,27 @@ extension AppDelegate {
         return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
       }
       return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+
+    case .normalShared:
+      if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
+        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
+      }
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+
+    case .normalOverride, .normalSuppress:
+      if let bundleId = mapping.bundleId {
+        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
+      }
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+    }
+  }
+
+  private func isNormalModeScope(_ scope: Karabiner2Exporter.StateMapping.Scope) -> Bool {
+    switch scope {
+    case .normalShared, .normalOverride, .normalSuppress:
+      return true
+    case .global, .fallbackOnly, .appShared, .appOverride, .appSuppress:
+      return false
     }
   }
 
@@ -3080,6 +3113,21 @@ extension AppDelegate {
     case .appOverride, .appSuppress:
       let bundleId = activationContext?.bundleId ?? mapping.bundleId
       return config.getConfig(for: bundleId)
+
+    case .normalShared:
+      guard let activationContext else {
+        return config.getNormalFallbackConfig()
+      }
+      switch activationContext.mode {
+      case .defaultOnly, .fallbackOnly:
+        return config.getNormalFallbackConfig()
+      case .appSpecificWithFallback:
+        return config.getNormalConfig(for: activationContext.bundleId)
+      }
+
+    case .normalOverride, .normalSuppress:
+      let bundleId = activationContext?.bundleId ?? mapping.bundleId
+      return config.getNormalConfig(for: bundleId)
     }
   }
   
@@ -3154,6 +3202,7 @@ extension AppDelegate {
     }
 
     let activationContext = resolvedActivationContext(for: mapping)
+    let isNormalModeDispatch = isNormalModeScope(mapping.scope)
     let activationType = activationType(for: activationContext.mode)
     let activationBundleId = bundleIdForShow(context: activationContext)
 
@@ -3178,6 +3227,11 @@ extension AppDelegate {
 
     // Check if this is a group state or an action state
     if mapping.actionType == "group" {
+      if isNormalModeDispatch {
+        debugLog("[AppDelegate] Ignoring normal-mode group state ID \(stateId); group transitions are handled by Karabiner")
+        return
+      }
+
       // This is a group state - show window if needed, then navigate
       debugLog("[AppDelegate] State ID \(stateId) is a group, simulating key navigation for path: \(mapping.path)")
 
@@ -3208,6 +3262,12 @@ extension AppDelegate {
 
       // Resolve lazily so shared fallback state IDs use the current app context when needed.
       if let cachedAction = cachedAction(for: mapping, activationContext: activationContext) {
+        if isNormalModeDispatch {
+          debugLog("[AppDelegate] Executing normal-mode action silently")
+          controller.runAction(cachedAction)
+          return
+        }
+
         if sticky {
           // In sticky mode, show window if needed, then execute action
           ensureWindowVisible { [weak self] in

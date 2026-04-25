@@ -15,6 +15,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
     var lastSequence: String?
     var lastStateId: Int32?
     var lastSticky = false
+    var normalModeActive: Bool?
     var state: [String: Any] = ["active": true, "mode": "karabiner2"]
 
     func unixSocketServerDidReceiveActivation(bundleId: String?) {
@@ -50,6 +51,10 @@ final class KarabinerCommandRouterTests: XCTestCase {
     func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
       lastStateId = stateId
       lastSticky = sticky
+    }
+
+    func unixSocketServerDidReceiveNormalModeStatus(active: Bool) {
+      normalModeActive = active
     }
 
     func unixSocketServerDidReceiveShake() {
@@ -128,6 +133,16 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertEqual(KarabinerCommandRouter.route(command: "shake", delegate: delegate), "OK")
     XCTAssertEqual(delegate.shakeCount, 1)
+  }
+
+  func testRouteNormalModeStatusCommands() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "normal_on", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.normalModeActive, true)
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "normal_off", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.normalModeActive, false)
   }
 
   func testRouteStateReturnsJSON() {

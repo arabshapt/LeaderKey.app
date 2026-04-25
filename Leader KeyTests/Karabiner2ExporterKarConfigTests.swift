@@ -458,6 +458,147 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertFalse(hasConditionType(fallbackManipulator, type: "frontmost_application_if"))
   }
 
+  func testGenerateKarabinerTSExportIncludesNormalModeRulesAndGuards() throws {
+    let globalConfig = UserConfig()
+    globalConfig.root.actions = [
+      .action(makeCommandAction(key: "x", label: "Global X", value: "echo global"))
+    ]
+
+    let normalFallbackRoot = Group(
+      key: nil,
+      label: "Normal Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeCommandAction(key: "f", label: "Fallback", value: "echo fallback")),
+        .group(
+          Group(
+            key: "g",
+            label: "Go",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [.action(makeCommandAction(key: "x", label: "Nested", value: "echo nested"))]
+          )
+        ),
+      ]
+    )
+    let normalAppConfig = UserConfig()
+    normalAppConfig.root = Group(
+      key: nil,
+      label: "Chrome Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(makeCommandAction(key: "b", label: "Browser", value: "echo browser"))]
+    )
+
+    try withTemporaryConfigDirectory(normalFallbackRoot: normalFallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [],
+        normalAppConfigs: [(bundleId: "com.google.Chrome", config: normalAppConfig, customName: "Chrome")]
+      )
+
+      let descriptions = result.managedRules.compactMap { $0["description"] as? String }
+      let normalAppIndex = try XCTUnwrap(descriptions.firstIndex(of: "LeaderKeyManaged/NormalAppMode/chrome"))
+      let normalFallbackIndex = try XCTUnwrap(descriptions.firstIndex(of: "LeaderKeyManaged/NormalFallbackMode"))
+      XCTAssertLessThan(normalAppIndex, normalFallbackIndex)
+      XCTAssertTrue(descriptions.contains("LeaderKeyManaged/NormalControls"))
+      XCTAssertTrue(descriptions.contains("LeaderKeyManaged/NormalCatchAll"))
+
+      let normalAppRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalAppMode/chrome" })
+      )
+      let normalAppManipulator = try XCTUnwrap(flattenManipulators(from: [normalAppRule]).first(where: {
+        fromKeyCode(in: $0) == "b"
+      }))
+      XCTAssertTrue(hasVariableCondition(normalAppManipulator, name: "leader_state", value: 0, type: "variable_if"))
+      XCTAssertTrue(hasVariableCondition(normalAppManipulator, name: "leaderkey_normal_enabled", value: 1, type: "variable_if"))
+      XCTAssertTrue(hasVariableCondition(normalAppManipulator, name: "leaderkey_normal_input", value: 1, type: "variable_unless"))
+      XCTAssertTrue(hasVariableCondition(normalAppManipulator, name: "leaderkey_normal_state", value: 0, type: "variable_if"))
+      XCTAssertTrue(hasConditionType(normalAppManipulator, type: "frontmost_application_if"))
+      XCTAssertTrue(hasSendUserCommand(manipulator: normalAppManipulator, prefix: "stateid "))
+
+      let normalFallbackRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalFallbackMode" })
+      )
+      let normalFallbackManipulators = flattenManipulators(from: [normalFallbackRule])
+      XCTAssertTrue(normalFallbackManipulators.contains(where: { fromKeyCode(in: $0) == "f" }))
+      XCTAssertTrue(normalFallbackManipulators.contains(where: {
+        fromKeyCode(in: $0) == "g"
+          && hasSetVariableNamed($0, name: "leaderkey_normal_state")
+          && !hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalShared && $0.actionType == "action" && $0.path == ["f"]
+      }))
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalOverride && $0.actionType == "action" && $0.path == ["b"]
+      }))
+      XCTAssertFalse(result.stateMappings.contains(where: {
+        ($0.scope == .normalShared || $0.scope == .normalOverride) && $0.actionType == "group"
+      }))
+
+      let globalStateId = try XCTUnwrap(result.stateMappings.first(where: {
+        $0.scope == .global && $0.path == ["x"]
+      })?.stateId)
+      let normalStateId = try XCTUnwrap(result.stateMappings.first(where: {
+        $0.scope == .normalShared && $0.path == ["g", "x"]
+      })?.stateId)
+      XCTAssertNotEqual(globalStateId, normalStateId)
+    }
+  }
+
+  func testNormalModeAfterAndEscapeCascadeExport() throws {
+    let normalFallbackRoot = Group(
+      key: nil,
+      label: "Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeCommandAction(key: "i", label: "After Input", value: "echo input", normalModeAfter: .input)),
+        .action(makeCommandAction(key: "d", label: "After Disabled", value: "echo disabled", normalModeAfter: .disabled)),
+        .action(makeCommandAction(key: "escape", label: "Reserved Escape", value: "echo should-not-export")),
+      ]
+    )
+
+    try withTemporaryConfigDirectory(normalFallbackRoot: normalFallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: UserConfig(), appConfigs: [])
+      let allManipulators = flattenManipulators(from: result.managedRules)
+
+      let inputMapping = try XCTUnwrap(allManipulators.first(where: {
+        fromKeyCode(in: $0) == "i" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_input", value: 1))
+
+      let disabledMapping = try XCTUnwrap(allManipulators.first(where: {
+        fromKeyCode(in: $0) == "d" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: disabledMapping, name: "leaderkey_normal_enabled", value: 0))
+      XCTAssertTrue(hasSendUserCommand(manipulator: disabledMapping, prefix: "normal_off"))
+
+      let escapeStateIdMappings = allManipulators.filter {
+        fromKeyCode(in: $0) == "escape" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }
+      XCTAssertTrue(escapeStateIdMappings.isEmpty)
+
+      let escapeResetMapping = try XCTUnwrap(allManipulators.first(where: {
+        fromKeyCode(in: $0) == "escape"
+          && hasVariableCondition($0, name: "leaderkey_normal_state", value: 0, type: "variable_unless")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: escapeResetMapping, name: "leaderkey_normal_state", value: 0))
+      XCTAssertFalse(hasSetVariable(manipulator: escapeResetMapping, name: "leaderkey_normal_enabled", value: 0))
+
+      let escapeDisableMapping = try XCTUnwrap(allManipulators.first(where: {
+        fromKeyCode(in: $0) == "escape"
+          && hasVariableCondition($0, name: "leaderkey_normal_state", value: 0, type: "variable_if")
+          && hasSendUserCommand(manipulator: $0, prefix: "normal_off")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: escapeDisableMapping, name: "leaderkey_normal_enabled", value: 0))
+      XCTAssertTrue(hasVariableCondition(escapeDisableMapping, name: "leaderkey_normal_input", value: 1, type: "variable_unless"))
+    }
+  }
+
   func testGenerateKarabinerTSExportRemovesLegacyLeaderVariables() throws {
     let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: makeSampleConfig(), appConfigs: [])
     let serialized = String(data: try serializeJSON(result.managedRules), encoding: .utf8) ?? ""
@@ -742,7 +883,12 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     return config
   }
 
-  private func makeCommandAction(key: String, label: String, value: String) -> Action {
+  private func makeCommandAction(
+    key: String,
+    label: String,
+    value: String,
+    normalModeAfter: NormalModeAfter? = nil
+  ) -> Action {
     Action(
       key: key,
       type: .command,
@@ -751,7 +897,8 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       iconPath: nil,
       activates: nil,
       stickyMode: nil,
-      macroSteps: nil
+      macroSteps: nil,
+      normalModeAfter: normalModeAfter
     )
   }
 
@@ -770,6 +917,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
 
   private func withTemporaryConfigDirectory(
     fallbackRoot: Group? = nil,
+    normalFallbackRoot: Group? = nil,
     body: () throws -> Void
   ) throws {
     let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -783,6 +931,12 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       let fallbackPath = tempDirectory.appendingPathComponent("app-fallback-config.json")
       let data = try JSONEncoder().encode(fallbackRoot)
       try data.write(to: fallbackPath, options: .atomic)
+    }
+
+    if let normalFallbackRoot {
+      let normalFallbackPath = tempDirectory.appendingPathComponent("normal-fallback-config.json")
+      let data = try JSONEncoder().encode(normalFallbackRoot)
+      try data.write(to: normalFallbackPath, options: .atomic)
     }
 
     Defaults[.configDir] = tempDirectory.path
@@ -974,6 +1128,21 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       }
 
     return variableName == name && variableValue.intValue == value
+    }
+  }
+
+  private func hasSetVariableNamed(_ manipulator: [String: Any], name: String) -> Bool {
+    let events = (manipulator["to"] as? [Any]) ?? []
+    return events.contains { event in
+      guard
+        let eventObject = event as? [String: Any],
+        let variableObject = eventObject["set_variable"] as? [String: Any],
+        let variableName = variableObject["name"] as? String
+      else {
+        return false
+      }
+
+      return variableName == name
     }
   }
 

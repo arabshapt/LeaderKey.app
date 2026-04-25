@@ -53,6 +53,31 @@ extension UserConfig {
     // Fallback to default global-config.json (already loaded into self.root)
     return root
   }
+
+  func getNormalFallbackConfig() -> Group {
+    let normalFallbackKey = "normal.default"
+
+    if let cachedNormalFallbackConfig = appConfigs[normalFallbackKey] {
+      return cachedNormalFallbackConfig ?? Group(actions: [])
+    }
+
+    let normalFallbackConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
+      normalFallbackConfigFileName)
+    if fileManager.fileExists(atPath: normalFallbackConfigPath) {
+      if let normalFallbackRoot = decodeConfig(
+        from: normalFallbackConfigPath, suppressAlerts: true, isDefaultConfig: false)
+      {
+        appConfigs[normalFallbackKey] = normalFallbackRoot
+        return normalFallbackRoot
+      } else {
+        appConfigs[normalFallbackKey] = nil
+      }
+    } else {
+      appConfigs[normalFallbackKey] = nil
+    }
+
+    return Group(actions: [])
+  }
   
   // Gets the fallback config with all items marked as isFromFallback
   // This is used when __FALLBACK__ is explicitly activated
@@ -113,6 +138,40 @@ extension UserConfig {
 
     // 2. Try fallback app config, then default global-config.json
     return getFallbackConfig()
+  }
+
+  func getNormalConfig(for bundleId: String?) -> Group {
+    guard let bundleId = bundleId, !bundleId.isEmpty else {
+      return getNormalFallbackConfig()
+    }
+
+    let cacheKey = "normal.\(bundleId)"
+    if let cachedConfig = appConfigs[cacheKey] {
+      return cachedConfig ?? getNormalFallbackConfig()
+    }
+
+    let normalFileName = "\(normalAppConfigPrefix)\(bundleId).json"
+    let normalConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(normalFileName)
+
+    if fileManager.fileExists(atPath: normalConfigPath) {
+      if let normalAppRoot = decodeConfig(
+        from: normalConfigPath, suppressAlerts: true, isDefaultConfig: false)
+      {
+        let rawMergedConfig = mergeNormalConfigWithFallback(
+          appSpecificConfig: normalAppRoot,
+          bundleId: bundleId
+        )
+        let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
+        appConfigs[cacheKey] = mergedConfig
+        return mergedConfig
+      } else {
+        appConfigs[cacheKey] = nil
+      }
+    } else {
+      appConfigs[cacheKey] = nil
+    }
+
+    return getNormalFallbackConfig()
   }
 
   // Helper to decode a config file from a given path
@@ -351,6 +410,26 @@ extension UserConfig {
       appSpecificGroup: appSpecificConfig,
       fallbackGroup: fallbackConfig,
       fallbackSource: defaultAppConfigDisplayName
+    )
+  }
+
+  internal func mergeNormalConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
+    let fallbackConfig = getNormalFallbackConfig()
+    let normalFallbackKey = "normal.default"
+    guard appConfigs[normalFallbackKey] != nil else {
+      debugLog(
+        "[UserConfig] mergeNormalConfigWithFallback: No normal fallback config available, returning app-specific config as-is"
+      )
+      return appSpecificConfig
+    }
+
+    debugLog(
+      "[UserConfig] mergeNormalConfigWithFallback: Merging normal app config for '\(bundleId)' with normal fallback config"
+    )
+    return mergeWithFallback(
+      appSpecificGroup: appSpecificConfig,
+      fallbackGroup: fallbackConfig,
+      fallbackSource: normalFallbackConfigDisplayName
     )
   }
 }

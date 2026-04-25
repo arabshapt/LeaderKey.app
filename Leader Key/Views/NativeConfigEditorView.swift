@@ -1315,6 +1315,9 @@ private struct ConfigInspectorView: View {
         Text("IntelliJ").tag(Type.intellij)
         Text("Keystroke").tag(Type.keystroke)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+        Text("Normal Mode Enable").tag(Type.normalModeEnable)
+        Text("Normal Mode Input").tag(Type.normalModeInput)
+        Text("Normal Mode Disable").tag(Type.normalModeDisable)
         Text("Macro").tag(Type.macro)
       }
 
@@ -1352,7 +1355,7 @@ private struct ConfigInspectorView: View {
         }
       }
 
-      if action.type != .toggleStickyMode {
+      if !action.type.isModeControlAction {
         Toggle(
           "Sticky Mode",
           isOn: Binding(
@@ -1365,6 +1368,24 @@ private struct ConfigInspectorView: View {
           )
         )
         .toggleStyle(.checkbox)
+      }
+
+      if !action.type.isModeControlAction {
+        Picker(
+          "Normal Mode After",
+          selection: Binding(
+            get: { action.normalModeAfter ?? .normal },
+            set: { newValue in
+              var updated = action
+              updated.normalModeAfter = newValue == .normal ? nil : newValue
+              session.updateSelectedAction(updated)
+            }
+          )
+        ) {
+          Text("Normal").tag(NormalModeAfter.normal)
+          Text("Input").tag(NormalModeAfter.input)
+          Text("Disabled").tag(NormalModeAfter.disabled)
+        }
       }
 
       HStack(spacing: 8) {
@@ -1423,7 +1444,7 @@ private struct ConfigInspectorView: View {
           .lineLimit(1)
           .truncationMode(.middle)
       }
-    case .toggleStickyMode:
+    case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
       Text("No value required")
         .font(.caption)
         .foregroundColor(.secondary)

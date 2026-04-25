@@ -34,7 +34,13 @@ extension UserConfig {
 
     // --- FALLBACK STRIPPING (for app-specific configs only) ---
     var groupToProcess = currentlyEditingGroup
-    let isAppSpecificConfig = selectedConfigKeyForEditing != globalDefaultDisplayName
+    let isAppSpecificConfig: Bool
+    switch configFileKind(forPath: filePath) {
+    case .app, .normalApp:
+      isAppSpecificConfig = true
+    case .global, .appFallback, .normalFallback, .unknown:
+      isAppSpecificConfig = false
+    }
 
     if isAppSpecificConfig {
       print(

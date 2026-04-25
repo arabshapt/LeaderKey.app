@@ -137,8 +137,9 @@ final class Karabiner2InputMethod: InputMethod {
     let globalConfig = userConfig
     
     // 2. Discover all app configs in Application Support directory
-    let configDir = NSHomeDirectory() + "/Library/Application Support/Leader Key"
+    let configDir = Defaults[.configDir]
     var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
+    var normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
     
     do {
       let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
@@ -180,6 +181,38 @@ final class Karabiner2InputMethod: InputMethod {
             debugLog("[Karabiner2InputMethod] Adding to appConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
             appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: customName))
           }
+        } else if file.hasPrefix("normal-app.") && file.hasSuffix(".json") && !file.hasSuffix(".meta.json") {
+          let bundleId = String(file.dropFirst("normal-app.".count).dropLast(5))
+
+          if bundleId.contains("Leader-Key") || bundleId.contains("leaderkey") || bundleId.contains(".meta") {
+            debugLog("[Karabiner2InputMethod] Skipping normal config: bundleId=\(bundleId)")
+            continue
+          }
+
+          debugLog("[Karabiner2InputMethod] Processing normal file: \(file) → bundleId: \(bundleId)")
+
+          var customName: String? = nil
+          let metaFilePath = configDir + "/normal-app.\(bundleId).meta.json"
+          if FileManager.default.fileExists(atPath: metaFilePath) {
+            do {
+              let metaData = try Data(contentsOf: URL(fileURLWithPath: metaFilePath))
+              let metadata = try JSONDecoder().decode(Karabiner2Exporter.AppMetadata.self, from: metaData)
+              customName = metadata.customName
+              debugLog("[Karabiner2InputMethod] Found normal custom name for \(bundleId): \(customName ?? "nil")")
+            } catch {
+              debugLog("[Karabiner2InputMethod] Failed to read normal meta file for \(bundleId): \(error)")
+            }
+          }
+
+          let normalConfigPath = configDir + "/" + file
+          if let normalConfig = loadAndMergeNormalAppConfig(
+            bundleId: bundleId,
+            configPath: normalConfigPath,
+            globalConfig: globalConfig
+          ) {
+            debugLog("[Karabiner2InputMethod] Adding to normalAppConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
+            normalAppConfigs.append((bundleId: bundleId, config: normalConfig, customName: customName))
+          }
         }
       }
     } catch {
@@ -187,24 +220,34 @@ final class Karabiner2InputMethod: InputMethod {
     }
     
     let discoveryElapsed = CFAbsoluteTimeGetCurrent() - pipelineStart
-    debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs")
+    debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs and \(normalAppConfigs.count) normal app configs")
     debugLog("[Benchmark] Config discovery: \(String(format: "%.0f", discoveryElapsed * 1000))ms")
 
     let backend = Defaults[.karabiner2Backend].normalized
     if backend.usesKarabinerTsExport {
       let karabinerTsStart = CFAbsoluteTimeGetCurrent()
-      exportUsingKarabinerTS(globalConfig: globalConfig, appConfigs: appConfigs)
+      exportUsingKarabinerTS(
+        globalConfig: globalConfig,
+        appConfigs: appConfigs,
+        normalAppConfigs: normalAppConfigs
+      )
       debugLog("[Benchmark] karabiner.ts export: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - karabinerTsStart) * 1000))ms")
       debugLog("[Benchmark] Total pipeline: \(String(format: "%.0f", (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000))ms")
       return
     }
 
-    exportUsingLegacyGoku(globalConfig: globalConfig, appConfigs: appConfigs, pipelineStart: pipelineStart)
+    exportUsingLegacyGoku(
+      globalConfig: globalConfig,
+      appConfigs: appConfigs,
+      normalAppConfigs: normalAppConfigs,
+      pipelineStart: pipelineStart
+    )
   }
 
   private func exportUsingLegacyGoku(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = [],
     pipelineStart: CFAbsoluteTime
   ) {
     // Generate unified EDN with hierarchical organization
@@ -214,7 +257,8 @@ final class Karabiner2InputMethod: InputMethod {
     do {
       (ednContent, stateMappings) = try Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
         globalConfig: globalConfig,
-        appConfigs: appConfigs
+        appConfigs: appConfigs,
+        normalAppConfigs: normalAppConfigs
       )
     } catch {
       debugLog("[Karabiner2InputMethod] Failed to generate unified Goku EDN: \(error)")
@@ -255,7 +299,8 @@ final class Karabiner2InputMethod: InputMethod {
         includeActivationShortcuts: true  // Always extract, but we'll decide whether to inject
       )
       let specificConfigRules = Karabiner2Exporter.generateCanonicalSpecificConfigRules(
-        appConfigs: appConfigs
+        appConfigs: appConfigs,
+        normalAppConfigs: normalAppConfigs
       )
       
       // Prepare rules for injection
@@ -332,6 +377,7 @@ final class Karabiner2InputMethod: InputMethod {
   private func exportUsingKarabinerTS(
     globalConfig: UserConfig,
     appConfigs: [(bundleId: String, config: UserConfig, customName: String?)],
+    normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = [],
     precomputedExport: Karabiner2Exporter.KarabinerTSExport? = nil
   ) {
     let service = KarabinerTsExportService.shared
@@ -346,7 +392,8 @@ final class Karabiner2InputMethod: InputMethod {
       } else {
         export = try Karabiner2Exporter.generateKarabinerTSExport(
           globalConfig: globalConfig,
-          appConfigs: appConfigs
+          appConfigs: appConfigs,
+          normalAppConfigs: normalAppConfigs
         )
       }
       let t1 = CFAbsoluteTimeGetCurrent()
@@ -472,6 +519,14 @@ final class Karabiner2InputMethod: InputMethod {
     let appConfig = UserConfig()
     appConfig.root = mergedRoot
     return appConfig
+  }
+
+  private func loadAndMergeNormalAppConfig(bundleId: String, configPath: String, globalConfig: UserConfig) -> UserConfig? {
+    let mergedRoot = globalConfig.getNormalConfig(for: bundleId)
+
+    let normalConfig = UserConfig()
+    normalConfig.root = mergedRoot
+    return normalConfig
   }
 
   private func isKarabinerRunning() -> Bool {
