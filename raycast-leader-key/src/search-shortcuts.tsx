@@ -30,13 +30,29 @@ import { RecordEditorForm } from "./editor-form.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { isNormalScope } from "./scope-utils.js";
 import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
 const MAX_VISIBLE_RESULTS = 300;
 
 function browseTargetPath(record: FlatIndexRecord): string[] {
-  return record.kind === "group" ? record.effectiveKeyPath : record.parentEffectiveKeyPath;
+  return record.kind === "group" || record.kind === "layer" ? record.effectiveKeyPath : record.parentEffectiveKeyPath;
+}
+
+function isContainerRecord(record: FlatIndexRecord): boolean {
+  return record.kind === "group" || record.kind === "layer";
+}
+
+function recordKindLabel(record: Pick<FlatIndexRecord, "kind">): string {
+  switch (record.kind) {
+    case "group":
+      return "group";
+    case "layer":
+      return "layer";
+    case "action":
+      return "action";
+  }
 }
 
 export default function SearchShortcutsCommand() {
@@ -48,7 +64,7 @@ export default function SearchShortcutsCommand() {
   const extensionName = environment.extensionName;
   const literalTypedPath = Array.from(searchText.trim());
   const typedPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
-  const typedPathItemIds = typedPathTitle ? ["typed-path:create-action", "typed-path:create-group"] : [];
+  const typedPathItemIds = typedPathTitle ? ["typed-path:create-action", "typed-path:create-group", "typed-path:create-layer"] : [];
 
   const results = payload ? searchRecords(payload.records, searchText) : [];
   const visibleResults = results.slice(0, MAX_VISIBLE_RESULTS);
@@ -84,7 +100,7 @@ export default function SearchShortcutsCommand() {
       const clipboardPayload = await copyRecordToInternalClipboard(record);
       await showToast({
         style: Toast.Style.Success,
-        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        title: `Copied ${clipboardPayload.kind}`,
         message: clipboardPayload.sourceDisplayLabel,
       });
     } catch (error) {
@@ -303,12 +319,47 @@ export default function SearchShortcutsCommand() {
               </ActionPanel>
             }
           />
+          <List.Item
+            detail={activeSelectedId === "typed-path:create-layer" ? (
+              <List.Item.Detail
+                markdown={[
+                  "# Create Layer by Typed Path",
+                  "",
+                  `Treat \`${searchText.trim()}\` as the literal Leader Key sequence \`${typedPathTitle}\`.`,
+                  "",
+                  "Pick a config next and create a normal-mode layer there.",
+                ].join("\n")}
+              />
+            ) : undefined}
+            icon={Icon.Layers}
+            id="typed-path:create-layer"
+            title={`Create Layer at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.Layers}
+                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="layer"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Layer"
+                />
+              </ActionPanel>
+            }
+          />
         </List.Section>
       ) : null}
       {visibleResults.map((record) => {
         const row = buildRowPresentation(record);
         const isSelected = activeSelectedId === record.id;
-        const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
+        const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
           ? { modifiers: ["cmd"], key: "return" }
           : { modifiers: ["cmd"], key: "." };
         const createOverrideTitle = record.effectiveScope === "normalApp"
@@ -326,7 +377,7 @@ export default function SearchShortcutsCommand() {
             title={row.title}
             actions={
               <ActionPanel>
-                {record.kind === "group" ? (
+                {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.ChevronRight}
                     shortcut={{ key: "return", modifiers: [] }}
@@ -340,7 +391,7 @@ export default function SearchShortcutsCommand() {
                         preferredEditor={preferredEditor}
                       />
                     }
-                    title="Open Group"
+                    title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
                 ) : (
                   <Action.Push
@@ -370,7 +421,7 @@ export default function SearchShortcutsCommand() {
                   icon={Icon.CopyClipboard}
                   onAction={() => void handleCopy(record)}
                   shortcut={{ modifiers: ["cmd"], key: "c" }}
-                  title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                  title={`Copy ${recordKindLabel(record)}`}
                 />
                 <Action
                   icon={Icon.Code}
@@ -399,9 +450,9 @@ export default function SearchShortcutsCommand() {
                       preferredEditor={preferredEditor}
                     />
                   }
-                  title={record.kind === "group" ? "Browse Group in Config" : "Browse in Config"}
+                  title={isContainerRecord(record) ? `Browse ${record.kind === "layer" ? "Layer" : "Group"} in Config` : "Browse in Config"}
                 />
-                {record.kind === "group" ? (
+                {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.Pencil}
                     shortcut={Keyboard.Shortcut.Common.Edit}
@@ -412,7 +463,7 @@ export default function SearchShortcutsCommand() {
                         record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`,
                       )
                     }
-                    title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
+                    title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                   />
                 ) : null}
                 {record.inherited ? (
@@ -456,7 +507,26 @@ export default function SearchShortcutsCommand() {
                   }
                   title="Create Sibling Group"
                 />
-                {record.kind === "group" ? (
+                {isNormalScope(record.effectiveScope) ? (
+                  <Action.Push
+                    icon={Icon.Layers}
+                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        initialType="layer"
+                        mode="create-sibling"
+                        onDidSave={async (nextPayload) => {
+                          setPayload(nextPayload);
+                        }}
+                        targetRecord={record}
+                        title={`Create Sibling Layer After ${record.displayLabel}`}
+                      />
+                    }
+                    title="Create Sibling Layer"
+                  />
+                ) : null}
+                {isContainerRecord(record) ? (
                   <>
                     <Action.Push
                       icon={Icon.Plus}
@@ -481,6 +551,25 @@ export default function SearchShortcutsCommand() {
                       }
                       title="Append Child Group"
                     />
+                    {isNormalScope(record.effectiveScope) ? (
+                      <Action.Push
+                        icon={Icon.Layers}
+                        shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+                        target={
+                          <RecordEditorForm
+                            configDirectory={configDirectory}
+                            initialType="layer"
+                            mode="append-child"
+                            onDidSave={async (nextPayload) => {
+                              setPayload(nextPayload);
+                            }}
+                            targetRecord={record}
+                            title={`Append Child Layer to ${record.displayLabel}`}
+                          />
+                        }
+                        title="Append Child Layer"
+                      />
+                    ) : null}
                   </>
                 ) : null}
                 {!record.inherited ? (

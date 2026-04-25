@@ -69,6 +69,8 @@ function humanTitle(record: FlatIndexRecord): string {
       return record.displayLabel.startsWith("Open ") ? record.displayLabel : `Open ${record.displayLabel}`;
     case "group":
       return `${record.displayLabel} Group`;
+    case "layer":
+      return `${record.displayLabel} Layer`;
   }
 }
 
@@ -142,6 +144,10 @@ function plainEnglishSummary(record: FlatIndexRecord): string {
     case "group": {
       const count = record.childCount ?? 0;
       return `This group contains ${count} child item${count === 1 ? "" : "s"}.`;
+    }
+    case "layer": {
+      const count = record.childCount ?? 0;
+      return `This hold layer is active while its trigger key is held and contains ${count} child item${count === 1 ? "" : "s"}.`;
     }
   }
 }

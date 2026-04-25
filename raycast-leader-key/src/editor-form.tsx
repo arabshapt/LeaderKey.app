@@ -11,6 +11,7 @@ import {
 } from "@raycast/api";
 import {
   appendChildToGroup,
+  generateActionLabel,
   macroStepSummary,
   createItemAtPath,
   deleteRecord,
@@ -24,6 +25,7 @@ import {
   insertSiblingAfter,
   triggerLeaderKeyConfigReload,
   type ConfigItem,
+  type ActionNode,
   type FlatIndexRecord,
   updateRecord,
   updateRecordAtPath,
@@ -33,6 +35,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formStateToActionNode, isModeControlActionType, validateActionNode } from "./action-form.js";
 import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
+import { isNormalConfigPath } from "./scope-utils.js";
 import {
   emptyFormState,
   formatFullPath,
@@ -102,9 +105,21 @@ function formStateToItem(
     };
   }
 
+  if (state.type === "layer") {
+    const preservedLayer = preserveItem?.type === "layer" ? preserveItem : undefined;
+    return {
+      actions: preservedLayer?.actions ?? [],
+      iconPath: preservedLayer?.iconPath,
+      key,
+      label: state.label.trim() || undefined,
+      tapAction: state.tapAction,
+      type: "layer",
+    };
+  }
+
   const action = formStateToActionNode(state, {
     menuAppName,
-    preserveAction: preserveItem?.type === "group" ? undefined : preserveItem,
+    preserveAction: preserveItem?.type === "group" || preserveItem?.type === "layer" ? undefined : preserveItem,
   });
   return {
     ...action,
@@ -118,6 +133,16 @@ function validateItem(item: ConfigItem): string | undefined {
   }
 
   if (item.type === "group") {
+    return undefined;
+  }
+
+  if (item.type === "layer") {
+    if (item.tapAction) {
+      const tapActionError = validateActionNode(item.tapAction);
+      if (tapActionError) {
+        return `Tap action: ${tapActionError}`;
+      }
+    }
     return undefined;
   }
 
@@ -244,6 +269,140 @@ function inferredMenuAppName(
     : undefined;
 }
 
+function tapActionSummary(action?: ActionNode): string {
+  if (!action) {
+    return "Short taps pass the original key through.";
+  }
+
+  return generateActionLabel(action, {
+    breadcrumbPath: [],
+    configDisplayName: "",
+    inherited: false,
+  });
+}
+
+interface LayerTapActionEditorProps {
+  defaultMenuAppName?: string;
+  initialTapAction?: ActionNode;
+  installedApps: Array<{ bundlePath: string; name: string }>;
+  onChange: (action: ActionNode) => void;
+}
+
+function LayerTapActionEditor(props: LayerTapActionEditorProps) {
+  const { defaultMenuAppName, initialTapAction, installedApps, onChange } = props;
+  const [tapState, setTapState] = useState<ItemFormState>(() =>
+    itemToFormState(initialTapAction ?? { type: "shortcut", value: "" }),
+  );
+  const { pop } = useNavigation();
+  const tapMacroSummary = useMemo(
+    () => macroStepSummary({
+      macroSteps: tapState.macroSteps,
+      type: "macro",
+      value: "",
+    }),
+    [tapState.macroSteps],
+  );
+
+  async function handleSubmitTapAction(): Promise<void> {
+    const nextMenuAppName = selectedMenuAppNameFor(tapState, defaultMenuAppName, installedApps);
+    const nextAction = formStateToActionNode(tapState, {
+      menuAppName: nextMenuAppName,
+      preserveAction: initialTapAction,
+    });
+    const error = validateActionNode(nextAction);
+    if (error) {
+      await showToast({ style: Toast.Style.Failure, title: error });
+      return;
+    }
+
+    onChange(nextAction);
+    pop();
+  }
+
+  return (
+    <Form
+      actions={
+        <ActionPanel>
+          <ActionValueFieldActions
+            defaultMenuAppName={defaultMenuAppName}
+            formState={tapState}
+            installedApps={installedApps}
+            setFormState={setTapState}
+          />
+          {tapState.type === "macro" ? (
+            <Action.Push
+              icon={Icon.List}
+              target={
+                <MacroStepsEditor
+                  defaultMenuAppName={defaultMenuAppName}
+                  initialSteps={tapState.macroSteps}
+                  installedApps={installedApps}
+                  onChange={(macroSteps) => setTapState((current) => ({ ...current, macroSteps }))}
+                  title="Edit Tap Action Macro Steps"
+                />
+              }
+              title="Edit Macro Steps"
+            />
+          ) : null}
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmitTapAction} title="Save Tap Action" />
+        </ActionPanel>
+      }
+      navigationTitle="Layer Tap Action"
+    >
+      <Form.Dropdown
+        id="tapActionType"
+        onChange={(value) => setTapState((current) => ({ ...current, type: value as ActionNode["type"] }))}
+        title="Type"
+        value={tapState.type}
+      >
+        <Form.Dropdown.Item title="Application" value="application" />
+        <Form.Dropdown.Item title="Command" value="command" />
+        <Form.Dropdown.Item title="Folder" value="folder" />
+        <Form.Dropdown.Item title="IntelliJ" value="intellij" />
+        <Form.Dropdown.Item title="Keystroke" value="keystroke" />
+        <Form.Dropdown.Item title="Macro" value="macro" />
+        <Form.Dropdown.Item title="Menu" value="menu" />
+        <Form.Dropdown.Item title="Shortcut" value="shortcut" />
+        <Form.Dropdown.Item title="Text" value="text" />
+        <Form.Dropdown.Item title="Normal Mode Enable" value="normalModeEnable" />
+        <Form.Dropdown.Item title="Normal Mode Input" value="normalModeInput" />
+        <Form.Dropdown.Item title="Normal Mode Disable" value="normalModeDisable" />
+        <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
+        <Form.Dropdown.Item title="URL" value="url" />
+      </Form.Dropdown>
+      {tapState.type === "macro" ? (
+        <Form.Description
+          text={[
+            `Steps: ${tapState.macroSteps.length}`,
+            `Enabled: ${tapState.macroSteps.filter((step) => step.enabled).length}`,
+            `Preview: ${tapMacroSummary.length > 0 ? tapMacroSummary.join(" -> ") : "No enabled steps yet."}`,
+          ].join("\n")}
+          title="Macro Steps"
+        />
+      ) : null}
+      <ActionValueFields
+        defaultMenuAppName={defaultMenuAppName}
+        formState={tapState}
+        installedApps={installedApps}
+        setFormState={setTapState}
+      />
+      {!isModeControlActionType(tapState.type) ? (
+        <Form.Dropdown
+          id="tapNormalModeAfter"
+          info="State after this tap action runs from normal mode."
+          onChange={(value) => setTapState((current) => ({ ...current, normalModeAfter: value as ItemFormState["normalModeAfter"] }))}
+          title="Normal Mode After"
+          value={tapState.normalModeAfter}
+        >
+          <Form.Dropdown.Item title="Normal" value="normal" />
+          <Form.Dropdown.Item title="Input" value="input" />
+          <Form.Dropdown.Item title="Disabled" value="disabled" />
+        </Form.Dropdown>
+      ) : null}
+    </Form>
+  );
+}
+
 export function RecordEditorForm(props: RecordEditorFormProps) {
   const { configDirectory, createAtPath, initialFormState, initialType, mode, preserveItem: initialPreserveItem, targetRecord, title } = props;
   const [formState, setFormState] = useState<ItemFormState>(() => {
@@ -262,7 +421,13 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       return recordToFormState(targetRecord);
     }
 
-    const nextState = emptyFormState(initialType ?? "shortcut");
+    const nextType = initialType === "layer"
+      && mode === "create-at-path"
+      && createAtPath
+      && !isNormalConfigPath(createAtPath.configPath)
+      ? "shortcut"
+      : initialType ?? "shortcut";
+    const nextState = emptyFormState(nextType);
     nextState.fullPath = defaultFullPath(mode, createAtPath, targetRecord);
     return nextState;
   });
@@ -274,12 +439,13 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const [isSaving, setIsSaving] = useState(false);
   const { pop } = useNavigation();
   const primaryTextFieldTitle = "Description";
-  const primaryTextFieldPlaceholder = formState.type === "group"
-    ? "Optional group description"
+  const primaryTextFieldPlaceholder = formState.type === "group" || formState.type === "layer"
+    ? "Optional container description"
     : "Optional action description";
   const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
   const destinationConfigPath = editableConfigPath(mode, createAtPath, targetRecord);
   const destinationConfigDisplayName = editableConfigDisplayName(mode, createAtPath, targetRecord);
+  const destinationIsNormalConfig = isNormalConfigPath(destinationConfigPath);
   const defaultMenuAppName = inferredMenuAppName(mode, createAtPath, targetRecord);
   const parsedFullPath = useMemo(
     () => pathIsEditable(mode)
@@ -402,6 +568,10 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
     if (!destinationKey) {
       await showToast({ style: Toast.Style.Failure, title: "A full path is required." });
+      return;
+    }
+    if (formState.type === "layer" && !destinationIsNormalConfig) {
+      await showToast({ style: Toast.Style.Failure, title: "Layers are only supported in normal-mode configs." });
       return;
     }
     const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
@@ -535,7 +705,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             }
           : {
               style: Toast.Style.Success,
-              title: targetRecord.kind === "group" ? "Deleted group" : "Deleted item",
+              title: targetRecord.kind === "group" ? "Deleted group" : targetRecord.kind === "layer" ? "Deleted layer" : "Deleted item",
               message: "Triggered Leader Key reload",
             },
       );
@@ -552,8 +722,8 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
   }
 
-  const showStickyModeField = !isModeControlActionType(formState.type);
-  const showNormalModeAfterField = formState.type !== "group" && !isModeControlActionType(formState.type);
+  const showStickyModeField = formState.type !== "layer" && !isModeControlActionType(formState.type);
+  const showNormalModeAfterField = formState.type !== "group" && formState.type !== "layer" && !isModeControlActionType(formState.type);
   const fullPathInfo = pathIsEditable(mode)
     ? [
         "Use tokenized syntax like a -> left -> space.",
@@ -608,13 +778,34 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
               title="Edit Macro Steps"
             />
           ) : null}
+          {formState.type === "layer" ? (
+            <Action.Push
+              icon={Icon.Layers}
+              target={
+                <LayerTapActionEditor
+                  defaultMenuAppName={defaultMenuAppName}
+                  initialTapAction={formState.tapAction}
+                  installedApps={installedApps}
+                  onChange={(tapAction) => setFormState((current) => ({ ...current, tapAction }))}
+                />
+              }
+              title={formState.tapAction ? "Edit Tap Action" : "Add Tap Action"}
+            />
+          ) : null}
+          {formState.type === "layer" && formState.tapAction ? (
+            <Action
+              icon={Icon.XMarkCircle}
+              onAction={() => setFormState((current) => ({ ...current, tapAction: undefined }))}
+              title="Remove Tap Action"
+            />
+          ) : null}
           <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title={isSaving ? "Saving…" : "Save"} />
           {canDeleteTarget ? (
             <Action
               icon={Icon.Trash}
               onAction={() => void handleDelete()}
               style={Action.Style.Destructive}
-              title={targetRecord?.kind === "group" ? "Delete Group" : "Delete Item"}
+              title={targetRecord?.kind === "group" ? "Delete Group" : targetRecord?.kind === "layer" ? "Delete Layer" : "Delete Item"}
             />
           ) : null}
         </ActionPanel>
@@ -627,7 +818,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         title="Context"
       />
       <Form.Separator />
-      {formState.type === "group" ? (
+      {formState.type === "group" || formState.type === "layer" ? (
         <Form.TextField
           id="label"
           onChange={(value) => setFormState((current) => ({ ...current, label: value }))}
@@ -636,7 +827,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           value={formState.label}
         />
       ) : null}
-      {formState.type === "group" ? (
+      {formState.type === "group" || formState.type === "layer" ? (
         <Form.TextField
           error={pathError}
           id="fullPath"
@@ -679,6 +870,9 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Group" value="group" />
         <Form.Dropdown.Item title="IntelliJ" value="intellij" />
         <Form.Dropdown.Item title="Keystroke" value="keystroke" />
+        {destinationIsNormalConfig || formState.type === "layer" ? (
+          <Form.Dropdown.Item title="Layer" value="layer" />
+        ) : null}
         <Form.Dropdown.Item title="Macro" value="macro" />
         <Form.Dropdown.Item title="Menu" value="menu" />
         <Form.Dropdown.Item title="Shortcut" value="shortcut" />
@@ -689,6 +883,12 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>
+      {formState.type === "layer" ? (
+        <Form.Description
+          text={tapActionSummary(formState.tapAction)}
+          title="Tap Action"
+        />
+      ) : null}
 
       {formState.type === "macro" ? (
         <Form.Description
@@ -706,7 +906,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         installedApps={installedApps}
         setFormState={setFormState}
       />
-      {formState.type !== "group" ? (
+      {formState.type !== "group" && formState.type !== "layer" ? (
         <Form.TextField
           id="description"
           onChange={(value) => setFormState((current) => ({ ...current, description: value }))}
@@ -715,7 +915,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           value={formState.description}
         />
       ) : null}
-      {formState.type !== "group" ? (
+      {formState.type !== "group" && formState.type !== "layer" ? (
         <Form.TextField
           id="aiDescription"
           info="Optional AI-generated description. Search includes this text when present."
@@ -725,7 +925,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           value={formState.aiDescription}
         />
       ) : null}
-      {formState.type !== "group" ? (
+      {formState.type !== "group" && formState.type !== "layer" ? (
         <Form.TextField
           error={pathError}
           id="fullPath"

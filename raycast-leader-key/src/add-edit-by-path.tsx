@@ -267,6 +267,30 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               </ActionPanel>
             }
           />
+          <List.Item
+            icon={Icon.Layers}
+            id="typed-path:create-layer"
+            title={`Create Layer at ${typedPathTitle}`}
+            subtitle={`Treat "${searchText.trim()}" as literal keys`}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  icon={Icon.Layers}
+                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  target={
+                    <TypedPathCreatePicker
+                      configDirectory={configDirectory}
+                      initialPayload={payload}
+                      itemType="layer"
+                      literalPath={literalTypedPath}
+                      onDidSave={setPayload}
+                    />
+                  }
+                  title="Choose Config for Layer"
+                />
+              </ActionPanel>
+            }
+          />
         </List.Section>
       ) : null}
       <List.Section title="Deeplinks">

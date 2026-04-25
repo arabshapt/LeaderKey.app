@@ -10,7 +10,7 @@ const INTERNAL_CLIPBOARD_KEY = "leaderkey-internal-clipboard";
 export interface InternalClipboardPayload {
   copiedAt: string;
   item: ConfigItem;
-  kind: "action" | "group";
+  kind: "action" | "group" | "layer";
   sourceDisplayLabel: string;
   sourceKeyPath: string[];
 }

@@ -176,6 +176,25 @@ extension UserConfig {
             appSpecificActions.append(.group(promotedGroup))
           }
         }
+      case .layer(let layer):
+        if !layer.isFromFallback {
+          let cleanedLayer = stripFallbackItems(from: layer)
+          appSpecificActions.append(.layer(cleanedLayer))
+        } else {
+          let cleanedLayer = stripFallbackItems(from: layer)
+          if !cleanedLayer.actions.isEmpty || cleanedLayer.tapAction != nil {
+            var promotedLayer = Layer(
+              key: cleanedLayer.key,
+              label: cleanedLayer.label,
+              iconPath: cleanedLayer.iconPath,
+              tapAction: cleanedLayer.tapAction,
+              actions: cleanedLayer.actions
+            )
+            promotedLayer.isFromFallback = false
+            promotedLayer.fallbackSource = nil
+            appSpecificActions.append(.layer(promotedLayer))
+          }
+        }
       }
     }
 
@@ -193,6 +212,34 @@ extension UserConfig {
     cleanGroup.fallbackSource = group.fallbackSource
 
     return cleanGroup
+  }
+
+  private func stripFallbackItems(from layer: Layer) -> Layer {
+    let cleanedGroup = stripFallbackItems(
+      from: Group(
+        key: layer.key,
+        label: layer.label,
+        iconPath: layer.iconPath,
+        stickyMode: nil,
+        actions: layer.actions
+      )
+    )
+
+    var cleanTapAction = layer.tapAction
+    if cleanTapAction?.isFromFallback == true {
+      cleanTapAction = nil
+    }
+
+    var cleanLayer = Layer(
+      key: layer.key,
+      label: layer.label,
+      iconPath: layer.iconPath,
+      tapAction: cleanTapAction,
+      actions: cleanedGroup.actions
+    )
+    cleanLayer.isFromFallback = layer.isFromFallback
+    cleanLayer.fallbackSource = layer.fallbackSource
+    return cleanLayer
   }
 
   // Recursively sorts actions and groups within a group alphabetically by key
@@ -219,6 +266,19 @@ extension UserConfig {
       case .group(let subgroup):
         // Recursively sort the subgroup and append the result
         sortedActions.append(.group(sortGroupRecursively(group: subgroup)))
+      case .layer(let layer):
+        let sortedLayerGroup = sortGroupRecursively(
+          group: Group(
+            key: layer.key,
+            label: layer.label,
+            iconPath: layer.iconPath,
+            stickyMode: nil,
+            actions: layer.actions
+          )
+        )
+        var sortedLayer = layer
+        sortedLayer.actions = sortedLayerGroup.actions
+        sortedActions.append(.layer(sortedLayer))
       }
     }
 

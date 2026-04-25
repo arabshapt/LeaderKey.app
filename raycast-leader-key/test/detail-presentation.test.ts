@@ -124,6 +124,17 @@ test("buildRecordDetailPresentation renders url, application, group, and macro p
   assert.equal(groupPresentation.title, "Open Group");
   assert.match(groupPresentation.markdown, /This group contains 4 child items\./);
 
+  const layerPresentation = buildRecordDetailPresentation(makeRecord({
+    actionType: "layer",
+    childCount: 2,
+    displayLabel: "Find",
+    kind: "layer",
+    rawValue: "",
+    valuePreview: "Layer with 2 items",
+  }));
+  assert.equal(layerPresentation.title, "Find Layer");
+  assert.match(layerPresentation.markdown, /This hold layer is active while its trigger key is held and contains 2 child items\./);
+
   const macroPresentation = buildRecordDetailPresentation(makeRecord({
     actionType: "macro",
     displayLabel: "Macro: Open Arc → Cmd\\+T",

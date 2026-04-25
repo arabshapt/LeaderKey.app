@@ -5,6 +5,7 @@ export type ActionType =
   | "group"
   | "intellij"
   | "keystroke"
+  | "layer"
   | "macro"
   | "menu"
   | "shortcut"
@@ -27,7 +28,7 @@ export interface MacroStep {
 
 export interface ActionNode {
   key?: string;
-  type: Exclude<ActionType, "group">;
+  type: Exclude<ActionType, "group" | "layer">;
   label?: string;
   description?: string;
   aiDescription?: string;
@@ -49,7 +50,16 @@ export interface GroupNode {
   actions: ConfigItem[];
 }
 
-export type ConfigItem = ActionNode | GroupNode;
+export interface LayerNode {
+  key?: string;
+  type: "layer";
+  label?: string;
+  iconPath?: string;
+  tapAction?: ActionNode;
+  actions: ConfigItem[];
+}
+
+export type ConfigItem = ActionNode | GroupNode | LayerNode;
 
 export interface ConfigMetadata {
   createdAt?: number;
@@ -79,7 +89,7 @@ export interface ConfigSummary {
 
 export interface FlatIndexRecord {
   id: string;
-  kind: "action" | "group";
+  kind: "action" | "group" | "layer";
   actionType: ActionType;
   key: string;
   keySequence: string;
@@ -107,6 +117,7 @@ export interface FlatIndexRecord {
   normalModeAfter?: NormalModeAfter;
   activates?: boolean;
   childCount?: number;
+  tapAction?: ActionNode;
   macroStepSummary?: string[];
   appName?: string;
   searchText: string;

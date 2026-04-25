@@ -90,6 +90,44 @@ Allowed values:
 
 Default is `"normal"`.
 
+Normal-mode hold layers use `type: "layer"` in normal configs. Layers are hold-only, matching Goku
+`layer`: the layer is active while the trigger key is physically held and exits on key-up. They are
+not simlayers, tap-toggle layers, or sticky layers.
+
+```json
+{
+  "key": "f",
+  "type": "layer",
+  "label": "Find",
+  "tapAction": {
+    "type": "shortcut",
+    "value": "Cf",
+    "normalModeAfter": "normal"
+  },
+  "actions": [
+    { "key": "b", "type": "shortcut", "value": "Cb" },
+    {
+      "key": "g",
+      "type": "group",
+      "actions": [
+        { "key": "x", "type": "command", "value": "echo nested" }
+      ]
+    }
+  ]
+}
+```
+
+Layer constraints in v1:
+
+- Layers are normal-mode only. Regular Leader Key configs can decode them, but the Karabiner exporter
+  ignores layer bindings outside normal scopes. Native Settings and Raycast only offer new layer
+  creation in normal fallback or normal app config scopes.
+- `tapAction` is optional. If it is omitted, a short tap passes the original trigger key through.
+- Holding past Karabiner's tap timeout without pressing a child key does nothing.
+- `tapAction` must be a terminal action. It cannot be `group` or `layer`.
+- Nested layers and modifier-key layer triggers are rejected by validation.
+- Sibling key collisions are rejected across actions, groups, and layers.
+
 ## Implementation Summary
 
 ### Config Model And Loading
@@ -168,6 +206,16 @@ Main changes:
 - `.normalModeEnable`, `.normalModeInput`, and `.normalModeDisable` export as direct Karabiner variable transitions.
 - Regular Leader Key terminal mappings special-case these actions so a Leader Key action can enable/input/disable normal mode directly.
 - Sticky-mode shortcut key-event-last behavior was not changed.
+- Added normal-mode hold-layer export:
+  - `leaderkey_normal_layer_state`
+  - `leaderkey_normal_layer_sequence_state`
+  - Layer trigger `to` sets layer state and resets layer sequence state.
+  - Layer trigger `to_if_alone` runs `tapAction` or passes the original key through.
+  - Layer trigger `to_after_key_up` resets both layer variables.
+  - Layer children dispatch through normal-mode state mappings, so overlay suppression is reused.
+  - Layer child groups use `leaderkey_normal_layer_sequence_state`, not `leaderkey_normal_state`.
+  - Invalid keys while a layer group is pending consume/reset only layer sequence state.
+  - Escape/Caps while a layer group is pending reset only layer sequence state; base held layer Escape/Caps pass through.
 
 Generated Karabiner rule groups:
 
@@ -175,6 +223,7 @@ Generated Karabiner rule groups:
 - `LeaderKeyManaged/NormalFallbackMode`
 - `LeaderKeyManaged/NormalControls`
 - `LeaderKeyManaged/NormalCatchAll`
+- `LeaderKeyManaged/NormalLayerCatchAll`
 
 ### Runtime Dispatch
 
@@ -248,6 +297,17 @@ Main changes:
 - Raycast action forms include the three normal-mode control actions.
 - Raycast action forms expose `normalModeAfter` for non-mode-control terminal actions.
 - Macro editor options include normal-mode control actions.
+- Config-core now treats `LayerNode` as a group-like container for indexing, search, path navigation,
+  validation, and mutations.
+- Normal app configs can inherit fallback layer children when layer metadata and `tapAction` match.
+- Existing layers can be edited as path containers; missing intermediate typed-path segments are still
+  auto-created as groups, not layers.
+- Raycast Browse Configs, Search Shortcuts, Add/Edit by Path, typed-path creation, copy/paste, detail
+  views, and editor forms understand layers.
+- Raycast layer editing includes a nested tap-action editor that reuses the existing terminal action
+  fields, macro step editor, and `normalModeAfter` picker.
+- Raycast and Native Settings hide layer creation outside normal-mode configs. Raycast typed-path
+  layer creation filters the config picker to normal fallback and normal app scopes.
 
 ## Tests Added Or Updated
 
@@ -278,6 +338,12 @@ Coverage added:
 - Config-core discovery/indexing of normal fallback and normal app configs.
 - Raycast deep links for normal fallback and normal app scopes.
 - Raycast serialization for `normalModeAfter` and normal-mode control actions.
+- Layer config validation for nested layers, modifier triggers, invalid tap actions, and sibling key
+  collisions.
+- Karabiner export of layer hold variables, `to_if_alone`, original-key tap passthrough, child actions,
+  child groups, state mappings, and layer Escape reset.
+- Config-core indexing, path navigation, and mutation behavior for layers.
+- Raycast layer form/detail handling.
 
 Regression coverage preserved:
 
@@ -288,6 +354,12 @@ Regression coverage preserved:
 - Activation rules.
 
 ## Verification
+
+The signing-disabled debug build passed:
+
+```sh
+xcodebuild -scheme "Leader Key" -configuration Debug build CODE_SIGNING_ALLOWED=NO
+```
 
 The regular signed test command is blocked on this machine by a missing local signing certificate:
 
@@ -310,23 +382,21 @@ xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test CODE_SIGNING_ALLOWED=N
 Result:
 
 ```text
-154 tests, 1 skipped, 0 failures
+159 tests, 1 skipped, 0 failures
 ```
 
-TypeScript tests and typechecks passed after installing workspace dev dependencies with `npm install`:
+TypeScript tests and typechecks passed:
 
 ```sh
-npm --prefix packages/leaderkey-config-core test
-npm --prefix packages/leaderkey-config-core run typecheck
-npm --prefix raycast-leader-key test
-npm --prefix raycast-leader-key run typecheck
+npm run typecheck
+npm test
 ```
 
 Results:
 
 ```text
-config-core: 33 tests, 0 failures
-raycast-leader-key: 42 tests, 0 failures
+config-core: 36 tests, 0 failures
+raycast-leader-key: 43 tests, 0 failures
 both typechecks passed
 root workspace typecheck passed
 ```
@@ -339,53 +409,48 @@ Expected modified files from this feature:
 
 ```text
 Leader Key/AppDelegate.swift
-Leader Key/CommandScoutModels.swift
+Leader Key/Cheatsheet.swift
+Leader Key/CommandScoutService.swift
+Leader Key/ConfigCache.swift
+Leader Key/ConfigValidator.swift
 Leader Key/Controller.swift
 Leader Key/Karabiner2Exporter.swift
-Leader Key/Karabiner2InputMethod.swift
-Leader Key/KarabinerCommandRouter.swift
-Leader Key/Settings/GeneralPane.swift
-Leader Key/StatusItem.swift
-Leader Key/UnixSocketServer.swift
-Leader Key/UserConfig+Creation.swift
-Leader Key/UserConfig+Deletion.swift
-Leader Key/UserConfig+Discovery.swift
-Leader Key/UserConfig+EditingState.swift
-Leader Key/UserConfig+FileManagement.swift
+Leader Key/KarabinerExporter.swift
 Leader Key/UserConfig+LoadingDecoding.swift
 Leader Key/UserConfig+Saving.swift
 Leader Key/UserConfig.swift
+Leader Key/Views/ActionIcon.swift
+Leader Key/Views/CommandScoutView.swift
 Leader Key/Views/ConfigEditorView.swift
 Leader Key/Views/NativeConfigEditorView.swift
+Leader KeyTests/ConfigValidatorTests.swift
 Leader KeyTests/Karabiner2ExporterKarConfigTests.swift
-Leader KeyTests/KarCompilerServiceTests.swift
-Leader KeyTests/KarabinerCommandRouterTests.swift
-Leader KeyTests/UserConfigTests.swift
-packages/leaderkey-config-core/src/app-configs.ts
-packages/leaderkey-config-core/src/constants.ts
-packages/leaderkey-config-core/src/discovery.ts
 packages/leaderkey-config-core/src/index.ts
 packages/leaderkey-config-core/src/indexing.ts
 packages/leaderkey-config-core/src/labels.ts
 packages/leaderkey-config-core/src/mutations.ts
+packages/leaderkey-config-core/src/normalize.ts
+packages/leaderkey-config-core/src/path-navigation.ts
+packages/leaderkey-config-core/src/path-validation.ts
 packages/leaderkey-config-core/src/types.ts
-packages/leaderkey-config-core/test/app-configs.test.ts
+packages/leaderkey-config-core/src/utils.ts
 packages/leaderkey-config-core/test/discovery-indexing.test.ts
-packages/leaderkey-config-core/test/labels.test.ts
+packages/leaderkey-config-core/test/mutations.test.ts
+packages/leaderkey-config-core/test/path-navigation.test.ts
 raycast-leader-key/src/action-form.ts
 raycast-leader-key/src/add-edit-by-path.tsx
 raycast-leader-key/src/browse-configs.tsx
-raycast-leader-key/src/create-app-config-form.tsx
-raycast-leader-key/src/deeplinks.ts
+raycast-leader-key/src/browser.tsx
+raycast-leader-key/src/clipboard.ts
 raycast-leader-key/src/detail-presentation.ts
 raycast-leader-key/src/editor-form.tsx
 raycast-leader-key/src/form-utils.ts
-raycast-leader-key/src/macro-editor.tsx
+raycast-leader-key/src/path-editor-view.tsx
 raycast-leader-key/src/presentation.ts
 raycast-leader-key/src/search-shortcuts.tsx
+raycast-leader-key/src/scope-utils.ts
 raycast-leader-key/src/typed-path-create-picker.tsx
-raycast-leader-key/test/action-form.test.ts
-raycast-leader-key/test/deeplinks.test.ts
+raycast-leader-key/test/detail-presentation.test.ts
 raycast-leader-key/test/form-utils.test.ts
 tasks/normal-mode-handoff.md
 ```

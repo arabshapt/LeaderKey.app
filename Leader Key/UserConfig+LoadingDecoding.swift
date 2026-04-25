@@ -299,7 +299,7 @@ extension UserConfig {
     )
   }
 
-  // Recursively marks all nested actions and groups as fallback items
+  // Recursively marks all nested actions, groups, and layers as fallback items
   private func markAsFromFallback(_ item: ActionOrGroup, fallbackSource: String) -> ActionOrGroup {
     switch item {
     case .action(var action):
@@ -322,6 +322,16 @@ extension UserConfig {
       // Recursively mark all nested items
       group.actions = group.actions.map { markAsFromFallback($0, fallbackSource: fallbackSource) }
       return .group(group)
+    case .layer(var layer):
+      layer.isFromFallback = true
+      layer.fallbackSource = fallbackSource
+      if var tapAction = layer.tapAction {
+        tapAction.isFromFallback = true
+        tapAction.fallbackSource = fallbackSource
+        layer.tapAction = tapAction
+      }
+      layer.actions = layer.actions.map { markAsFromFallback($0, fallbackSource: fallbackSource) }
+      return .layer(layer)
     }
   }
 
@@ -368,6 +378,40 @@ extension UserConfig {
             fallbackSource: fallbackSource
           )
           mergedActions[appItemIndex] = .group(mergedNestedGroup)
+        }
+      } else if let fallbackKey = fallbackKey,
+        case .layer(let fallbackLayer) = fallbackItem,
+        let appItemIndex = mergedActions.firstIndex(where: {
+          if case .layer(let layer) = $0, layer.key == fallbackKey { return true }
+          return false
+        })
+      {
+        // Both have layers with the same key - merge child actions recursively like groups.
+        if case .layer(let appLayer) = mergedActions[appItemIndex] {
+          var appAsGroup = Group(
+            key: appLayer.key,
+            label: appLayer.label,
+            iconPath: appLayer.iconPath,
+            stickyMode: nil,
+            actions: appLayer.actions
+          )
+          appAsGroup.isFromFallback = appLayer.isFromFallback
+          appAsGroup.fallbackSource = appLayer.fallbackSource
+          let fallbackAsGroup = Group(
+            key: fallbackLayer.key,
+            label: fallbackLayer.label,
+            iconPath: fallbackLayer.iconPath,
+            stickyMode: nil,
+            actions: fallbackLayer.actions
+          )
+          let mergedLayerGroup = mergeWithFallback(
+            appSpecificGroup: appAsGroup,
+            fallbackGroup: fallbackAsGroup,
+            fallbackSource: fallbackSource
+          )
+          var mergedLayer = appLayer
+          mergedLayer.actions = mergedLayerGroup.actions
+          mergedActions[appItemIndex] = .layer(mergedLayer)
         }
       }
     }

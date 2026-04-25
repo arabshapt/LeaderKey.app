@@ -8,6 +8,44 @@ test("parsePathInput treats every typed character as a path segment", () => {
   assert.deepEqual(parsePathInput("ab.c"), ["a", "b", ".", "c"]);
 });
 
+test("analyzePathInConfig treats layers as containers", async () => {
+  const configDirectory = await createTempConfigDirectory();
+
+  const globalRoot: GroupNode = {
+    actions: [
+      {
+        actions: [
+          {
+            key: "b",
+            type: "shortcut",
+            value: "Cb",
+          },
+        ],
+        key: "f",
+        label: "Find",
+        type: "layer",
+      },
+    ],
+    type: "group",
+  };
+
+  await writeConfigFile(configDirectory, "global-config.json", globalRoot);
+  const payload = await buildCachePayload(configDirectory);
+  const globalConfig = expectRecord(
+    payload.configs.find((config) => config.scope === "global"),
+    "expected global config summary",
+  );
+
+  const exactLayer = analyzePathInConfig(payload, globalConfig, "f");
+  assert.equal(exactLayer.state, "exact-group");
+  assert.equal(exactLayer.exactMatch?.kind, "layer");
+  assert.deepEqual(exactLayer.visibleChildren.map((record) => record.key), ["b"]);
+
+  const layerChild = analyzePathInConfig(payload, globalConfig, "fb");
+  assert.equal(layerChild.state, "exact-action");
+  assert.deepEqual(layerChild.exactMatch?.effectiveKeyPath, ["f", "b"]);
+});
+
 test("analyzePathInConfig resolves arrow and space aliases in path input", async () => {
   const configDirectory = await createTempConfigDirectory();
 

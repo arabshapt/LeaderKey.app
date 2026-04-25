@@ -9,7 +9,7 @@ import {
 
 import { encodeKeystrokeRawValue, menuPathValue, type ItemFormState } from "./form-utils.js";
 
-export type MacroStepActionType = Exclude<ConfigItem["type"], "group">;
+export type MacroStepActionType = ActionNode["type"];
 
 export function isModeControlActionType(type: ConfigItem["type"]): boolean {
   return type === "toggleStickyMode"
@@ -60,7 +60,7 @@ export function formStateToActionNode(
   state: ItemFormState,
   options: ActionFromFormStateOptions = {},
 ): ActionNode {
-  if (state.type === "group") {
+  if (state.type === "group" || state.type === "layer") {
     throw new Error("formStateToActionNode requires an action type.");
   }
 

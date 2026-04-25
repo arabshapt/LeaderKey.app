@@ -1,5 +1,11 @@
 import { discoverLiveConfigs, loadGroupFromFile, writeGroupToFile } from "./discovery.js";
-import { generateActionLabel, generateGroupLabel, resolveActionAiDescription, resolveActionDescription } from "./labels.js";
+import {
+  generateActionLabel,
+  generateGroupLabel,
+  generateLayerLabel,
+  resolveActionAiDescription,
+  resolveActionDescription,
+} from "./labels.js";
 import type { ActionNode, ConfigItem, GroupNode, ItemContext } from "./types.js";
 
 function shouldReplaceGroupLabel(label: string | undefined): boolean {
@@ -20,6 +26,24 @@ function normalizeItem(item: ConfigItem, context: ItemContext): ConfigItem {
       ...item,
       actions: nextActions,
       label: shouldReplaceGroupLabel(item.label) ? nextGroupLabel ?? item.label : item.label,
+    };
+  }
+
+  if (item.type === "layer") {
+    const nextLayerLabel = generateLayerLabel(item);
+    const nextActions = item.actions.map((child, index) =>
+      normalizeItem(child, {
+        ...context,
+        breadcrumbPath: [...context.breadcrumbPath, child.key ?? `#${index}`],
+      }));
+
+    return {
+      ...item,
+      actions: nextActions,
+      label: shouldReplaceGroupLabel(item.label) ? nextLayerLabel ?? item.label : item.label,
+      tapAction: item.tapAction
+        ? normalizeItem(item.tapAction, context) as ActionNode
+        : undefined,
     };
   }
 

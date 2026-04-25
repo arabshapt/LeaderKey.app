@@ -223,6 +223,24 @@ class CommandScoutService {
                     sequences.insert(seq)
                     sequences.formUnion(collectExistingSequences(from: subgroup, prefix: subPrefix))
                 }
+            case .layer(let layer):
+                if let key = layer.key, !key.isEmpty {
+                    let subPrefix = prefix + [key.lowercased()]
+                    let seq = subPrefix.joined()
+                    sequences.insert(seq)
+                    sequences.formUnion(
+                        collectExistingSequences(
+                            from: Group(
+                                key: layer.key,
+                                label: layer.label,
+                                iconPath: layer.iconPath,
+                                stickyMode: nil,
+                                actions: layer.actions
+                            ),
+                            prefix: subPrefix
+                        )
+                    )
+                }
             }
         }
         return sequences
@@ -238,6 +256,23 @@ class CommandScoutService {
                 }
             case .group(let subgroup):
                 signatures.formUnion(collectExistingActionSignatures(from: subgroup))
+            case .layer(let layer):
+                if let tapAction = layer.tapAction,
+                    let actionType = CommandScoutActionType(rawValue: tapAction.type.rawValue)
+                {
+                    signatures.insert(actionSignature(type: actionType, value: tapAction.value))
+                }
+                signatures.formUnion(
+                    collectExistingActionSignatures(
+                        from: Group(
+                            key: layer.key,
+                            label: layer.label,
+                            iconPath: layer.iconPath,
+                            stickyMode: nil,
+                            actions: layer.actions
+                        )
+                    )
+                )
             }
         }
         return signatures

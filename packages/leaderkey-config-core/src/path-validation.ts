@@ -33,6 +33,10 @@ function isSameEditableRecord(currentRecord: FlatIndexRecord | undefined, candid
   return Boolean(currentRecord && candidate.id === currentRecord.id);
 }
 
+function isContainerRecord(record: FlatIndexRecord): boolean {
+  return record.kind === "group" || record.kind === "layer";
+}
+
 function overrideRecordForDestination(
   payload: CachePayload,
   configFilePath: string,
@@ -63,11 +67,11 @@ export function validateRecordPath(
     };
   }
 
-  if (currentRecord?.kind === "group" && isKeyPathPrefix(currentRecord.effectiveKeyPath, destinationKeyPath)) {
+  if (currentRecord && isContainerRecord(currentRecord) && isKeyPathPrefix(currentRecord.effectiveKeyPath, destinationKeyPath)) {
     return {
       autoCreateGroupKeys: [],
       destinationKeyPath,
-      error: "A group cannot be moved into its own descendant path.",
+      error: "A container cannot be moved into its own descendant path.",
     };
   }
 
@@ -104,7 +108,7 @@ export function validateRecordPath(
     const prefix = destinationKeyPath.slice(0, index + 1);
     const localGroup = localRecords.find((record) =>
       !isSameEditableRecord(currentRecord, record) &&
-      record.kind === "group" &&
+      isContainerRecord(record) &&
       keyPathMatches(record.effectiveKeyPath, prefix),
     );
 

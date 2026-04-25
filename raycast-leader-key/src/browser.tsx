@@ -32,6 +32,7 @@ import { RecordEditorForm } from "./editor-form.js";
 import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { isNormalScope } from "./scope-utils.js";
 
 interface ConfigNodesListProps {
   configDirectory: string;
@@ -44,6 +45,21 @@ interface ConfigNodesListProps {
 
 function effectivePathMatches(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function isContainerRecord(record: FlatIndexRecord): boolean {
+  return record.kind === "group" || record.kind === "layer";
+}
+
+function recordKindLabel(record: Pick<FlatIndexRecord, "kind">): string {
+  switch (record.kind) {
+    case "group":
+      return "group";
+    case "layer":
+      return "layer";
+    case "action":
+      return "action";
+  }
 }
 
 function configChildren(
@@ -72,7 +88,7 @@ function currentContextGroupRecord(
 ): FlatIndexRecord | undefined {
   if (parentEffectiveKeyPath.length > 0) {
     return payload.records.find((record) =>
-      record.kind === "group" &&
+      isContainerRecord(record) &&
       record.effectiveConfigDisplayName === configDisplayName &&
       effectivePathMatches(record.effectiveKeyPath, parentEffectiveKeyPath)
     );
@@ -159,8 +175,13 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
         effectivePathMatches(record.effectiveKeyPath, fullLiteralPath)
       )
     : undefined;
+  const canCreateLayerInContext = Boolean(contextRecord && isNormalScope(contextRecord.effectiveScope));
   const typedPathItemIds = literalPathTitle && !literalPathConflict
-    ? ["typed-path:create-action", "typed-path:create-group"]
+    ? [
+        "typed-path:create-action",
+        "typed-path:create-group",
+        ...(canCreateLayerInContext ? ["typed-path:create-layer"] : []),
+      ]
     : [];
   const combinedIds = [...typedPathItemIds, ...visibleRecords.map((record) => record.id)];
   const activeSelectedId = selectedId && combinedIds.includes(selectedId)
@@ -185,7 +206,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
       const clipboardPayload = await copyRecordToInternalClipboard(record);
       await showToast({
         style: Toast.Style.Success,
-        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        title: `Copied ${clipboardPayload.kind}`,
         message: clipboardPayload.sourceDisplayLabel,
       });
     } catch (error) {
@@ -263,7 +284,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
             }
           : {
               style: Toast.Style.Success,
-              title: clipboardPayload.kind === "group" ? "Pasted group" : "Pasted action",
+              title: `Pasted ${clipboardPayload.kind}`,
               message: `Added to ${groupLabel}`,
             },
       );
@@ -388,6 +409,25 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
           }
           title="Add First Group"
         />
+        {canCreateLayerInContext ? (
+          <Action.Push
+            icon={Icon.Layers}
+            shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+            target={
+              <RecordEditorForm
+                configDirectory={configDirectory}
+                initialType="layer"
+                mode="append-child"
+                onDidSave={async (nextPayload) => {
+                  handleDidMutate(nextPayload);
+                }}
+                targetRecord={contextRecord}
+                title={`Add First Layer to ${contextRecord.displayLabel}`}
+              />
+            }
+            title="Add First Layer"
+          />
+        ) : null}
         <Action
           icon={Icon.Clipboard}
           onAction={() => void handlePasteIntoGroup(
@@ -506,6 +546,51 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
               </ActionPanel>
             }
           />
+          {canCreateLayerInContext ? (
+            <List.Item
+              detail={activeSelectedId === "typed-path:create-layer" ? (
+                <List.Item.Detail
+                  markdown={[
+                    "# Create Layer by Typed Path",
+                    "",
+                    `Treat \`${searchText.trim()}\` as the literal path \`${literalPathTitle}\` in ${configDisplayName}.`,
+                    "",
+                    "This creates missing intermediate groups automatically if needed.",
+                  ].join("\n")}
+                />
+              ) : undefined}
+              icon={Icon.Layers}
+              id="typed-path:create-layer"
+              title={`Create Layer at ${literalPathTitle}`}
+              subtitle={`Treat "${searchText.trim()}" as literal keys`}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    icon={Icon.Layers}
+                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        createAtPath={{
+                          configDisplayName,
+                          configPath: contextRecord.effectiveConfigPath,
+                          parentKeyPath: fullLiteralPath.slice(0, -1),
+                          suggestedKey: fullLiteralPath.at(-1)!,
+                        }}
+                        initialType="layer"
+                        mode="create-at-path"
+                        onDidSave={async (nextPayload) => {
+                          handleDidMutate(nextPayload);
+                        }}
+                        title={`Create Layer at ${literalPathTitle}`}
+                      />
+                    }
+                    title="Create Layer at Typed Path"
+                  />
+                </ActionPanel>
+              }
+            />
+          ) : null}
         </List.Section>
       ) : null}
       {visibleRecords.length === 0 && typedPathItemIds.length === 0 ? (
@@ -525,7 +610,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
             : undefined,
         );
         const isSelected = activeSelectedId === record.id;
-        const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
+        const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
           ? { modifiers: ["cmd"], key: "return" }
           : { modifiers: ["cmd"], key: "." };
 
@@ -540,7 +625,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
             title={row.title}
             actions={
               <ActionPanel>
-                {record.kind === "group" ? (
+                {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.ChevronRight}
                     shortcut={{ key: "return", modifiers: [] }}
@@ -554,7 +639,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                         preferredEditor={preferredEditor}
                       />
                     }
-                    title="Open Group"
+                    title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
                 ) : (
                   <Action.Push
@@ -574,7 +659,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   icon={Icon.CopyClipboard}
                   onAction={() => void handleCopy(record)}
                   shortcut={{ modifiers: ["cmd"], key: "c" }}
-                  title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                  title={`Copy ${recordKindLabel(record)}`}
                 />
                 <Action
                   icon={Icon.Clipboard}
@@ -601,12 +686,12 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                     title="Open in Path Editor"
                   />
                 ) : null}
-                {record.kind === "group" ? (
+                {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.Pencil}
                     shortcut={Keyboard.Shortcut.Common.Edit}
                     target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
-                    title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                    title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                   />
                 ) : null}
                 {record.inherited ? (
@@ -640,7 +725,26 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   }
                   title="Create Sibling Group"
                 />
-                {record.kind === "group" ? (
+                {isNormalScope(record.effectiveScope) ? (
+                  <Action.Push
+                    icon={Icon.Layers}
+                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        initialType="layer"
+                        mode="create-sibling"
+                        onDidSave={async (nextPayload) => {
+                          handleDidMutate(nextPayload);
+                        }}
+                        targetRecord={record}
+                        title={`Create Sibling Layer After ${record.displayLabel}`}
+                      />
+                    }
+                    title="Create Sibling Layer"
+                  />
+                ) : null}
+                {isContainerRecord(record) ? (
                   <>
                     <Action.Push
                       icon={Icon.Plus}
@@ -665,6 +769,25 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                       }
                       title="Append Child Group"
                     />
+                    {isNormalScope(record.effectiveScope) ? (
+                      <Action.Push
+                        icon={Icon.Layers}
+                        shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+                        target={
+                          <RecordEditorForm
+                            configDirectory={configDirectory}
+                            initialType="layer"
+                            mode="append-child"
+                            onDidSave={async (nextPayload) => {
+                              handleDidMutate(nextPayload);
+                            }}
+                            targetRecord={record}
+                            title={`Append Child Layer to ${record.displayLabel}`}
+                          />
+                        }
+                        title="Append Child Layer"
+                      />
+                    ) : null}
                   </>
                 ) : null}
                 {!record.inherited ? (

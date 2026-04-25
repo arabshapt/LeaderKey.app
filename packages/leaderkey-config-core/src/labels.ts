@@ -2,7 +2,7 @@ import { URL } from "node:url";
 
 import { parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
 import { humanizeShortcutSequence, humanizeSlug, snippet } from "./utils.js";
-import type { ActionNode, GroupNode, ItemContext, MacroStep } from "./types.js";
+import type { ActionNode, GroupNode, ItemContext, LayerNode, MacroStep } from "./types.js";
 
 interface ParsedKeystrokeValue {
   app?: string;
@@ -276,6 +276,16 @@ export function generateGroupLabel(group: GroupNode): string | undefined {
   }
 
   const key = group.key?.trim().toLowerCase() ?? "";
+  return GROUP_LABELS.get(key);
+}
+
+export function generateLayerLabel(layer: LayerNode): string | undefined {
+  const currentLabel = layer.label?.trim() ?? "";
+  if (currentLabel && !PLACEHOLDER_GROUP_LABEL.test(currentLabel) && !/^\d+$/.test(currentLabel)) {
+    return currentLabel;
+  }
+
+  const key = layer.key?.trim().toLowerCase() ?? "";
   return GROUP_LABELS.get(key);
 }
 

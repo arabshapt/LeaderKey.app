@@ -312,6 +312,8 @@ final class KarabinerExporter {
           keys.insert(key.lowercased())
         }
         collectKeysFromGroup(subgroup, into: &keys)
+      case .layer:
+        continue
       }
     }
   }

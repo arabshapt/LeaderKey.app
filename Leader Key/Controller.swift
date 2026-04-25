@@ -288,6 +288,10 @@ class Controller {
           if action.key == key {
             return true
           }
+        case .layer(let layer):
+          if layer.key == key {
+            return true
+          }
         }
         return false
       }
@@ -322,6 +326,8 @@ class Controller {
         userState.display = group.key
         userState.navigateToGroup(group)
       }
+    case .layer:
+      window.notFound()
     case .none:
       window.notFound()
     }
@@ -422,6 +428,8 @@ class Controller {
         runGroup(group)
       case .action(let action):
         runAction(action)
+      case .layer:
+        continue
       }
     }
   }

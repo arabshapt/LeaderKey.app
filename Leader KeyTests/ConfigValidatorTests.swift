@@ -64,6 +64,70 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errors.isEmpty, "A single literal space is a valid spacebar key")
   }
 
+  func testValidLayerConfiguration() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: Action(key: nil, type: .shortcut, value: "Cf", normalModeAfter: .normal),
+            actions: [
+              .action(Action(key: "b", type: .shortcut, value: "Cb")),
+              .group(
+                Group(
+                  key: "g",
+                  label: "Go",
+                  stickyMode: nil,
+                  actions: [.action(Action(key: "x", type: .command, value: "echo nested"))]
+                )
+              ),
+            ]
+          )
+        )
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.isEmpty, "Valid layer configuration should not have validation errors")
+  }
+
+  func testLayerValidationRejectsNestedLayersModifierTriggersInvalidTapActionsAndSiblingCollisions() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "f", type: .shortcut, value: "Cf")),
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: Action(key: nil, type: .group, value: ""),
+            actions: [
+              .layer(Layer(key: "x", label: "Nested", iconPath: nil, tapAction: nil, actions: []))
+            ]
+          )
+        ),
+        .layer(Layer(key: "caps_lock", label: "Caps", iconPath: nil, tapAction: nil, actions: [])),
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [1] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidLayerTapAction && $0.path == [1] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .nestedLayer && $0.path == [1, 0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidLayerTrigger && $0.path == [2] }))
+  }
+
   // Test that empty keys are detected
   func testEmptyKeys() {
     let group = Group(
@@ -160,6 +224,24 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errorPaths.contains([2, 1]), "Should have error at path [2, 1]")
   }
 
+  func testDuplicateKeysIncludeLayers() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .group(Group(key: "a", label: "Group", stickyMode: nil, actions: [])),
+        .layer(Layer(key: "a", label: "Layer", iconPath: nil, tapAction: nil, actions: [])),
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertEqual(errors.filter { $0.type == .duplicateKey }.count, 2)
+    XCTAssertTrue(errors.map(\.path).contains([0]))
+    XCTAssertTrue(errors.map(\.path).contains([1]))
+  }
+
   // Test that the findItem function correctly locates items
   func testFindItem() {
     let group = Group(
@@ -216,5 +298,36 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertNil(
       ConfigValidator.findItem(in: group, at: [0, 0]),
       "Should return nil when path goes through an action")
+  }
+
+  func testFindItemLocatesLayerChildren() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: nil,
+            actions: [.action(Action(key: "b", type: .shortcut, value: "Cb"))]
+          )
+        )
+      ]
+    )
+
+    if case .layer(let foundLayer) = ConfigValidator.findItem(in: group, at: [0]) {
+      XCTAssertEqual(foundLayer.key, "f")
+    } else {
+      XCTFail("Should find the layer")
+    }
+
+    if case .action(let foundAction) = ConfigValidator.findItem(in: group, at: [0, 0]) {
+      XCTAssertEqual(foundAction.key, "b")
+    } else {
+      XCTFail("Should find the layer child")
+    }
   }
 }

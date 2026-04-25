@@ -6,6 +6,7 @@ import {
   type FlatIndexRecord,
   type MacroStep,
   type NormalModeAfter,
+  type ActionNode,
 } from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
@@ -73,6 +74,7 @@ export interface ItemFormState {
   normalModeAfter: NormalModeAfter;
   shortcutValue: string;
   stickyMode: boolean;
+  tapAction?: ActionNode;
   textValue: string;
   type: ConfigItem["type"];
   urlValue: string;
@@ -105,6 +107,7 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     normalModeAfter: "normal",
     shortcutValue: "",
     stickyMode: false,
+    tapAction: undefined,
     textValue: "",
     type,
     urlValue: "",
@@ -232,21 +235,22 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
 
   return {
     activates: record.activates ?? false,
-    aiDescription: record.actionType === "group" ? "" : record.aiDescription ?? "",
+    aiDescription: record.kind === "group" || record.kind === "layer" ? "" : record.aiDescription ?? "",
     applicationPath: record.actionType === "application" ? record.rawValue : "",
     commandValue: record.actionType === "command" ? record.rawValue : "",
-    description: record.actionType === "group" ? "" : record.description ?? "",
+    description: record.kind === "group" || record.kind === "layer" ? "" : record.description ?? "",
     fullPath: formatFullPath(record.effectiveKeyPath),
     folderPath: record.actionType === "folder" ? record.rawValue : "",
     intellijValue: record.actionType === "intellij" ? record.rawValue : "",
     keystroke,
-    label: record.actionType === "group" ? record.label ?? record.displayLabel ?? "" : "",
+    label: record.kind === "group" || record.kind === "layer" ? record.label ?? record.displayLabel ?? "" : "",
     macroSteps: [],
     menuFallbackPaths: record.actionType === "menu" ? record.menuFallbackPaths ?? [] : [],
     menuValue: record.actionType === "menu" ? record.rawValue : "",
     normalModeAfter: record.normalModeAfter ?? "normal",
     shortcutValue: record.actionType === "shortcut" ? record.rawValue : "",
     stickyMode: record.stickyMode ?? false,
+    tapAction: record.tapAction,
     textValue: record.actionType === "text" ? record.rawValue : "",
     type: record.actionType ?? "shortcut",
     urlValue: record.actionType === "url" ? record.rawValue : "",
@@ -265,6 +269,16 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
       label: item.label ?? "",
       stickyMode: item.stickyMode ?? false,
       type: "group",
+    };
+  }
+
+  if (item.type === "layer") {
+    return {
+      ...emptyFormState("layer"),
+      fullPath: item.key ? formatFullPath([item.key]) : "",
+      label: item.label ?? "",
+      tapAction: item.tapAction,
+      type: "layer",
     };
   }
 

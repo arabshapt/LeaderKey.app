@@ -109,6 +109,8 @@ enum Cheatsheet {
             return !action.isFromFallback
           case .group(let subgroup):
             return !subgroup.isFromFallback
+          case .layer(let layer):
+            return !layer.isFromFallback
           }
         }
       }
@@ -149,6 +151,79 @@ enum Cheatsheet {
               Cheatsheet.ActionRow(action: action, indent: indent + 1)
             case .group(let group):
               Cheatsheet.GroupRow(group: group, indent: indent + 1)
+            case .layer(let layer):
+              Cheatsheet.LayerRow(layer: layer, indent: indent + 1)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  struct LayerRow: SwiftUI.View {
+    @Default(.expandGroupsInCheatsheet) var expand
+    @Default(.showDetailsInCheatsheet) var showDetails
+    @Default(.showAppIconsInCheatsheet) var showIcons
+    @Default(.showFallbackItems) var showFallbackItems
+
+    let layer: Layer
+    let indent: Int
+
+    var visibleLayerActions: [ActionOrGroup] {
+      let sortedActions = layer.actions.sortedAlphabetically()
+      if showFallbackItems {
+        return sortedActions
+      } else {
+        return sortedActions.filter { item in
+          switch item {
+          case .action(let action):
+            return !action.isFromFallback
+          case .group(let subgroup):
+            return !subgroup.isFromFallback
+          case .layer(let nestedLayer):
+            return !nestedLayer.isFromFallback
+          }
+        }
+      }
+    }
+
+    var body: some SwiftUI.View {
+      VStack(alignment: .leading, spacing: 4) {
+        HStack {
+          ForEach(0..<indent, id: \.self) { _ in
+            Text("  ")
+          }
+          KeyBadge(key: layer.key ?? "", showFallbackIndicator: layer.isFromFallback)
+            .help(
+              layer.isFromFallback ? "From \(layer.fallbackSource ?? "Fallback App Config")" : "")
+
+          if showIcons {
+            actionIcon(item: ActionOrGroup.layer(layer), iconSize: iconSize)
+          }
+
+          Image(systemName: "square.stack.3d.up")
+            .foregroundStyle(.secondary)
+
+          Text(layer.displayName)
+            .opacity(layer.isFromFallback ? 0.7 : 1.0)
+
+          Spacer()
+          if showDetails {
+            Text("\(layer.actions.count.description) item(s)")
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.middle)
+          }
+        }
+        if expand {
+          ForEach(Array(visibleLayerActions.enumerated()), id: \.offset) { _, item in
+            switch item {
+            case .action(let action):
+              Cheatsheet.ActionRow(action: action, indent: indent + 1)
+            case .group(let group):
+              Cheatsheet.GroupRow(group: group, indent: indent + 1)
+            case .layer(let layer):
+              Cheatsheet.LayerRow(layer: layer, indent: indent + 1)
             }
           }
         }
@@ -196,6 +271,8 @@ enum Cheatsheet {
             return !action.isFromFallback
           case .group(let group):
             return !group.isFromFallback
+          case .layer(let layer):
+            return !layer.isFromFallback
           }
         }
       }
@@ -220,6 +297,8 @@ enum Cheatsheet {
               Cheatsheet.ActionRow(action: action, indent: 0)
             case .group(let group):
               Cheatsheet.GroupRow(group: group, indent: 0)
+            case .layer(let layer):
+              Cheatsheet.LayerRow(layer: layer, indent: 0)
             }
           }
         }

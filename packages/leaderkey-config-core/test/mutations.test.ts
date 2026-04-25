@@ -8,6 +8,7 @@ import {
   createItemAtPath,
   insertSiblingAfter,
   type GroupNode,
+  type LayerNode,
   updateRecord,
   updateRecordAtPath,
   validateRecordPath,
@@ -319,7 +320,49 @@ test("validateRecordPath rejects exact local collisions, blocked descendants, an
     currentRecord: groupRecord,
     destinationKeyPath: ["a", "c"],
   });
-  assert.equal(descendantMove.error, "A group cannot be moved into its own descendant path.");
+  assert.equal(descendantMove.error, "A container cannot be moved into its own descendant path.");
+});
+
+test("appendChildToGroup and createItemAtPath treat existing layers as containers", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const globalPath = await writeConfigFile(configDirectory, "global-config.json", {
+    actions: [
+      {
+        actions: [],
+        key: "f",
+        label: "Find",
+        type: "layer",
+      },
+    ],
+    type: "group",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const layerRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "f" && candidate.kind === "layer"),
+    "expected source layer",
+  );
+
+  await appendChildToGroup(layerRecord, {
+    key: "b",
+    type: "shortcut",
+    value: "Cb",
+  });
+  await createItemAtPath(globalPath, ["f", "g"], {
+    key: "x",
+    type: "command",
+    value: "echo nested",
+  });
+
+  const savedRoot = await readJsonFile<GroupNode>(globalPath);
+  const layer = savedRoot.actions[0] as LayerNode;
+  const group = layer.actions[1] as GroupNode;
+
+  assert.equal(layer.type, "layer");
+  assert.equal(layer.actions[0]?.key, "b");
+  assert.equal(group.type, "group");
+  assert.equal(group.key, "g");
+  assert.equal(group.actions[0]?.key, "x");
 });
 
 test("validateRecordPath allows local overrides of inherited fallback content in app configs", async () => {

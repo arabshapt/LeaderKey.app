@@ -7,6 +7,7 @@ import {
   discoverLiveConfigs,
   searchRecords,
   type GroupNode,
+  type LayerNode,
 } from "../src/index.js";
 import { createTempConfigDirectory, expectRecord, writeConfigFile } from "./helpers.js";
 
@@ -161,4 +162,74 @@ test("discovers live configs, respects custom names, and indexes merged fallback
   assert.equal(inheritedNormalChromeRecord.sourceScope, "normalFallback");
   assert.equal(inheritedNormalChromeRecord.sourceConfigDisplayName, "Normal Fallback Config");
   assert.equal(inheritedNormalChromeRecord.normalModeAfter, "input");
+});
+
+test("indexes layers as group-like containers and merges normal fallback layer children", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  const tapAction = {
+    normalModeAfter: "normal" as const,
+    type: "shortcut" as const,
+    value: "Cf",
+  };
+  const fallbackLayer: LayerNode = {
+    actions: [
+      {
+        key: "b",
+        type: "shortcut",
+        value: "Cb",
+      },
+    ],
+    key: "f",
+    label: "Find",
+    tapAction,
+    type: "layer",
+  };
+  const appLayer: LayerNode = {
+    actions: [
+      {
+        key: "x",
+        type: "command",
+        value: "echo local",
+      },
+    ],
+    key: "f",
+    label: "Find",
+    tapAction,
+    type: "layer",
+  };
+
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [fallbackLayer],
+    type: "group",
+  });
+  await writeConfigFile(configDirectory, "normal-app.com.google.Chrome.json", {
+    actions: [appLayer],
+    type: "group",
+  }, {
+    customName: "Chrome Normal",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const layerRecord = expectRecord(
+    payload.records.find((record) => record.effectiveConfigDisplayName === "Chrome Normal" && record.keySequence === "f"),
+    "expected merged layer record",
+  );
+  assert.equal(layerRecord.kind, "layer");
+  assert.equal(layerRecord.actionType, "layer");
+  assert.equal(layerRecord.childCount, 2);
+  assert.equal(layerRecord.tapAction?.type, "shortcut");
+
+  const localChild = expectRecord(
+    payload.records.find((record) => record.effectiveConfigDisplayName === "Chrome Normal" && record.keySequence === "f -> x"),
+    "expected local layer child",
+  );
+  assert.equal(localChild.inherited, false);
+  assert.equal(localChild.sourceScope, "normalApp");
+
+  const inheritedChild = expectRecord(
+    payload.records.find((record) => record.effectiveConfigDisplayName === "Chrome Normal" && record.keySequence === "f -> b"),
+    "expected inherited layer child",
+  );
+  assert.equal(inheritedChild.inherited, true);
+  assert.equal(inheritedChild.sourceScope, "normalFallback");
 });

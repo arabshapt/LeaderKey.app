@@ -97,6 +97,18 @@ func convertNestedFallbacksToAppSpecific(_ items: [ActionOrGroup]) -> [ActionOrG
       // Recursively convert nested items (only fallback ones)
       group.actions = convertNestedFallbacksToAppSpecific(group.actions)
       return .group(group)
+    case .layer(var layer):
+      if layer.isFromFallback {
+        layer.isFromFallback = false
+        layer.fallbackSource = nil
+      }
+      if var tapAction = layer.tapAction {
+        tapAction.isFromFallback = false
+        tapAction.fallbackSource = nil
+        layer.tapAction = tapAction
+      }
+      layer.actions = convertNestedFallbacksToAppSpecific(layer.actions)
+      return .layer(layer)
     }
   }
 }
@@ -137,6 +149,18 @@ func makeTrueDuplicate(item: ActionOrGroup) -> ActionOrGroup {
     newGroup.isFromFallback = group.isFromFallback
     newGroup.fallbackSource = group.fallbackSource
     return .group(newGroup)
+  case .layer(let layer):
+    let newActions = layer.actions.map { makeTrueDuplicate(item: $0) }
+    var newLayer = Layer(
+      key: layer.key,
+      label: layer.label,
+      iconPath: layer.iconPath,
+      tapAction: layer.tapAction,
+      actions: newActions
+    )
+    newLayer.isFromFallback = layer.isFromFallback
+    newLayer.fallbackSource = layer.fallbackSource
+    return .layer(newLayer)
   }
 }
 
@@ -219,6 +243,8 @@ struct GroupContentView: View {
           return action.isFromFallback
         case .group(let subgroup):
           return subgroup.isFromFallback
+        case .layer(let layer):
+          return layer.isFromFallback
         }
       }
     }
@@ -368,6 +394,34 @@ struct ActionOrGroupRow: View {
           onDelete: onDelete,
           onDuplicate: onDuplicate
         )
+      case .layer(let layer):
+        GroupRow(
+          group: Binding(
+            get: {
+              Group(
+                key: layer.key,
+                label: layer.label,
+                iconPath: layer.iconPath,
+                stickyMode: nil,
+                actions: layer.actions
+              )
+            },
+            set: { newGroup in
+              var updated = layer
+              updated.key = newGroup.key
+              updated.label = newGroup.label
+              updated.iconPath = newGroup.iconPath
+              updated.actions = newGroup.actions
+              item = .layer(updated)
+            }
+          ),
+          path: path,
+          validationError: validationError,
+          validationErrorsByPath: validationErrorsByPath,
+          expandedGroups: $expandedGroups,
+          onDelete: onDelete,
+          onDuplicate: onDuplicate
+        )
       }
     }
     .contextMenu {
@@ -415,6 +469,9 @@ struct IconPickerMenu: View {
             case .group(var group):
               group.iconPath = panel.url?.path
               item = .group(group)
+            case .layer(var layer):
+              layer.iconPath = panel.url?.path
+              item = .layer(layer)
             }
           }
         }
@@ -431,6 +488,9 @@ struct IconPickerMenu: View {
         case .group(var group):
           group.iconPath = nil
           item = .group(group)
+        case .layer(var layer):
+          layer.iconPath = nil
+          item = .layer(layer)
         }
       }
     } label: {
@@ -455,6 +515,15 @@ struct IconPickerMenu: View {
             set: { newPath in
               group.iconPath = newPath
               item = .group(group)
+            }
+          ))
+      case .layer(var layer):
+        SymbolPicker(
+          symbol: Binding(
+            get: { layer.iconPath },
+            set: { newPath in
+              layer.iconPath = newPath
+              item = .layer(layer)
             }
           ))
       }

@@ -4,6 +4,7 @@ import {
   actionValuePreview,
   generateActionLabel,
   generateGroupLabel,
+  generateLayerLabel,
   macroStepSummary,
   resolveActionAiDescription,
   resolveActionDescription,
@@ -16,6 +17,7 @@ import type {
   DiscoveredConfigFile,
   FlatIndexRecord,
   GroupNode,
+  LayerNode,
   ScopeType,
 } from "./types.js";
 
@@ -43,7 +45,36 @@ interface InternalGroupNode extends InternalNodeBase {
   kind: "group";
 }
 
-type InternalNode = InternalActionNode | InternalGroupNode;
+interface InternalLayerNode extends InternalNodeBase {
+  children: InternalNode[];
+  item: LayerNode;
+  kind: "layer";
+}
+
+type InternalContainerNode = InternalGroupNode | InternalLayerNode;
+type InternalNode = InternalActionNode | InternalContainerNode;
+
+function isContainerItem(item: ConfigItem): item is GroupNode | LayerNode {
+  return item.type === "group" || item.type === "layer";
+}
+
+function layerMetadataMatches(localLayer: LayerNode, fallbackLayer: LayerNode): boolean {
+  return localLayer.label === fallbackLayer.label
+    && localLayer.iconPath === fallbackLayer.iconPath
+    && JSON.stringify(localLayer.tapAction ?? null) === JSON.stringify(fallbackLayer.tapAction ?? null);
+}
+
+function containersCanMerge(localItem: ConfigItem, fallbackItem: ConfigItem): boolean {
+  if (localItem.type === "group" && fallbackItem.type === "group") {
+    return true;
+  }
+
+  if (localItem.type === "layer" && fallbackItem.type === "layer") {
+    return layerMetadataMatches(localItem, fallbackItem);
+  }
+
+  return false;
+}
 
 function createInternalNode(
   item: ConfigItem,
@@ -51,7 +82,7 @@ function createInternalNode(
   effectiveKeyPath: string[],
   inherited: boolean,
 ): InternalNode {
-  if (item.type === "group") {
+  if (isContainerItem(item)) {
     return {
       children: item.actions.map((child, index) =>
         createInternalNode(
@@ -63,9 +94,9 @@ function createInternalNode(
       effectiveKeyPath,
       inherited,
       item,
-      kind: "group",
+      kind: item.type,
       source,
-    };
+    } as InternalContainerNode;
   }
 
   return {
@@ -79,12 +110,12 @@ function createInternalNode(
 
 function mergeGroups(
   effectiveDescriptor: DiscoveredConfigFile,
-  localGroup: GroupNode,
+  localGroup: GroupNode | LayerNode,
   localSource: InternalSource,
-  fallbackGroup: GroupNode | undefined,
+  fallbackGroup: GroupNode | LayerNode | undefined,
   fallbackSource: InternalSource | undefined,
   effectiveKeyPath: string[] = [],
-): InternalGroupNode {
+): InternalContainerNode {
   const children: InternalNode[] = [];
   const fallbackChildrenByKey = new Map<string, { index: number; item: ConfigItem }>();
 
@@ -103,13 +134,13 @@ function mergeGroups(
     const mergedKeyPath = [...effectiveKeyPath, localKey];
     const fallbackMatch = fallbackChildrenByKey.get(localKey);
 
-    if (localItem.type === "group" && fallbackMatch?.item.type === "group" && fallbackSource) {
+    if (fallbackMatch && fallbackSource && containersCanMerge(localItem, fallbackMatch.item)) {
       children.push(
         mergeGroups(
           effectiveDescriptor,
-          localItem,
+          localItem as GroupNode | LayerNode,
           localItemSource,
-          fallbackMatch.item,
+          fallbackMatch.item as GroupNode | LayerNode,
           {
             ...fallbackSource,
             nodePath: [...fallbackSource.nodePath, fallbackMatch.index],
@@ -142,20 +173,31 @@ function mergeGroups(
     }
   }
 
+  const mergedItem = localGroup.type === "layer"
+    ? {
+        actions: [],
+        iconPath: localGroup.iconPath,
+        key: localGroup.key,
+        label: localGroup.label,
+        tapAction: localGroup.tapAction,
+        type: "layer" as const,
+      }
+    : {
+        actions: [],
+        key: localGroup.key,
+        label: localGroup.label,
+        stickyMode: localGroup.stickyMode,
+        type: "group" as const,
+      };
+
   return {
     children,
     effectiveKeyPath,
     inherited: false,
-    item: {
-      actions: [],
-      key: localGroup.key,
-      label: localGroup.label,
-      stickyMode: localGroup.stickyMode,
-      type: "group",
-    },
-    kind: "group",
+    item: mergedItem,
+    kind: localGroup.type,
     source: localSource,
-  };
+  } as InternalContainerNode;
 }
 
 function buildBreadcrumb(configDisplayName: string, keyPath: string[]): string[] {
@@ -171,15 +213,17 @@ function buildFlatRecord(
   const keySequence = node.effectiveKeyPath.join(" -> ");
   const sourceStatus = node.inherited ? "fallback" : "local";
 
-  if (node.kind === "group") {
-    const label = generateGroupLabel(node.item);
-    const displayLabel = label ?? node.item.label ?? node.item.key ?? "Group";
+  if (node.kind === "group" || node.kind === "layer") {
+    const label = node.kind === "layer" ? generateLayerLabel(node.item) : generateGroupLabel(node.item);
+    const fallbackLabel = node.kind === "layer" ? "Layer" : "Group";
+    const displayLabel = label ?? node.item.label ?? node.item.key ?? fallbackLabel;
     const childCount = node.children.length;
+    const actionType = node.kind;
 
     return {
-      actionType: "group",
-    activates: undefined,
-    appName: undefined,
+      actionType,
+      activates: undefined,
+      appName: undefined,
       breadcrumbDisplay: breadcrumbPath.join(" -> "),
       breadcrumbPath,
       childCount,
@@ -193,16 +237,16 @@ function buildFlatRecord(
         node.source.configPath,
         node.source.nodePath.join("."),
         node.effectiveKeyPath.join("."),
-        "group",
+        node.kind,
       ]),
       inherited: node.inherited,
       key: node.item.key ?? "",
       keySequence,
-      kind: "group",
+      kind: node.kind,
       label,
       macroStepSummary: undefined,
-    menuFallbackPaths: undefined,
-    normalModeAfter: undefined,
+      menuFallbackPaths: undefined,
+      normalModeAfter: undefined,
       parentEffectiveKeyPath,
       rawValue: "",
       searchText: [
@@ -210,7 +254,7 @@ function buildFlatRecord(
         breadcrumbPath.join(" "),
         displayLabel,
         label,
-        "group",
+        node.kind,
       ]
         .filter(Boolean)
         .join(" ")
@@ -220,8 +264,11 @@ function buildFlatRecord(
       sourceNodePath: node.source.nodePath,
       sourceScope: node.source.scope,
       sourceStatus,
-      stickyMode: node.item.stickyMode,
-      valuePreview: `Contains ${childCount} item${childCount === 1 ? "" : "s"}`,
+      stickyMode: node.kind === "group" ? node.item.stickyMode : undefined,
+      tapAction: node.kind === "layer" ? node.item.tapAction : undefined,
+      valuePreview: node.kind === "layer"
+        ? `Layer with ${childCount} item${childCount === 1 ? "" : "s"}`
+        : `Contains ${childCount} item${childCount === 1 ? "" : "s"}`,
     };
   }
 
@@ -301,7 +348,7 @@ function buildFlatRecord(
 }
 
 function flattenTree(
-  node: InternalGroupNode,
+  node: InternalContainerNode,
   effectiveDescriptor: DiscoveredConfigFile,
   records: FlatIndexRecord[] = [],
   parentEffectiveKeyPath: string[] = [],
@@ -310,7 +357,7 @@ function flattenTree(
     const record = buildFlatRecord(child, effectiveDescriptor, parentEffectiveKeyPath);
     records.push(record);
 
-    if (child.kind === "group") {
+    if (child.kind === "group" || child.kind === "layer") {
       flattenTree(child, effectiveDescriptor, records, child.effectiveKeyPath);
     }
   }
@@ -338,7 +385,7 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
       scope: descriptor.scope,
     };
 
-    let mergedRoot: InternalGroupNode;
+    let mergedRoot: InternalContainerNode;
     const inheritedDescriptor = descriptor.scope === "app"
       ? fallbackDescriptor
       : descriptor.scope === "normalApp"

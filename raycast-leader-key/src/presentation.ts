@@ -21,6 +21,11 @@ function compactActionSummary(record: FlatIndexRecord): string {
     const count = record.childCount ?? 0;
     return `${record.displayLabel} · ${count} item${count === 1 ? "" : "s"}`;
   }
+  if (record.kind === "layer") {
+    const count = record.childCount ?? 0;
+    const tap = record.tapAction ? " · tap action" : "";
+    return `${record.displayLabel} layer · ${count} item${count === 1 ? "" : "s"}${tap}`;
+  }
 
   const note = preferredDescription(record);
   const label = record.displayLabel.trim();
@@ -119,6 +124,9 @@ function recordStatusAccessories(record: FlatIndexRecord, options?: RowPresentat
 export function recordIcon(record: FlatIndexRecord): Image.ImageLike {
   if (record.kind === "group") {
     return Icon.Folder;
+  }
+  if (record.kind === "layer") {
+    return Icon.Layers;
   }
 
   switch (record.actionType) {

@@ -16,6 +16,7 @@ class ClipboardManager: ObservableObject {
     case none
     case action
     case group
+    case layer
   }
 
   private init() {}
@@ -58,6 +59,8 @@ class ClipboardManager: ObservableObject {
       return .action
     case .group:
       return .group
+    case .layer:
+      return .layer
     }
   }
 }
@@ -321,8 +324,12 @@ extension UserConfig {
             subGroup.key = effectiveKey
             item = .group(subGroup)
           }
-        @unknown default:
-          break
+        case .layer(var layer):
+          let oldKey = layer.key
+          if oldKey != effectiveKey {
+            layer.key = effectiveKey
+            item = .layer(layer)
+          }
         }
       }
       self.currentlyEditingGroup = self.currentlyEditingGroup  // Force SwiftUI update
@@ -353,11 +360,47 @@ extension UserConfig {
       update(&itemToUpdate)
       group.actions[index] = itemToUpdate
     } else {
-      guard case .group(var subgroup) = group.actions[index] else {
+      switch group.actions[index] {
+      case .group(var subgroup):
+        modifyItem(in: &subgroup, at: currentPath, update: update)
+        group.actions[index] = .group(subgroup)
+      case .layer(var layer):
+        modifyItems(in: &layer.actions, at: currentPath, update: update)
+        group.actions[index] = .layer(layer)
+      case .action:
         return
       }
-      modifyItem(in: &subgroup, at: currentPath, update: update)
-      group.actions[index] = .group(subgroup)
+    }
+  }
+
+  private func modifyItems(
+    in items: inout [ActionOrGroup],
+    at path: [Int],
+    update: (inout ActionOrGroup) -> Void
+  ) {
+    guard !path.isEmpty else { return }
+
+    var currentPath = path
+    let index = currentPath.removeFirst()
+
+    guard index >= 0 && index < items.count else { return }
+
+    if currentPath.isEmpty {
+      var itemToUpdate = items[index]
+      update(&itemToUpdate)
+      items[index] = itemToUpdate
+      return
+    }
+
+    switch items[index] {
+    case .group(var subgroup):
+      modifyItems(in: &subgroup.actions, at: currentPath, update: update)
+      items[index] = .group(subgroup)
+    case .layer(var layer):
+      modifyItems(in: &layer.actions, at: currentPath, update: update)
+      items[index] = .layer(layer)
+    case .action:
+      return
     }
   }
 
@@ -419,6 +462,33 @@ extension UserConfig {
       DispatchQueue.main.async {
         updateLogic()
         // Trigger real-time validation after group update
+        self.validateWithoutAlerts()
+        self.saveCurrentlyEditingConfig()
+      }
+    }
+  }
+
+  // Public method to update an entire layer
+  func updateLayer(at path: [Int], newLayer: Layer) {
+    // Mark as actively editing when user makes changes
+    isActivelyEditing = true
+
+    let updateLogic = {
+      self.modifyItem(in: &self.currentlyEditingGroup, at: path) { item in
+        guard case .layer = item else {
+          return
+        }
+        item = .layer(newLayer)
+      }
+    }
+
+    if Thread.isMainThread {
+      updateLogic()
+      validateWithoutAlerts()
+      saveCurrentlyEditingConfig()
+    } else {
+      DispatchQueue.main.async {
+        updateLogic()
         self.validateWithoutAlerts()
         self.saveCurrentlyEditingConfig()
       }
@@ -488,6 +558,11 @@ extension UserConfig {
         group.key = generateUniqueKey(base: key, existingKeys: existingKeys)
       }
       cleanedItem = .group(group)
+    case .layer(var layer):
+      if let key = layer.key, existingKeys.contains(key) {
+        layer.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+      }
+      cleanedItem = .layer(layer)
     }
 
     return cleanedItem
@@ -502,12 +577,23 @@ extension UserConfig {
       pathCopy.removeLast()  // Remove the insertion index
 
       for index in pathCopy {
-        guard index >= 0 && index < currentGroup.actions.count,
-          case .group(let subgroup) = currentGroup.actions[index]
-        else {
+        guard index >= 0 && index < currentGroup.actions.count else {
           break
         }
-        currentGroup = subgroup
+        switch currentGroup.actions[index] {
+        case .group(let subgroup):
+          currentGroup = subgroup
+        case .layer(let layer):
+          currentGroup = Group(
+            key: layer.key,
+            label: layer.label,
+            iconPath: layer.iconPath,
+            stickyMode: nil,
+            actions: layer.actions
+          )
+        case .action:
+          break
+        }
       }
     }
 
@@ -543,13 +629,52 @@ extension UserConfig {
     if currentPath.isEmpty {
       group.actions.insert(item, at: index)
     } else {
-      guard index < group.actions.count,
-        case .group(var subgroup) = group.actions[index]
-      else {
+      guard index < group.actions.count else {
         return
       }
-      insertItemInGroup(item, in: &subgroup, at: currentPath)
-      group.actions[index] = .group(subgroup)
+
+      switch group.actions[index] {
+      case .group(var subgroup):
+        insertItemInGroup(item, in: &subgroup, at: currentPath)
+        group.actions[index] = .group(subgroup)
+      case .layer(var layer):
+        insertItemInItems(item, in: &layer.actions, at: currentPath)
+        group.actions[index] = .layer(layer)
+      case .action:
+        return
+      }
+    }
+  }
+
+  private func insertItemInItems(_ item: ActionOrGroup, in items: inout [ActionOrGroup], at path: [Int]) {
+    guard !path.isEmpty else {
+      items.append(item)
+      return
+    }
+
+    var currentPath = path
+    let index = currentPath.removeFirst()
+
+    guard index >= 0 && index <= items.count else {
+      return
+    }
+
+    if currentPath.isEmpty {
+      items.insert(item, at: index)
+      return
+    }
+
+    guard index < items.count else { return }
+
+    switch items[index] {
+    case .group(var subgroup):
+      insertItemInItems(item, in: &subgroup.actions, at: currentPath)
+      items[index] = .group(subgroup)
+    case .layer(var layer):
+      insertItemInItems(item, in: &layer.actions, at: currentPath)
+      items[index] = .layer(layer)
+    case .action:
+      return
     }
   }
 }
@@ -582,6 +707,8 @@ struct SearchResult: Identifiable, Hashable {
       return action.type.rawValue.capitalized
     case .group:
       return "Group"
+    case .layer:
+      return "Layer"
     }
   }
 
@@ -606,6 +733,8 @@ struct SearchResult: Identifiable, Hashable {
       }
     case .group(let group):
       return "Contains \(group.actions.count) items"
+    case .layer(let layer):
+      return "Layer with \(layer.actions.count) items"
     }
   }
 
@@ -760,7 +889,7 @@ extension UserConfig {
         findings.append(result)
       }
 
-      // Recurse into subgroups if necessary
+      // Recurse into containers if necessary
       if case .group(let subGroup) = actionOrGroup {
         if includeGroups || matchReason == nil {  // Also search inside if the group itself didn't match
           let subGroupFindings = search(
@@ -773,6 +902,26 @@ extension UserConfig {
             keySequence: newKeySequence
           )
           findings.append(contentsOf: subGroupFindings)
+        }
+      } else if case .layer(let layer) = actionOrGroup {
+        if includeGroups || matchReason == nil {
+          let layerGroup = Group(
+            key: layer.key,
+            label: layer.label,
+            iconPath: layer.iconPath,
+            stickyMode: nil,
+            actions: layer.actions
+          )
+          let layerFindings = search(
+            in: layerGroup,
+            query: query,
+            configName: configName,
+            matchType: matchType,
+            includeGroups: includeGroups,
+            currentPath: newPath,
+            keySequence: newKeySequence
+          )
+          findings.append(contentsOf: layerFindings)
         }
       }
     }
@@ -811,6 +960,7 @@ let defaultConfig = """
 
 enum Type: String, Codable {
   case group
+  case layer
   case application
   case url
   case command
@@ -981,26 +1131,61 @@ struct Group: Item, Codable, Equatable, Identifiable {
   }
 }
 
+struct Layer: Item, Codable, Equatable, Identifiable {
+  let id = UUID()
+  var key: String?
+  var type: Type = .layer
+  var label: String?
+  var iconPath: String?
+  var tapAction: Action?
+  var actions: [ActionOrGroup]
+
+  // Metadata for fallback system (not persisted to JSON)
+  var isFromFallback: Bool = false
+  var fallbackSource: String?
+
+  enum CodingKeys: String, CodingKey {
+    case key, type, label, iconPath, tapAction, actions
+    // Exclude isFromFallback and fallbackSource from JSON persistence
+  }
+
+  var displayName: String {
+    guard let labelValue = label else { return "Layer" }
+    if labelValue.isEmpty { return "Layer" }
+    return labelValue
+  }
+
+  static func == (lhs: Layer, rhs: Layer) -> Bool {
+    return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
+      && lhs.iconPath == rhs.iconPath && lhs.tapAction == rhs.tapAction
+      && lhs.actions == rhs.actions
+    // Intentionally exclude isFromFallback and fallbackSource from equality comparison
+  }
+}
+
 enum ActionOrGroup: Codable, Equatable, Identifiable {
   var id: UUID {
     switch self {
     case .action(let action): return action.id
     case .group(let group): return group.id
+    case .layer(let layer): return layer.id
     }
   }
 
   case action(Action)
   case group(Group)
+  case layer(Layer)
 
   var item: Item {
     switch self {
     case .group(let group): return group
     case .action(let action): return action
+    case .layer(let layer): return layer
     }
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter
+    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter, tapAction
   }
 
   init(from decoder: Decoder) throws {
@@ -1021,6 +1206,11 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       let actions = try container.decode([ActionOrGroup].self, forKey: .actions)
       self = .group(
         Group(key: key, label: label, iconPath: iconPath, stickyMode: stickyMode, actions: actions))
+    case .layer:
+      let actions = try container.decode([ActionOrGroup].self, forKey: .actions)
+      let tapAction = try container.decodeIfPresent(Action.self, forKey: .tapAction)
+      self = .layer(
+        Layer(key: key, label: label, iconPath: iconPath, tapAction: tapAction, actions: actions))
     default:
       let value = try container.decodeIfPresent(String.self, forKey: .value) ?? ""
       let macroSteps = try container.decodeIfPresent([MacroStep].self, forKey: .macroSteps)
@@ -1064,6 +1254,15 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       }
       try container.encodeIfPresent(group.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(group.stickyMode, forKey: .stickyMode)
+    case .layer(let layer):
+      try container.encode(layer.key, forKey: .key)
+      try container.encode(Type.layer, forKey: .type)
+      try container.encode(layer.actions, forKey: .actions)
+      if layer.label != nil && !layer.label!.isEmpty {
+        try container.encodeIfPresent(layer.label, forKey: .label)
+      }
+      try container.encodeIfPresent(layer.iconPath, forKey: .iconPath)
+      try container.encodeIfPresent(layer.tapAction, forKey: .tapAction)
     }
   }
 }
@@ -1102,6 +1301,32 @@ extension ActionOrGroup {
           iconPath: group.iconPath,
           stickyMode: group.stickyMode,
           actions: group.actions.map { $0.makeTrueDuplicate() }
+        ))
+    case .layer(let layer):
+      return .layer(
+        Layer(
+          key: layer.key,
+          label: layer.label,
+          iconPath: layer.iconPath,
+          tapAction: layer.tapAction.map { action in
+            Action(
+              key: action.key,
+              type: action.type,
+              label: action.label,
+              description: action.description,
+              aiDescription: action.aiDescription,
+              value: action.value,
+              iconPath: action.iconPath,
+              activates: action.activates,
+              menuFallbackPaths: action.menuFallbackPaths,
+              stickyMode: action.stickyMode,
+              macroSteps: action.macroSteps?.map { step in
+                MacroStep(action: step.action, delay: step.delay, enabled: step.enabled)
+              },
+              normalModeAfter: action.normalModeAfter
+            )
+          },
+          actions: layer.actions.map { $0.makeTrueDuplicate() }
         ))
     }
   }

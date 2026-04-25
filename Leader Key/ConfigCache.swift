@@ -87,6 +87,8 @@ final class ConfigCache {
         itemCount += 1
         if case .group(let subgroup) = item {
           countItems(subgroup.actions)
+        } else if case .layer(let layer) = item {
+          countItems(layer.actions)
         }
       }
     }

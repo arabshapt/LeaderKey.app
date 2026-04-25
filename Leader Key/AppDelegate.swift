@@ -2198,6 +2198,14 @@ extension AppDelegate {
         }
 
         return true  // Event handled
+      case .layer(let layer):
+        #if DEBUG
+          debugLog(
+            "[AppDelegate] processKeyInSequence: Ignoring normal-mode layer '\(layer.displayName)' in Leader Key overlay."
+          )
+        #endif
+        DispatchQueue.main.async { self.controller.window.shake() }
+        return true
       }
     } else {
       // Key not found in the current group.

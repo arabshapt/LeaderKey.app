@@ -2,9 +2,15 @@ import fs from "node:fs/promises";
 
 import { FALLBACK_CONFIG_DISPLAY_NAME } from "./constants.js";
 import { loadGroupFromFile, writeGroupToFile } from "./discovery.js";
-import { generateActionLabel, generateGroupLabel, resolveActionAiDescription, resolveActionDescription } from "./labels.js";
+import {
+  generateActionLabel,
+  generateGroupLabel,
+  generateLayerLabel,
+  resolveActionAiDescription,
+  resolveActionDescription,
+} from "./labels.js";
 import { cloneConfigItem } from "./utils.js";
-import type { ActionNode, ConfigItem, FlatIndexRecord, GroupNode } from "./types.js";
+import type { ActionNode, ConfigItem, FlatIndexRecord, GroupNode, LayerNode } from "./types.js";
 
 export type MutationMode = "edit-source" | "override-in-effective-config";
 
@@ -13,6 +19,12 @@ interface JsonNode {
   kind: "array" | "literal" | "object";
   offset: number;
   properties?: Map<string, JsonNode>;
+}
+
+type ContainerNode = GroupNode | LayerNode;
+
+function isContainerItem(item: ConfigItem): item is ContainerNode {
+  return item.type === "group" || item.type === "layer";
 }
 
 function isWhitespace(char: string | undefined): boolean {
@@ -175,10 +187,10 @@ function parseJsonTree(text: string): JsonNode {
 }
 
 function getMutableItemAtPath(group: GroupNode, nodePath: number[]): ConfigItem {
-  let currentGroup = group;
+  let currentGroup: ContainerNode = group;
 
   for (let index = 0; index < nodePath.length; index += 1) {
-    const item = currentGroup.actions[nodePath[index]!];
+    const item: ConfigItem | undefined = currentGroup.actions[nodePath[index]!];
     if (!item) {
       throw new Error(`Invalid node path: ${nodePath.join(".")}`);
     }
@@ -187,8 +199,8 @@ function getMutableItemAtPath(group: GroupNode, nodePath: number[]): ConfigItem 
       return item;
     }
 
-    if (item.type !== "group") {
-      throw new Error(`Path ${nodePath.join(".")} does not point to a group`);
+    if (!isContainerItem(item)) {
+      throw new Error(`Path ${nodePath.join(".")} does not point to a container`);
     }
 
     currentGroup = item;
@@ -197,24 +209,28 @@ function getMutableItemAtPath(group: GroupNode, nodePath: number[]): ConfigItem 
   return currentGroup;
 }
 
-function getMutableGroupAtPath(group: GroupNode, nodePath: number[]): GroupNode {
+function getMutableContainerAtPath(group: GroupNode, nodePath: number[]): ContainerNode {
   if (nodePath.length === 0) {
     return group;
   }
 
   const item = getMutableItemAtPath(group, nodePath);
-  if (item.type !== "group") {
-    throw new Error(`Path ${nodePath.join(".")} is not a group`);
+  if (!isContainerItem(item)) {
+    throw new Error(`Path ${nodePath.join(".")} is not a container`);
   }
   return item;
 }
 
-function getMutableParentGroup(group: GroupNode, nodePath: number[]): GroupNode {
-  return getMutableGroupAtPath(group, nodePath.slice(0, -1));
+function getMutableParentContainer(group: GroupNode, nodePath: number[]): ContainerNode {
+  return getMutableContainerAtPath(group, nodePath.slice(0, -1));
 }
 
 function nextGroupLabel(group: GroupNode): string | undefined {
   return generateGroupLabel(group);
+}
+
+function nextLayerLabel(layer: LayerNode): string | undefined {
+  return generateLayerLabel(layer);
 }
 
 function nextActionLabel(action: ActionNode): string {
@@ -242,6 +258,17 @@ function normalizeItemBeforeSave(item: ConfigItem): ConfigItem {
     };
   }
 
+  if (item.type === "layer") {
+    return {
+      ...item,
+      actions: item.actions.map((child) => normalizeItemBeforeSave(child)),
+      label: nextLayerLabel(item) ?? item.label,
+      tapAction: item.tapAction
+        ? (normalizeItemBeforeSave(item.tapAction) as ActionNode)
+        : undefined,
+    };
+  }
+
   return {
     ...item,
     aiDescription: resolveActionAiDescription(item),
@@ -250,18 +277,18 @@ function normalizeItemBeforeSave(item: ConfigItem): ConfigItem {
   };
 }
 
-function ensureGroupPathByKeys(root: GroupNode, keyPath: string[]): GroupNode {
-  let current = root;
+function ensureGroupPathByKeys(root: GroupNode, keyPath: string[]): ContainerNode {
+  let current: ContainerNode = root;
   for (const key of keyPath) {
     const blockingAction = current.actions.find(
-      (item) => item.type !== "group" && (item.key ?? "") === key,
+      (item) => !isContainerItem(item) && (item.key ?? "") === key,
     );
     if (blockingAction) {
       throw new Error(`Cannot create subgroup '${key}' because an action with that key already exists.`);
     }
 
-    const existingGroup = current.actions.find(
-      (item): item is GroupNode => item.type === "group" && (item.key ?? "") === key,
+    const existingGroup: ContainerNode | undefined = current.actions.find(
+      (item): item is ContainerNode => isContainerItem(item) && (item.key ?? "") === key,
     );
 
     if (existingGroup) {
@@ -282,7 +309,7 @@ function ensureGroupPathByKeys(root: GroupNode, keyPath: string[]): GroupNode {
   return current;
 }
 
-function replaceOrAppendByKey(group: GroupNode, item: ConfigItem): void {
+function replaceOrAppendByKey(group: ContainerNode, item: ConfigItem): void {
   const key = item.key ?? "";
   const existingIndex = group.actions.findIndex((candidate) => (candidate.key ?? "") === key);
   if (existingIndex >= 0) {
@@ -312,7 +339,7 @@ export async function updateRecord(
 
   const targetPath = record.sourceConfigPath;
   const root = await loadGroupFromFile(targetPath);
-  const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
+  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
   const itemIndex = record.sourceNodePath.at(-1)!;
   parentGroup.actions.splice(itemIndex, 1, normalizeItemBeforeSave(nextItem));
   await writeGroupToFile(targetPath, root);
@@ -344,7 +371,7 @@ export async function updateRecordAtPath(
 
   const targetPath = record.sourceConfigPath;
   const root = await loadGroupFromFile(targetPath);
-  const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
+  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
   const itemIndex = record.sourceNodePath.at(-1)!;
   parentGroup.actions.splice(itemIndex, 1);
 
@@ -369,7 +396,7 @@ export async function deleteRecord(record: FlatIndexRecord): Promise<string> {
   }
 
   const root = await loadGroupFromFile(record.sourceConfigPath);
-  const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
+  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
   parentGroup.actions.splice(record.sourceNodePath.at(-1)!, 1);
   await writeGroupToFile(record.sourceConfigPath, root);
   return record.sourceConfigPath;
@@ -385,7 +412,7 @@ export async function insertSiblingAfter(record: FlatIndexRecord, item: ConfigIt
   }
 
   const root = await loadGroupFromFile(record.sourceConfigPath);
-  const parentGroup = getMutableParentGroup(root, record.sourceNodePath);
+  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
   const index = record.sourceNodePath.at(-1)! + 1;
   parentGroup.actions.splice(index, 0, normalizeItemBeforeSave(item));
   await writeGroupToFile(record.sourceConfigPath, root);
@@ -393,8 +420,8 @@ export async function insertSiblingAfter(record: FlatIndexRecord, item: ConfigIt
 }
 
 export async function appendChildToGroup(record: FlatIndexRecord, item: ConfigItem): Promise<string> {
-  if (record.kind !== "group") {
-    throw new Error("appendChildToGroup requires a group record");
+  if (record.kind !== "group" && record.kind !== "layer") {
+    throw new Error("appendChildToGroup requires a container record");
   }
 
   if (record.inherited) {
@@ -406,7 +433,7 @@ export async function appendChildToGroup(record: FlatIndexRecord, item: ConfigIt
   }
 
   const root = await loadGroupFromFile(record.sourceConfigPath);
-  const group = getMutableGroupAtPath(root, record.sourceNodePath);
+  const group = getMutableContainerAtPath(root, record.sourceNodePath);
   group.actions.push(normalizeItemBeforeSave(item));
   await writeGroupToFile(record.sourceConfigPath, root);
   return record.sourceConfigPath;
@@ -456,19 +483,30 @@ export function cloneRecordToConfigItem(record: FlatIndexRecord): ConfigItem {
     };
   }
 
+  if (record.kind === "layer") {
     return {
-      activates: record.activates,
-      aiDescription: record.aiDescription,
-      description: record.description,
+      actions: [],
+      iconPath: undefined,
       key: record.key,
       label: record.label,
-      menuFallbackPaths: record.menuFallbackPaths,
-      normalModeAfter: record.normalModeAfter,
-      stickyMode: record.stickyMode,
-      type: record.actionType as ActionNode["type"],
-      value: record.rawValue,
+      tapAction: record.tapAction,
+      type: "layer",
     };
   }
+
+  return {
+    activates: record.activates,
+    aiDescription: record.aiDescription,
+    description: record.description,
+    key: record.key,
+    label: record.label,
+    menuFallbackPaths: record.menuFallbackPaths,
+    normalModeAfter: record.normalModeAfter,
+    stickyMode: record.stickyMode,
+    type: record.actionType as ActionNode["type"],
+    value: record.rawValue,
+  };
+}
 
 export async function openConfigLocation(record: FlatIndexRecord): Promise<string> {
   return record.inherited && record.sourceConfigDisplayName === FALLBACK_CONFIG_DISPLAY_NAME

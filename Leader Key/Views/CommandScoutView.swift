@@ -590,6 +590,7 @@ struct CommandScoutView: View {
             switch item {
             case .action(let a): return a.key
             case .group(let g): return g.key
+            case .layer(let l): return l.key
             }
         }
         let configSummary = existingKeys.isEmpty ? "Empty" : existingKeys.joined(separator: ", ")

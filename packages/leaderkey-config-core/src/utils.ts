@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 
-import type { ActionNode, ConfigItem, GroupNode } from "./types.js";
+import type { ActionNode, ConfigItem, GroupNode, LayerNode } from "./types.js";
 
 const SHORTCUT_KEY_NAMES = new Map<string, string>([
   ["backspace", "Backspace"],
@@ -55,8 +55,16 @@ export function isGroup(item: ConfigItem): item is GroupNode {
   return item.type === "group";
 }
 
+export function isLayer(item: ConfigItem): item is LayerNode {
+  return item.type === "layer";
+}
+
+export function isContainer(item: ConfigItem): item is GroupNode | LayerNode {
+  return item.type === "group" || item.type === "layer";
+}
+
 export function isAction(item: ConfigItem): item is ActionNode {
-  return item.type !== "group";
+  return item.type !== "group" && item.type !== "layer";
 }
 
 export function sortObjectKeys<T>(value: T): T {

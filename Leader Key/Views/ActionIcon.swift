@@ -24,6 +24,8 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
       (action.iconPath, action.type, action.value)
     case .group(let group):
       (group.iconPath, nil, nil)
+    case .layer(let layer):
+      (layer.iconPath, .layer, nil)
     }
 
   // Handle custom icon path if present
@@ -83,6 +85,11 @@ func actionIcon(item: ActionOrGroup, iconSize: NSSize) -> some View {
     case .keystroke:
       return AnyView(
         Image(systemName: "keyboard")
+          .foregroundStyle(.secondary)
+          .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
+    case .layer:
+      return AnyView(
+        Image(systemName: "square.stack.3d.up")
           .foregroundStyle(.secondary)
           .frame(width: iconSize.width, height: iconSize.height, alignment: .center))
     default:

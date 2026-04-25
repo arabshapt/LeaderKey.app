@@ -38,6 +38,7 @@ import { RecordEditorForm } from "./editor-form.js";
 import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { isNormalScope } from "./scope-utils.js";
 
 interface PathEditorViewProps {
   configDirectory: string;
@@ -177,11 +178,26 @@ function rootOutcomeRow(
 }
 
 function childBrowseTarget(record: FlatIndexRecord): string[] {
-  return record.kind === "group" ? record.effectiveKeyPath : record.parentEffectiveKeyPath;
+  return record.kind === "group" || record.kind === "layer" ? record.effectiveKeyPath : record.parentEffectiveKeyPath;
 }
 
 function keyPathMatches(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function isContainerRecord(record: FlatIndexRecord): boolean {
+  return record.kind === "group" || record.kind === "layer";
+}
+
+function recordKindLabel(record: Pick<FlatIndexRecord, "kind">): string {
+  switch (record.kind) {
+    case "group":
+      return "group";
+    case "layer":
+      return "layer";
+    case "action":
+      return "action";
+  }
 }
 
 export function recordPathInput(record: Pick<FlatIndexRecord, "effectiveKeyPath">): string {
@@ -240,6 +256,7 @@ export function PathEditorView(props: PathEditorViewProps) {
   const ownerOrAuthorName = environment.ownerOrAuthorName;
   const extensionName = environment.extensionName;
   const { push } = useNavigation();
+  const canCreateLayerInConfig = isNormalScope(configSummary.scope);
 
   useEffect(() => {
     setPayload(initialPayload);
@@ -307,7 +324,7 @@ export function PathEditorView(props: PathEditorViewProps) {
       const clipboardPayload = await copyRecordToInternalClipboard(record);
       await showToast({
         style: Toast.Style.Success,
-        title: clipboardPayload.kind === "group" ? "Copied group" : "Copied action",
+        title: `Copied ${clipboardPayload.kind}`,
         message: clipboardPayload.sourceDisplayLabel,
       });
     } catch (error) {
@@ -434,7 +451,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             }
           : {
               style: Toast.Style.Success,
-              title: clipboardPayload.kind === "group" ? "Pasted group" : "Pasted action",
+              title: `Pasted ${clipboardPayload.kind}`,
               message: `Added to ${target.groupLabel}`,
             },
       );
@@ -611,7 +628,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                     preferredEditor={preferredEditor}
                   />
                 }
-                title="Open Group"
+                title={record.kind === "layer" ? "Open Layer" : "Open Group"}
               />
               <Action.Push
                 icon={Icon.Pencil}
@@ -627,13 +644,13 @@ export function PathEditorView(props: PathEditorViewProps) {
                     title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
                   />
                 }
-                title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
+                title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
               />
               <Action
                 icon={Icon.CopyClipboard}
                 onAction={() => void handleCopy(record)}
                 shortcut={{ modifiers: ["cmd"], key: "c" }}
-                title="Copy Group"
+                title={`Copy ${recordKindLabel(record)}`}
               />
               <Action
                 icon={Icon.Clipboard}
@@ -653,17 +670,17 @@ export function PathEditorView(props: PathEditorViewProps) {
                   onAction={() => void handleDelete(record)}
                   shortcut={{ modifiers: ["cmd"], key: "backspace" }}
                   style={Action.Style.Destructive}
-                  title="Delete Group"
+                  title={record.kind === "layer" ? "Delete Layer" : "Delete Group"}
                 />
               ) : null}
             </ActionPanel>
           ),
           detail: recordListItemDetail(record),
-          icon: Icon.Folder,
+          icon: recordIcon(record),
           id: `outcome:group:${record.id}`,
           subtitle: {
             tooltip: `Open ${record.displayLabel}`,
-            value: "Open group",
+            value: record.kind === "layer" ? "Open layer" : "Open group",
           },
           title: {
             tooltip: typedPathTitle(analysis),
@@ -801,6 +818,31 @@ export function PathEditorView(props: PathEditorViewProps) {
                 }
                 title="Create Group at Path"
               />
+              {canCreateLayerInConfig ? (
+                <Action.Push
+                  icon={Icon.Layers}
+                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  target={
+                    <RecordEditorForm
+                      configDirectory={configDirectory}
+                      createAtPath={{
+                        configDisplayName: configSummary.displayName,
+                        configPath: configSummary.filePath,
+                        parentKeyPath: analysis.createParentKeyPath,
+                        suggestedKey: analysis.finalKey,
+                      }}
+                      initialType="layer"
+                      mode="create-at-path"
+                      onDidSave={async (nextPayload, context) => {
+                        await handleDidMutate(nextPayload);
+                        setPathInput(context.savedKeyPath.join(""));
+                      }}
+                      title={`Create Layer at ${typedPathTitle(analysis)}`}
+                    />
+                  }
+                  title="Create Layer at Path"
+                />
+              ) : null}
               <Action.Push
                 icon={Icon.ChevronRight}
                 shortcut={{ modifiers: ["cmd"], key: "o" }}
@@ -886,6 +928,57 @@ export function PathEditorView(props: PathEditorViewProps) {
           subtitle: {
             tooltip: `Create group at ${typedPathTitle(analysis)}`,
             value: "Create group",
+          },
+          title: {
+            tooltip: typedPathTitle(analysis),
+            value: typedPathTitle(analysis),
+          },
+        },
+        {
+          actions: (
+            <ActionPanel>
+              <Action.Push
+                icon={Icon.Layers}
+                shortcut={{ key: "return", modifiers: [] }}
+                target={
+                  <RecordEditorForm
+                    configDirectory={configDirectory}
+                    createAtPath={{
+                      configDisplayName: configSummary.displayName,
+                      configPath: configSummary.filePath,
+                      parentKeyPath: analysis.createParentKeyPath,
+                      suggestedKey: analysis.finalKey,
+                    }}
+                    initialType="layer"
+                    mode="create-at-path"
+                    onDidSave={async (nextPayload, context) => {
+                      await handleDidMutate(nextPayload);
+                      setPathInput(context.savedKeyPath.join(""));
+                    }}
+                    title={`Create Layer at ${typedPathTitle(analysis)}`}
+                  />
+                }
+                title="Create Layer at Path"
+              />
+              <Action
+                icon={Icon.Clipboard}
+                onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
+                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                title="Paste into Deepest Existing Group"
+              />
+            </ActionPanel>
+          ),
+          detail: createOutcomeDetail(
+            analysis,
+            "Create Layer at Path",
+            `Creates a new hold layer at ${typedPathTitle(analysis)}.${analysis.autoCreateGroupKeys.length > 0 ? ` Missing intermediate groups will be created automatically: ${autoGroups}.` : ""}`,
+            [...sharedMetadata, { title: "Final Type", text: "layer" }],
+          ),
+          icon: Icon.Layers,
+          id: `outcome:create-layer:${configSummary.filePath}:${analysis.input}`,
+          subtitle: {
+            tooltip: `Create layer at ${typedPathTitle(analysis)}`,
+            value: "Create layer",
           },
           title: {
             tooltip: typedPathTitle(analysis),
@@ -1017,10 +1110,61 @@ export function PathEditorView(props: PathEditorViewProps) {
           value: literalPathTitle,
         },
       },
+      {
+        actions: (
+          <ActionPanel>
+            <Action.Push
+              icon={Icon.Layers}
+              shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+              target={
+                <RecordEditorForm
+                  configDirectory={configDirectory}
+                  createAtPath={{
+                    configDisplayName: configSummary.displayName,
+                    configPath: configSummary.filePath,
+                    parentKeyPath,
+                    suggestedKey,
+                  }}
+                  initialType="layer"
+                  mode="create-at-path"
+                  onDidSave={async (nextPayload, context) => {
+                    await handleDidMutate(nextPayload);
+                    setPathInput(context.savedKeyPath.join(""));
+                  }}
+                  title={`Create Layer at ${literalPathTitle}`}
+                />
+              }
+              title="Create Literal Layer"
+            />
+          </ActionPanel>
+        ),
+        detail: outcomeDetail(
+          "Create Literal Layer",
+          [
+            "# Create Literal Layer",
+            "",
+            `Treat \`${pathInput.trim()}\` as the literal key path \`${literalPathTitle}\`, not the alias-resolved match.`,
+            "",
+            "Missing intermediate groups will be created automatically if needed.",
+          ].join("\n"),
+          metadata,
+        ),
+        icon: Icon.Layers,
+        id: `outcome:literal-create-layer:${configSummary.filePath}:${pathInput}`,
+        subtitle: {
+          tooltip: `Create literal layer at ${literalPathTitle}`,
+          value: "Create literal layer",
+        },
+        title: {
+          tooltip: literalPathTitle,
+          value: literalPathTitle,
+        },
+      },
     ];
   }
 
-  const topRows = [...literalTypedPathRows(), ...outcomeRows()];
+  const topRows = [...literalTypedPathRows(), ...outcomeRows()]
+    .filter((row) => canCreateLayerInConfig || !row.id.includes("create-layer"));
   const childRows = analysis.visibleChildren;
   const combinedIds = [...topRows.map((row) => row.id), ...childRows.map((record) => record.id)];
   const activeSelectedId = selectedId && combinedIds.includes(selectedId)
@@ -1056,7 +1200,7 @@ export function PathEditorView(props: PathEditorViewProps) {
         {childRows.map((record) => {
           const row = buildRowPresentation(record);
           const isSelected = activeSelectedId === record.id;
-          const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
+          const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
             ? { modifiers: ["cmd"], key: "return" }
             : { modifiers: ["cmd"], key: "." };
 
@@ -1071,7 +1215,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               title={row.title}
               actions={
                 <ActionPanel>
-                  {record.kind === "group" ? (
+                  {isContainerRecord(record) ? (
                     <>
                       <Action.Push
                         icon={Icon.ChevronRight}
@@ -1086,7 +1230,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                             preferredEditor={preferredEditor}
                           />
                         }
-                        title="Open Group"
+                        title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                       />
                       <Action.Push
                         icon={Icon.Pencil}
@@ -1102,7 +1246,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                             title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
                           />
                         }
-                        title={record.inherited ? "Edit Fallback Source" : "Edit Group"}
+                        title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                       />
                     </>
                   ) : (
@@ -1133,7 +1277,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                     icon={Icon.CopyClipboard}
                     onAction={() => void handleCopy(record)}
                     shortcut={{ modifiers: ["cmd"], key: "c" }}
-                    title={record.kind === "group" ? "Copy Group" : "Copy Action"}
+                    title={`Copy ${recordKindLabel(record)}`}
                   />
                   <Action
                     icon={Icon.Clipboard}
@@ -1166,7 +1310,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                         preferredEditor={preferredEditor}
                       />
                     }
-                    title={record.kind === "group" ? "Browse Group in Config" : "Browse in Config"}
+                  title={isContainerRecord(record) ? `Browse ${record.kind === "layer" ? "Layer" : "Group"} in Config` : "Browse in Config"}
                   />
                   {!record.inherited ? (
                     <Action

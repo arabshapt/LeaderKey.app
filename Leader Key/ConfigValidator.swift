@@ -28,6 +28,9 @@ enum ValidationErrorType {
   case emptyKey
   case nonSingleCharacterKey
   case duplicateKey
+  case invalidLayerTrigger
+  case invalidLayerTapAction
+  case nestedLayer
 }
 
 enum ValidationSeverity {
@@ -50,15 +53,38 @@ enum ValidationSeverity {
 }
 
 class ConfigValidator {
+  private static let disallowedLayerTriggerKeys: Set<String> = [
+    "caps_lock",
+    "left_command",
+    "right_command",
+    "left_option",
+    "right_option",
+    "left_control",
+    "right_control",
+    "left_shift",
+    "right_shift",
+    "fn",
+    "command",
+    "option",
+    "control",
+    "shift"
+  ]
+
   static func validate(group: Group) -> [ValidationError] {
     var errors = [ValidationError]()
-    validateGroup(group, path: [], errors: &errors)
+    validateGroup(group, path: [], errors: &errors, insideLayer: false)
     return errors
   }
 
-  private static func validateGroup(_ group: Group, path: [Int], errors: inout [ValidationError]) {
+  private static func validateGroup(
+    _ group: Group,
+    path: [Int],
+    errors: inout [ValidationError],
+    insideLayer: Bool,
+    validateSelfKey: Bool = true
+  ) {
     // Check if the group key is valid (if not root level)
-    if !path.isEmpty {
+    if validateSelfKey && !path.isEmpty {
       validateKey(group.key, at: path, errors: &errors)
     }
 
@@ -75,7 +101,10 @@ class ConfigValidator {
         validateKey(keyToValidate, at: currentPath, errors: &errors)
       case .group(let subgroup):
         keyToValidate = subgroup.key
-        validateGroup(subgroup, path: currentPath, errors: &errors)
+        validateGroup(subgroup, path: currentPath, errors: &errors, insideLayer: insideLayer)
+      case .layer(let layer):
+        keyToValidate = layer.key
+        validateLayer(layer, path: currentPath, errors: &errors, insideLayer: insideLayer)
       }
 
       // Check for duplicates using keyToValidate
@@ -101,6 +130,56 @@ class ConfigValidator {
         }
       }
     }
+  }
+
+  private static func validateLayer(
+    _ layer: Layer,
+    path: [Int],
+    errors: inout [ValidationError],
+    insideLayer: Bool
+  ) {
+    validateKey(layer.key, at: path, errors: &errors)
+
+    if insideLayer {
+      errors.append(
+        ValidationError(
+          path: path,
+          message: "Nested layers are not supported",
+          type: .nestedLayer,
+          suggestion: "Use a group inside the layer, or move this layer to normal mode base level"
+        ))
+    }
+
+    if let key = layer.key?.lowercased(), disallowedLayerTriggerKeys.contains(key) {
+      errors.append(
+        ValidationError(
+          path: path,
+          message: "Modifier keys cannot be used as normal-mode layer triggers",
+          type: .invalidLayerTrigger,
+          suggestion: "Use a non-modifier key for the layer trigger"
+        ))
+    }
+
+    if let tapAction = layer.tapAction,
+      tapAction.type == .group || tapAction.type == .layer
+    {
+      errors.append(
+        ValidationError(
+          path: path,
+          message: "Layer tapAction must be a terminal action",
+          type: .invalidLayerTapAction,
+          suggestion: "Use a shortcut, command, macro, or normal-mode control action"
+        ))
+    }
+
+    let layerGroup = Group(
+      key: layer.key,
+      label: layer.label,
+      iconPath: layer.iconPath,
+      stickyMode: nil,
+      actions: layer.actions
+    )
+    validateGroup(layerGroup, path: path, errors: &errors, insideLayer: true, validateSelfKey: false)
   }
 
   private static func validateKey(_ key: String?, at path: [Int], errors: inout [ValidationError]) {
@@ -154,11 +233,22 @@ class ConfigValidator {
         return currentGroup.actions[index]
       } else {
         // We need to go deeper
-        guard case .group(let subgroup) = currentGroup.actions[index] else {
+        guard index < currentGroup.actions.count else { return nil }
+        switch currentGroup.actions[index] {
+        case .group(let subgroup):
+          currentGroup = subgroup
+        case .layer(let layer):
+          currentGroup = Group(
+            key: layer.key,
+            label: layer.label,
+            iconPath: layer.iconPath,
+            stickyMode: nil,
+            actions: layer.actions
+          )
+        case .action:
           // Path points through an action, which can't contain other items
           return nil
         }
-        currentGroup = subgroup
       }
     }
 

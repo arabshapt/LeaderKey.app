@@ -600,6 +600,121 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testNormalModeLayerExportsHoldVariablesTapActionChildrenAndEscapeReset() throws {
+    let tapAction = Action(
+      key: nil,
+      type: .shortcut,
+      label: "Tap Find",
+      value: "Cf",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil,
+      normalModeAfter: .normal
+    )
+    let normalFallbackRoot = Group(
+      key: nil,
+      label: "Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: tapAction,
+            actions: [
+              .action(makeShortcutAction(key: "b", label: "Back", value: "Cb")),
+              .group(
+                Group(
+                  key: "g",
+                  label: "Group",
+                  iconPath: nil,
+                  stickyMode: nil,
+                  actions: [.action(makeCommandAction(key: "x", label: "Nested", value: "echo nested"))]
+                )
+              ),
+            ]
+          )
+        ),
+        .layer(
+          Layer(
+            key: "h",
+            label: "Plain",
+            iconPath: nil,
+            tapAction: nil,
+            actions: [.action(makeShortcutAction(key: "j", label: "Jump", value: "Cj"))]
+          )
+        ),
+      ]
+    )
+
+    try withTemporaryConfigDirectory(normalFallbackRoot: normalFallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: UserConfig(), appConfigs: [])
+      let normalFallbackRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalFallbackMode" })
+      )
+      let normalFallbackManipulators = flattenManipulators(from: [normalFallbackRule])
+      let trigger = try XCTUnwrap(normalFallbackManipulators.first(where: { fromKeyCode(in: $0) == "f" }))
+
+      XCTAssertTrue(hasVariableCondition(trigger, name: "leaderkey_normal_layer_state", value: 0, type: "variable_if"))
+      XCTAssertTrue(hasSetVariableNamed(trigger, name: "leaderkey_normal_layer_state"))
+      XCTAssertTrue(hasSetVariable(manipulator: trigger, name: "leaderkey_normal_layer_sequence_state", value: 0))
+      XCTAssertTrue(
+        toAfterKeyUpEvents(in: trigger).contains(where: {
+          eventHasSetVariable($0, name: "leaderkey_normal_layer_state", value: 0)
+        })
+      )
+      XCTAssertTrue(
+        toAfterKeyUpEvents(in: trigger).contains(where: {
+          eventHasSetVariable($0, name: "leaderkey_normal_layer_sequence_state", value: 0)
+        })
+      )
+      XCTAssertTrue(
+        toIfAloneEvents(in: trigger).contains(where: {
+          eventHasSendUserCommand($0, prefix: "stateid ")
+        })
+      )
+
+      let noTapTrigger = try XCTUnwrap(normalFallbackManipulators.first(where: { fromKeyCode(in: $0) == "h" }))
+      XCTAssertTrue(toIfAloneEvents(in: noTapTrigger).contains(where: { eventHasKeyCode($0, keyCode: "h") }))
+
+      let childAction = try XCTUnwrap(normalFallbackManipulators.first(where: {
+        fromKeyCode(in: $0) == "b"
+          && hasCondition($0, name: "leaderkey_normal_layer_state", type: "variable_if")
+      }))
+      XCTAssertTrue(hasSendUserCommand(manipulator: childAction, prefix: "stateid "))
+      XCTAssertTrue(hasSetVariable(manipulator: childAction, name: "leaderkey_normal_layer_sequence_state", value: 0))
+
+      let childGroup = try XCTUnwrap(normalFallbackManipulators.first(where: {
+        fromKeyCode(in: $0) == "g"
+          && hasCondition($0, name: "leaderkey_normal_layer_state", type: "variable_if")
+      }))
+      XCTAssertTrue(hasSetVariableNamed(childGroup, name: "leaderkey_normal_layer_sequence_state"))
+      XCTAssertFalse(hasSetVariableNamed(childGroup, name: "leaderkey_normal_state"))
+      XCTAssertFalse(hasSendUserCommand(manipulator: childGroup, prefix: "stateid "))
+
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalShared && $0.path == ["f", "b"]
+      }))
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalShared && $0.path == ["f", "g", "x"]
+      }))
+
+      let controlsRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalControls" })
+      )
+      let layerEscape = try XCTUnwrap(flattenManipulators(from: [controlsRule]).first(where: {
+        fromKeyCode(in: $0) == "escape"
+          && hasCondition($0, name: "leaderkey_normal_layer_state", type: "variable_unless")
+          && hasCondition($0, name: "leaderkey_normal_layer_sequence_state", type: "variable_unless")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: layerEscape, name: "leaderkey_normal_layer_sequence_state", value: 0))
+      XCTAssertFalse(hasSetVariable(manipulator: layerEscape, name: "leaderkey_normal_enabled", value: 0))
+    }
+  }
+
   func testGenerateKarabinerTSExportRemovesLegacyLeaderVariables() throws {
     let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: makeSampleConfig(), appConfigs: [])
     let serialized = String(data: try serializeJSON(result.managedRules), encoding: .utf8) ?? ""
@@ -1047,6 +1162,46 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
 
   private func toEvents(in manipulator: [String: Any]) -> [Any] {
     (manipulator["to"] as? [Any]) ?? []
+  }
+
+  private func toIfAloneEvents(in manipulator: [String: Any]) -> [Any] {
+    (manipulator["to_if_alone"] as? [Any]) ?? []
+  }
+
+  private func toAfterKeyUpEvents(in manipulator: [String: Any]) -> [Any] {
+    (manipulator["to_after_key_up"] as? [Any]) ?? []
+  }
+
+  private func eventHasKeyCode(_ event: Any, keyCode: String) -> Bool {
+    guard let eventObject = event as? [String: Any] else {
+      return false
+    }
+    return eventObject["key_code"] as? String == keyCode
+  }
+
+  private func eventHasSendUserCommand(_ event: Any, prefix: String) -> Bool {
+    guard
+      let eventObject = event as? [String: Any],
+      let commandObject = eventObject["send_user_command"] as? [String: Any],
+      let payload = commandObject["payload"] as? String
+    else {
+      return false
+    }
+
+    return payload.hasPrefix(prefix)
+  }
+
+  private func eventHasSetVariable(_ event: Any, name: String, value: Int) -> Bool {
+    guard
+      let eventObject = event as? [String: Any],
+      let variableObject = eventObject["set_variable"] as? [String: Any],
+      let variableName = variableObject["name"] as? String,
+      let variableValue = variableObject["value"] as? NSNumber
+    else {
+      return false
+    }
+
+    return variableName == name && variableValue.intValue == value
   }
 
   private func indexOfSetVariableEvent(_ events: [Any], name: String, value: Int) -> Int? {

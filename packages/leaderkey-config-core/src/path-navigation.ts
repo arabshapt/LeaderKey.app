@@ -56,6 +56,10 @@ function childRecords(records: FlatIndexRecord[], parentEffectiveKeyPath: string
   return records.filter((record) => keyPathMatches(record.parentEffectiveKeyPath, parentEffectiveKeyPath));
 }
 
+function isContainerRecord(record: FlatIndexRecord): boolean {
+  return record.kind === "group" || record.kind === "layer";
+}
+
 export function parsePathInput(input: string): string[] {
   return Array.from(input.trim());
 }
@@ -128,7 +132,7 @@ function analyzeTypedPath(
       break;
     }
 
-    if (match.kind === "action") {
+    if (!isContainerRecord(match)) {
       if (index === typedPath.length - 1) {
         state = "exact-action";
         exactMatch = match;

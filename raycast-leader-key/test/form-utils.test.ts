@@ -35,6 +35,32 @@ test("emptyFormState can default to group without inheriting selected item value
   assert.equal(state.commandValue, "");
 });
 
+test("itemToFormState preserves layer tap action metadata", () => {
+  const state = itemToFormState({
+    actions: [
+      {
+        key: "b",
+        type: "shortcut",
+        value: "Cb",
+      },
+    ],
+    key: "f",
+    label: "Find",
+    tapAction: {
+      normalModeAfter: "input",
+      type: "shortcut",
+      value: "Cf",
+    },
+    type: "layer",
+  });
+
+  assert.equal(state.type, "layer");
+  assert.equal(state.fullPath, "f");
+  assert.equal(state.label, "Find");
+  assert.equal(state.tapAction?.type, "shortcut");
+  assert.equal(state.tapAction?.normalModeAfter, "input");
+});
+
 test("recordToFormState still preserves edit-source data", () => {
   const state = recordToFormState({
     actionType: "command",

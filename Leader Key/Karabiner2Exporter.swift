@@ -60,6 +60,10 @@ final class Karabiner2Exporter {
     case group
     case action
     case suppress
+    case layer
+    case layerGroup
+    case layerAction
+    case layerSuppress
   }
 
   private struct ManagedBinding {
@@ -73,6 +77,39 @@ final class Karabiner2Exporter {
     let scope: StateMapping.Scope
     let appAlias: String?
     let bundleId: String?
+    let layerStateId: Int32?
+    let layerParentStateId: Int32?
+    let tapStateId: Int32?
+
+    init(
+      parentStateId: Int32,
+      stateId: Int32?,
+      path: [String],
+      originalPath: [String],
+      item: ActionOrGroup,
+      kind: ManagedBindingKind,
+      parentGroupHasStickyMode: Bool,
+      scope: StateMapping.Scope,
+      appAlias: String?,
+      bundleId: String?,
+      layerStateId: Int32? = nil,
+      layerParentStateId: Int32? = nil,
+      tapStateId: Int32? = nil
+    ) {
+      self.parentStateId = parentStateId
+      self.stateId = stateId
+      self.path = path
+      self.originalPath = originalPath
+      self.item = item
+      self.kind = kind
+      self.parentGroupHasStickyMode = parentGroupHasStickyMode
+      self.scope = scope
+      self.appAlias = appAlias
+      self.bundleId = bundleId
+      self.layerStateId = layerStateId
+      self.layerParentStateId = layerParentStateId
+      self.tapStateId = tapStateId
+    }
   }
 
   private struct ManagedExportModel {
@@ -181,6 +218,8 @@ final class Karabiner2Exporter {
   private static let normalModeEnabledVariable = "leaderkey_normal_enabled"
   private static let normalModeInputVariable = "leaderkey_normal_input"
   private static let normalModeStateVariable = "leaderkey_normal_state"
+  private static let normalModeLayerStateVariable = "leaderkey_normal_layer_state"
+  private static let normalModeLayerSequenceStateVariable = "leaderkey_normal_layer_sequence_state"
   private static let appStartMarker = ";;; LEADERKEY_APPLICATIONS_START"
   private static let appEndMarker = ";;; LEADERKEY_APPLICATIONS_END"
   private static let mainStartMarker = ";;; LEADERKEY_MAIN_START"
@@ -460,6 +499,14 @@ final class Karabiner2Exporter {
         "from": from,
         "to": compileKarToEvents(mapping["to"]),
       ]
+
+      if let toIfAlone = mapping["to_if_alone"] {
+        manipulator["to_if_alone"] = compileKarToEvents(toIfAlone)
+      }
+
+      if let toAfterKeyUp = mapping["to_after_key_up"] {
+        manipulator["to_after_key_up"] = compileKarToEvents(toAfterKeyUp)
+      }
 
       if !conditions.isEmpty {
         manipulator["conditions"] = conditions
@@ -908,6 +955,14 @@ final class Karabiner2Exporter {
     return from
   }
 
+  private static func karKeyEvent(keyCode: String, modifiers: [String] = []) -> [String: Any] {
+    var event: [String: Any] = ["key_code": keyCode]
+    if !modifiers.isEmpty {
+      event["modifiers"] = modifiers
+    }
+    return event
+  }
+
   private static func karShell(_ command: String) -> [String: Any] {
     ["shell": command]
   }
@@ -1319,11 +1374,23 @@ final class Karabiner2Exporter {
     "\(group.label ?? "")|\(group.iconPath ?? "")|\(group.stickyMode == true)"
   }
 
+  private static func layerSignature(for layer: Layer) -> String {
+    let tapSignature = layer.tapAction.map(actionSignature(for:)) ?? ""
+    return "\(layer.label ?? "")|\(layer.iconPath ?? "")|\(tapSignature)"
+  }
+
   private static func groupMetadataMatches(_ lhs: Group, _ rhs: Group) -> Bool {
     lhs.key == rhs.key
       && lhs.label == rhs.label
       && lhs.iconPath == rhs.iconPath
       && lhs.stickyMode == rhs.stickyMode
+  }
+
+  private static func layerMetadataMatches(_ lhs: Layer, _ rhs: Layer) -> Bool {
+    lhs.key == rhs.key
+      && lhs.label == rhs.label
+      && lhs.iconPath == rhs.iconPath
+      && lhs.tapAction == rhs.tapAction
   }
 
   private static func isSuppressionAction(_ action: Action) -> Bool {
@@ -1515,6 +1582,202 @@ final class Karabiner2Exporter {
           collections: &collections
         )
       }
+    case .layer(let layer):
+      guard isNormalModeScope(scope) else {
+        return
+      }
+
+      let layerStateId = try registry.makeStateId(
+        namespace: namespace,
+        path: path,
+        kind: "layer.\(layerSignature(for: layer))",
+        scope: scope,
+        bundleId: bundleId
+      )
+
+      let tapStateId: Int32?
+      if let tapAction = layer.tapAction {
+        let tapPath = path + ["tap"]
+        tapStateId = try registry.makeStateId(
+          namespace: namespace,
+          path: tapPath,
+          kind: "layer_tap.\(actionSignature(for: tapAction))",
+          scope: scope,
+          bundleId: bundleId
+        )
+        collections.stateMappings.append(
+          makeStateMapping(
+            stateId: tapStateId!,
+            path: originalPath,
+            scope: scope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            actionType: "action",
+            actionTypeRaw: tapAction.type.rawValue,
+            actionValue: tapAction.value,
+            actionLabel: tapAction.label
+          ))
+      } else {
+        tapStateId = nil
+      }
+
+      collections.bindings.append(
+        ManagedBinding(
+          parentStateId: parentStateId,
+          stateId: layerStateId,
+          path: path,
+          originalPath: originalPath,
+          item: item,
+          kind: .layer,
+          parentGroupHasStickyMode: parentGroupHasStickyMode,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          tapStateId: tapStateId
+        ))
+
+      for child in layer.actions {
+        try appendLayerChildBinding(
+          item: child,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          normalParentStateId: parentStateId,
+          layerStateId: layerStateId,
+          layerParentStateId: normalModeBaseStateId,
+          parentPath: path,
+          originalParentPath: originalPath,
+          registry: registry,
+          collections: &collections
+        )
+      }
+    }
+  }
+
+  private static func appendLayerChildBinding(
+    item: ActionOrGroup,
+    scope: StateMapping.Scope,
+    appAlias: String?,
+    bundleId: String?,
+    normalParentStateId: Int32,
+    layerStateId: Int32,
+    layerParentStateId: Int32,
+    parentPath: [String],
+    originalParentPath: [String],
+    registry: StateIdRegistry,
+    collections: inout ManagedBindingCollections
+  ) throws {
+    guard let originalKey = item.item.key, !originalKey.isEmpty else {
+      return
+    }
+
+    let normalizedKey = normalizeKeyForPath(originalKey)
+    guard !normalizedKey.isEmpty else {
+      return
+    }
+
+    let path = parentPath + [normalizedKey]
+    let originalPath = originalParentPath + [originalKey]
+    let namespace = stateIdNamespace(for: scope, bundleId: bundleId)
+
+    switch item {
+    case .action(let action):
+      if isSuppressionAction(action) {
+        collections.bindings.append(
+          ManagedBinding(
+            parentStateId: normalParentStateId,
+            stateId: nil,
+            path: path,
+            originalPath: originalPath,
+            item: item,
+            kind: .layerSuppress,
+            parentGroupHasStickyMode: false,
+            scope: suppressionScope(for: scope),
+            appAlias: appAlias,
+            bundleId: bundleId,
+            layerStateId: layerStateId,
+            layerParentStateId: layerParentStateId
+          ))
+        return
+      }
+
+      let terminalStateId = try registry.makeStateId(
+        namespace: namespace,
+        path: path,
+        kind: "layer_action.\(actionSignature(for: action))",
+        scope: scope,
+        bundleId: bundleId
+      )
+      collections.bindings.append(
+        ManagedBinding(
+          parentStateId: normalParentStateId,
+          stateId: terminalStateId,
+          path: path,
+          originalPath: originalPath,
+          item: item,
+          kind: .layerAction,
+          parentGroupHasStickyMode: false,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          layerStateId: layerStateId,
+          layerParentStateId: layerParentStateId
+        ))
+      collections.stateMappings.append(
+        makeStateMapping(
+          stateId: terminalStateId,
+          path: originalPath,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          actionType: "action",
+          actionTypeRaw: action.type.rawValue,
+          actionValue: action.value,
+          actionLabel: action.label
+        ))
+
+    case .group(let group):
+      let groupStateId = try registry.makeStateId(
+        namespace: namespace,
+        path: path,
+        kind: "layer_group.\(groupSignature(for: group))",
+        scope: scope,
+        bundleId: bundleId
+      )
+      collections.bindings.append(
+        ManagedBinding(
+          parentStateId: normalParentStateId,
+          stateId: groupStateId,
+          path: path,
+          originalPath: originalPath,
+          item: item,
+          kind: .layerGroup,
+          parentGroupHasStickyMode: false,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          layerStateId: layerStateId,
+          layerParentStateId: layerParentStateId
+        ))
+
+      for child in group.actions {
+        try appendLayerChildBinding(
+          item: child,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          normalParentStateId: normalParentStateId,
+          layerStateId: layerStateId,
+          layerParentStateId: groupStateId,
+          parentPath: path,
+          originalParentPath: originalPath,
+          registry: registry,
+          collections: &collections
+        )
+      }
+
+    case .layer:
+      return
     }
   }
 
@@ -1545,6 +1808,167 @@ final class Karabiner2Exporter {
     }
 
     return collections
+  }
+
+  private static func collectLayerDeltaBindings(
+    appLayer: Layer,
+    fallbackLayer: Layer,
+    appAlias: String,
+    bundleId: String,
+    sharedScope: StateMapping.Scope,
+    overrideScope: StateMapping.Scope,
+    suppressScope: StateMapping.Scope,
+    normalParentStateId: Int32,
+    layerStateId: Int32,
+    layerParentStateId: Int32,
+    parentPath: [String],
+    originalParentPath: [String],
+    registry: StateIdRegistry,
+    collections: inout ManagedBindingCollections
+  ) throws {
+    let appItems = keyedItems(appLayer.actions)
+    let fallbackItems = keyedItems(fallbackLayer.actions)
+    let orderedKeys = Array(Set(appItems.keys).union(fallbackItems.keys)).sorted()
+
+    for normalizedKey in orderedKeys {
+      let appItem = appItems[normalizedKey]
+      let fallbackItem = fallbackItems[normalizedKey]
+
+      switch (appItem, fallbackItem) {
+      case let (.some(.group(appSubgroup)), .some(.group(fallbackSubgroup))):
+        let originalKey = appSubgroup.key ?? fallbackSubgroup.key ?? normalizedKey
+        let path = parentPath + [normalizedKey]
+        let originalPath = originalParentPath + [originalKey]
+
+        if groupMetadataMatches(appSubgroup, fallbackSubgroup) {
+          let sharedStateId = try registry.makeStateId(
+            namespace: stateIdNamespace(for: sharedScope, bundleId: nil),
+            path: path,
+            kind: "layer_group.\(groupSignature(for: fallbackSubgroup))",
+            scope: sharedScope,
+            bundleId: nil
+          )
+          try collectLayerDeltaBindings(
+            appLayer: Layer(
+              key: appSubgroup.key,
+              label: appSubgroup.label,
+              iconPath: appSubgroup.iconPath,
+              tapAction: nil,
+              actions: appSubgroup.actions
+            ),
+            fallbackLayer: Layer(
+              key: fallbackSubgroup.key,
+              label: fallbackSubgroup.label,
+              iconPath: fallbackSubgroup.iconPath,
+              tapAction: nil,
+              actions: fallbackSubgroup.actions
+            ),
+            appAlias: appAlias,
+            bundleId: bundleId,
+            sharedScope: sharedScope,
+            overrideScope: overrideScope,
+            suppressScope: suppressScope,
+            normalParentStateId: normalParentStateId,
+            layerStateId: layerStateId,
+            layerParentStateId: sharedStateId,
+            parentPath: path,
+            originalParentPath: originalPath,
+            registry: registry,
+            collections: &collections
+          )
+        } else {
+          try appendLayerChildBinding(
+            item: .group(appSubgroup),
+            scope: overrideScope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            normalParentStateId: normalParentStateId,
+            layerStateId: layerStateId,
+            layerParentStateId: layerParentStateId,
+            parentPath: parentPath,
+            originalParentPath: originalParentPath,
+            registry: registry,
+            collections: &collections
+          )
+        }
+
+      case let (.some(.action(appAction)), .some(.action(fallbackAction))):
+        if isSuppressionAction(appAction) {
+          try appendLayerChildBinding(
+            item: .action(appAction),
+            scope: suppressScope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            normalParentStateId: normalParentStateId,
+            layerStateId: layerStateId,
+            layerParentStateId: layerParentStateId,
+            parentPath: parentPath,
+            originalParentPath: originalParentPath,
+            registry: registry,
+            collections: &collections
+          )
+        } else if appAction != fallbackAction {
+          try appendLayerChildBinding(
+            item: .action(appAction),
+            scope: overrideScope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            normalParentStateId: normalParentStateId,
+            layerStateId: layerStateId,
+            layerParentStateId: layerParentStateId,
+            parentPath: parentPath,
+            originalParentPath: originalParentPath,
+            registry: registry,
+            collections: &collections
+          )
+        }
+
+      case let (.some(item), .none):
+        let scope: StateMapping.Scope
+        if case .action(let action) = item, isSuppressionAction(action) {
+          scope = suppressScope
+        } else {
+          scope = overrideScope
+        }
+        try appendLayerChildBinding(
+          item: item,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          normalParentStateId: normalParentStateId,
+          layerStateId: layerStateId,
+          layerParentStateId: layerParentStateId,
+          parentPath: parentPath,
+          originalParentPath: originalParentPath,
+          registry: registry,
+          collections: &collections
+        )
+
+      case let (.some(item), .some(_)):
+        let scope: StateMapping.Scope
+        if case .action(let action) = item, isSuppressionAction(action) {
+          scope = suppressScope
+        } else {
+          scope = overrideScope
+        }
+        try appendLayerChildBinding(
+          item: item,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          normalParentStateId: normalParentStateId,
+          layerStateId: layerStateId,
+          layerParentStateId: layerParentStateId,
+          parentPath: parentPath,
+          originalParentPath: originalParentPath,
+          registry: registry,
+          collections: &collections
+        )
+
+      case (.none, _):
+        continue
+      }
+    }
   }
 
   private static func collectAppDeltaBindings(
@@ -1600,6 +2024,50 @@ final class Karabiner2Exporter {
         } else {
           try appendFullBinding(
             item: .group(appSubgroup),
+            scope: overrideScope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            parentStateId: parentStateId,
+            parentPath: parentPath,
+            originalParentPath: originalParentPath,
+            parentGroupHasStickyMode: appGroup.stickyMode ?? false,
+            registry: registry,
+            collections: &collections
+          )
+        }
+
+      case let (.some(.layer(appLayer)), .some(.layer(fallbackLayer))):
+        let originalKey = appLayer.key ?? fallbackLayer.key ?? normalizedKey
+        let path = parentPath + [normalizedKey]
+        let originalPath = originalParentPath + [originalKey]
+
+        if layerMetadataMatches(appLayer, fallbackLayer) {
+          let sharedLayerStateId = try registry.makeStateId(
+            namespace: stateIdNamespace(for: sharedScope, bundleId: nil),
+            path: path,
+            kind: "layer.\(layerSignature(for: fallbackLayer))",
+            scope: sharedScope,
+            bundleId: nil
+          )
+          try collectLayerDeltaBindings(
+            appLayer: appLayer,
+            fallbackLayer: fallbackLayer,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            sharedScope: sharedScope,
+            overrideScope: overrideScope,
+            suppressScope: suppressScope,
+            normalParentStateId: parentStateId,
+            layerStateId: sharedLayerStateId,
+            layerParentStateId: normalModeBaseStateId,
+            parentPath: path,
+            originalParentPath: originalPath,
+            registry: registry,
+            collections: &collections
+          )
+        } else {
+          try appendFullBinding(
+            item: .layer(appLayer),
             scope: overrideScope,
             appAlias: appAlias,
             bundleId: bundleId,
@@ -1775,6 +2243,9 @@ final class Karabiner2Exporter {
           "from": karFrom(keyCode: keyCode, modifiers: modifiers),
           "to": ["vk_none"]
         ]
+
+      case .layer, .layerGroup, .layerAction, .layerSuppress:
+        return []
       }
 
       guard var conditioned = mapping else {
@@ -1808,6 +2279,22 @@ final class Karabiner2Exporter {
       variableCondition(name: normalModeEnabledVariable, value: 1),
       variableUnlessCondition(name: normalModeInputVariable, value: 1),
       variableCondition(name: normalModeStateVariable, value: parentStateId),
+      variableCondition(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+    ]
+  }
+
+  private static func normalLayerConditions(
+    normalParentStateId: Int32,
+    layerStateId: Int32,
+    layerParentStateId: Int32
+  ) -> [[String: Any]] {
+    [
+      variableCondition(name: "leader_state", value: inactiveStateId),
+      variableCondition(name: normalModeEnabledVariable, value: 1),
+      variableUnlessCondition(name: normalModeInputVariable, value: 1),
+      variableCondition(name: normalModeStateVariable, value: normalParentStateId),
+      variableCondition(name: normalModeLayerStateVariable, value: layerStateId),
+      variableCondition(name: normalModeLayerSequenceStateVariable, value: layerParentStateId),
     ]
   }
 
@@ -1818,12 +2305,16 @@ final class Karabiner2Exporter {
         karSetVariable(name: normalModeEnabledVariable, value: 1),
         karSetVariable(name: normalModeInputVariable, value: 0),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
         karSendUserCommand("normal_on"),
       ]
     case .normalModeInput:
       return [
         karSetVariable(name: normalModeInputVariable, value: 1),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
         karSendUserCommand("normal_input"),
       ]
     case .normalModeDisable:
@@ -1831,6 +2322,8 @@ final class Karabiner2Exporter {
         karSetVariable(name: normalModeEnabledVariable, value: 0),
         karSetVariable(name: normalModeInputVariable, value: 0),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+        karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
         karSendUserCommand("normal_off"),
       ]
     default:
@@ -1838,7 +2331,11 @@ final class Karabiner2Exporter {
     }
   }
 
-  private static func normalModeTerminalEvents(stateId: Int32, action: Action) -> [Any] {
+  private static func normalModeTerminalEvents(
+    stateId: Int32,
+    action: Action,
+    resetLayerSequence: Bool = false
+  ) -> [Any] {
     if let controlEvents = normalModeControlEvents(for: action.type) {
       return controlEvents
     }
@@ -1847,6 +2344,9 @@ final class Karabiner2Exporter {
       karSendUserCommand("stateid \(stateId)"),
       karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
     ]
+    if resetLayerSequence {
+      events.append(karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId))
+    }
 
     switch action.normalModeAfter ?? .normal {
     case .normal:
@@ -1904,6 +2404,70 @@ final class Karabiner2Exporter {
 
       case .suppress:
         toEvents = ["vk_none"]
+
+      case .layer:
+        guard let stateId = binding.stateId,
+              case .layer(let layer) = binding.item
+        else {
+          return nil
+        }
+
+        let tapEvents: [Any]
+        if let tapAction = layer.tapAction, let tapStateId = binding.tapStateId {
+          tapEvents = normalModeTerminalEvents(stateId: tapStateId, action: tapAction)
+        } else {
+          tapEvents = [karKeyEvent(keyCode: keyCode, modifiers: modifiers)]
+        }
+
+        return [
+          "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+          "to": [
+            karSetVariable(name: normalModeLayerStateVariable, value: stateId),
+            karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
+          ],
+          "to_if_alone": tapEvents,
+          "to_after_key_up": [
+            karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+            karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
+          ],
+          "condition": normalModeConditions(parentStateId: binding.parentStateId),
+        ]
+
+      case .layerGroup:
+        guard let stateId = binding.stateId else { return nil }
+        toEvents = [karSetVariable(name: normalModeLayerSequenceStateVariable, value: stateId)]
+
+      case .layerAction:
+        guard let stateId = binding.stateId,
+              case .action(let action) = binding.item
+        else {
+          return nil
+        }
+        toEvents = normalModeTerminalEvents(
+          stateId: stateId,
+          action: action,
+          resetLayerSequence: true
+        )
+
+      case .layerSuppress:
+        toEvents = ["vk_none"]
+      }
+
+      if binding.kind == .layerGroup || binding.kind == .layerAction || binding.kind == .layerSuppress {
+        guard let layerStateId = binding.layerStateId,
+              let layerParentStateId = binding.layerParentStateId
+        else {
+          return nil
+        }
+        return [
+          "from": karFrom(keyCode: keyCode, modifiers: modifiers),
+          "to": toEvents,
+          "condition": normalLayerConditions(
+            normalParentStateId: binding.parentStateId,
+            layerStateId: layerStateId,
+            layerParentStateId: layerParentStateId
+          ),
+        ]
       }
 
       return [
@@ -1935,6 +2499,70 @@ final class Karabiner2Exporter {
     }
   }
 
+  private static func normalLayerPendingCatchAllMappings(from bindings: [ManagedBinding]) -> [[String: Any]] {
+    struct PendingLayerState: Hashable {
+      let normalParentStateId: Int32
+      let layerStateId: Int32
+      let layerSequenceStateId: Int32
+    }
+
+    let pendingStates = Set(bindings.compactMap { binding -> PendingLayerState? in
+      guard binding.kind == .layerGroup,
+            let layerStateId = binding.layerStateId,
+            let layerSequenceStateId = binding.stateId
+      else {
+        return nil
+      }
+      return PendingLayerState(
+        normalParentStateId: binding.parentStateId,
+        layerStateId: layerStateId,
+        layerSequenceStateId: layerSequenceStateId
+      )
+    })
+
+    return pendingStates.sorted {
+      if $0.normalParentStateId != $1.normalParentStateId {
+        return $0.normalParentStateId < $1.normalParentStateId
+      }
+      if $0.layerStateId != $1.layerStateId {
+        return $0.layerStateId < $1.layerStateId
+      }
+      return $0.layerSequenceStateId < $1.layerSequenceStateId
+    }.map { pendingState in
+      [
+        "from": [
+          "any": "key_code",
+          "modifiers": "any",
+        ],
+        "to": [
+          karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
+          "vk_none",
+        ],
+        "condition": normalLayerConditions(
+          normalParentStateId: pendingState.normalParentStateId,
+          layerStateId: pendingState.layerStateId,
+          layerParentStateId: pendingState.layerSequenceStateId
+        ),
+      ]
+    }
+  }
+
+  private static func normalLayerEscapeMappings() -> [[String: Any]] {
+    ["escape", "caps_lock"].map { keyCode in
+      [
+        "from": keyCode,
+        "to": [karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId)],
+        "condition": [
+          variableCondition(name: "leader_state", value: inactiveStateId),
+          variableCondition(name: normalModeEnabledVariable, value: 1),
+          variableUnlessCondition(name: normalModeInputVariable, value: 1),
+          variableUnlessCondition(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+          variableUnlessCondition(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
+        ],
+      ]
+    }
+  }
+
   private static func normalModeEscapeCascadeMappings() -> [[String: Any]] {
     ["escape", "caps_lock"].flatMap { keyCode -> [[String: Any]] in
       [
@@ -1946,6 +2574,7 @@ final class Karabiner2Exporter {
             variableCondition(name: normalModeEnabledVariable, value: 1),
             variableUnlessCondition(name: normalModeInputVariable, value: 1),
             variableUnlessCondition(name: normalModeStateVariable, value: normalModeBaseStateId),
+            variableCondition(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
           ],
         ],
         [
@@ -1954,6 +2583,8 @@ final class Karabiner2Exporter {
             karSetVariable(name: normalModeEnabledVariable, value: 0),
             karSetVariable(name: normalModeInputVariable, value: 0),
             karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+            karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+            karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
             karSendUserCommand("normal_off"),
           ],
           "condition": [
@@ -1961,6 +2592,7 @@ final class Karabiner2Exporter {
             variableCondition(name: normalModeEnabledVariable, value: 1),
             variableUnlessCondition(name: normalModeInputVariable, value: 1),
             variableCondition(name: normalModeStateVariable, value: normalModeBaseStateId),
+            variableCondition(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
           ],
         ],
       ]
@@ -2197,7 +2829,15 @@ final class Karabiner2Exporter {
     rules.append(
       makeKarRule(
         description: "\(managedRuleDescriptionPrefix)NormalControls",
-        mappings: normalModeEscapeCascadeMappings()))
+        mappings: normalLayerEscapeMappings() + normalModeEscapeCascadeMappings()))
+
+    let normalLayerCatchAllMappings = normalLayerPendingCatchAllMappings(from: allNormalBindings)
+    if !normalLayerCatchAllMappings.isEmpty {
+      rules.append(
+        makeKarRule(
+          description: "\(managedRuleDescriptionPrefix)NormalLayerCatchAll",
+          mappings: normalLayerCatchAllMappings))
+    }
 
     let normalCatchAllMappings = normalPendingCatchAllMappings(from: allNormalBindings)
     if !normalCatchAllMappings.isEmpty {

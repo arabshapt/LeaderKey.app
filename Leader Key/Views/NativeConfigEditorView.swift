@@ -14,6 +14,7 @@ struct NodeRecord: Identifiable {
 
   var isGroup: Bool {
     if case .group = item { return true }
+    if case .layer = item { return true }
     return false
   }
 
@@ -29,6 +30,8 @@ struct NodeRecord: Identifiable {
     switch item {
     case .group:
       return "Group"
+    case .layer:
+      return "Layer"
     case .action(let action):
       return action.type.rawValue
     }
@@ -38,6 +41,8 @@ struct NodeRecord: Identifiable {
     switch item {
     case .group(let group):
       return group.stickyMode == true
+    case .layer:
+      return false
     case .action(let action):
       return action.stickyMode == true
     }
@@ -47,6 +52,8 @@ struct NodeRecord: Identifiable {
     switch item {
     case .group(let group):
       return group.isFromFallback
+    case .layer(let layer):
+      return layer.isFromFallback
     case .action(let action):
       return action.isFromFallback
     }
@@ -184,6 +191,20 @@ final class ConfigEditorSession: ObservableObject {
 
   var inspectorSelectedItem: ActionOrGroup? {
     inspectorSelectedRecord?.item
+  }
+
+  var isNormalModeConfig: Bool {
+    guard let userConfig else {
+      return selectedConfigKey == normalFallbackConfigDisplayName
+        || selectedConfigKey.hasPrefix("Normal: ")
+    }
+
+    switch userConfig.configFileKind(forDisplayKey: selectedConfigKey) {
+    case .normalFallback, .normalApp:
+      return true
+    case .global, .appFallback, .app, .unknown:
+      return false
+    }
   }
 
   var selectedValidationError: ValidationError? {
@@ -334,6 +355,11 @@ final class ConfigEditorSession: ObservableObject {
         let cleanedItem = validateAndCleanItem(pastedItem, parentPath: targetPath)
         insert(item: cleanedItem, at: insertPath)
         finalizeStructuralChange(selectPath: insertPath)
+      case .layer(let layer):
+        let insertPath = targetPath + [layer.actions.count]
+        let cleanedItem = validateAndCleanItem(pastedItem, parentPath: targetPath)
+        insert(item: cleanedItem, at: insertPath)
+        finalizeStructuralChange(selectPath: insertPath)
       case .action:
         guard let siblingIndex = targetPath.last else { return }
         let parentPath = Array(targetPath.dropLast())
@@ -370,6 +396,10 @@ final class ConfigEditorSession: ObservableObject {
       let insertPath = targetPath + [group.actions.count]
       insert(item: newAction, at: insertPath)
       finalizeStructuralChange(selectPath: insertPath)
+    case .layer(let layer):
+      let insertPath = targetPath + [layer.actions.count]
+      insert(item: newAction, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
     case .action:
       guard let siblingIndex = targetPath.last else { return }
       let insertPath = Array(targetPath.dropLast()) + [siblingIndex + 1]
@@ -396,10 +426,46 @@ final class ConfigEditorSession: ObservableObject {
       let insertPath = targetPath + [group.actions.count]
       insert(item: newGroup, at: insertPath)
       finalizeStructuralChange(selectPath: insertPath)
+    case .layer(let layer):
+      let insertPath = targetPath + [layer.actions.count]
+      insert(item: newGroup, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
     case .action:
       guard let siblingIndex = targetPath.last else { return }
       let insertPath = Array(targetPath.dropLast()) + [siblingIndex + 1]
       insert(item: newGroup, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
+    }
+  }
+
+  func insertLayer(after nodeID: NodeID? = nil) {
+    guard isNormalModeConfig else { return }
+
+    let newLayer = ActionOrGroup.layer(Layer(key: "", label: "Layer", iconPath: nil, tapAction: nil, actions: []))
+
+    guard let targetID = nodeID ?? selectedTreeID,
+      let targetPath = path(for: targetID),
+      let record = nodeIndex[targetID]
+    else {
+      let insertPath = [root.actions.count]
+      insert(item: newLayer, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
+      return
+    }
+
+    switch record.item {
+    case .group(let group):
+      let insertPath = targetPath + [group.actions.count]
+      insert(item: newLayer, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
+    case .layer(let layer):
+      let insertPath = targetPath + [layer.actions.count]
+      insert(item: newLayer, at: insertPath)
+      finalizeStructuralChange(selectPath: insertPath)
+    case .action:
+      guard let siblingIndex = targetPath.last else { return }
+      let insertPath = Array(targetPath.dropLast()) + [siblingIndex + 1]
+      insert(item: newLayer, at: insertPath)
       finalizeStructuralChange(selectPath: insertPath)
     }
   }
@@ -438,6 +504,8 @@ final class ConfigEditorSession: ObservableObject {
       siblingCountAfterDelete = root.actions.count
     } else if let parentItem = itemAtPath(parentPath), case .group(let parentGroup) = parentItem {
       siblingCountAfterDelete = parentGroup.actions.count
+    } else if let parentItem = itemAtPath(parentPath), case .layer(let parentLayer) = parentItem {
+      siblingCountAfterDelete = parentLayer.actions.count
     } else {
       siblingCountAfterDelete = 0
     }
@@ -485,6 +553,19 @@ final class ConfigEditorSession: ObservableObject {
       group.actions = convertNestedFallbacksToAppSpecific(group.actions)
       applyEdit(nodeID: selectedID) { item in
         item = .group(group)
+      }
+    case .layer(var layer):
+      guard layer.isFromFallback else { return }
+      layer.isFromFallback = false
+      layer.fallbackSource = nil
+      layer.actions = convertNestedFallbacksToAppSpecific(layer.actions)
+      if var tapAction = layer.tapAction {
+        tapAction.isFromFallback = false
+        tapAction.fallbackSource = nil
+        layer.tapAction = tapAction
+      }
+      applyEdit(nodeID: selectedID) { item in
+        item = .layer(layer)
       }
     }
 
@@ -553,6 +634,14 @@ final class ConfigEditorSession: ObservableObject {
     applyEdit(nodeID: selectedID) { item in
       guard case .group = item else { return }
       item = .group(newGroup)
+    }
+  }
+
+  func updateSelectedLayer(_ newLayer: Layer) {
+    guard let selectedID = inspectorSelectedID ?? selectedTreeID else { return }
+    applyEdit(nodeID: selectedID) { item in
+      guard case .layer = item else { return }
+      item = .layer(newLayer)
     }
   }
 
@@ -862,9 +951,18 @@ final class ConfigEditorSession: ObservableObject {
     pathForNodeID[nodeID] = path
     nodeIDForPath[path] = nodeID
 
+    let containerActions: [ActionOrGroup]?
     if case .group(let group) = item {
+      containerActions = group.actions
+    } else if case .layer(let layer) = item {
+      containerActions = layer.actions
+    } else {
+      containerActions = nil
+    }
+
+    if let containerActions {
       var childIDs: [NodeID] = []
-      for (childIndex, childItem) in group.actions.enumerated() {
+      for (childIndex, childItem) in containerActions.enumerated() {
         if !showFallbackItems && isFallback(childItem) {
           continue
         }
@@ -910,6 +1008,8 @@ final class ConfigEditorSession: ObservableObject {
       return action.isFromFallback
     case .group(let group):
       return group.isFromFallback
+    case .layer(let layer):
+      return layer.isFromFallback
     }
   }
 
@@ -926,8 +1026,20 @@ final class ConfigEditorSession: ObservableObject {
         return item
       }
 
-      guard case .group(let subgroup) = item else { return nil }
-      currentGroup = subgroup
+      switch item {
+      case .group(let subgroup):
+        currentGroup = subgroup
+      case .layer(let layer):
+        currentGroup = Group(
+          key: layer.key,
+          label: layer.label,
+          iconPath: layer.iconPath,
+          stickyMode: nil,
+          actions: layer.actions
+        )
+      case .action:
+        return nil
+      }
     }
 
     return nil
@@ -950,11 +1062,47 @@ final class ConfigEditorSession: ObservableObject {
       update(&itemToUpdate)
       group.actions[index] = itemToUpdate
     } else {
-      guard case .group(var subgroup) = group.actions[index] else {
+      switch group.actions[index] {
+      case .group(var subgroup):
+        modifyItem(in: &subgroup, at: currentPath, update: update)
+        group.actions[index] = .group(subgroup)
+      case .layer(var layer):
+        modifyItems(in: &layer.actions, at: currentPath, update: update)
+        group.actions[index] = .layer(layer)
+      case .action:
         return
       }
-      modifyItem(in: &subgroup, at: currentPath, update: update)
-      group.actions[index] = .group(subgroup)
+    }
+  }
+
+  private func modifyItems(
+    in items: inout [ActionOrGroup],
+    at path: [Int],
+    update: (inout ActionOrGroup) -> Void
+  ) {
+    guard !path.isEmpty else { return }
+
+    var currentPath = path
+    let index = currentPath.removeFirst()
+
+    guard index >= 0 && index < items.count else { return }
+
+    if currentPath.isEmpty {
+      var itemToUpdate = items[index]
+      update(&itemToUpdate)
+      items[index] = itemToUpdate
+      return
+    }
+
+    switch items[index] {
+    case .group(var subgroup):
+      modifyItems(in: &subgroup.actions, at: currentPath, update: update)
+      items[index] = .group(subgroup)
+    case .layer(var layer):
+      modifyItems(in: &layer.actions, at: currentPath, update: update)
+      items[index] = .layer(layer)
+    case .action:
+      return
     }
   }
 
@@ -978,13 +1126,52 @@ final class ConfigEditorSession: ObservableObject {
     if currentPath.isEmpty {
       group.actions.insert(item, at: index)
     } else {
-      guard index < group.actions.count,
-        case .group(var subgroup) = group.actions[index]
-      else {
+      guard index < group.actions.count else {
         return
       }
-      insertItemInGroup(item, in: &subgroup, at: currentPath)
-      group.actions[index] = .group(subgroup)
+
+      switch group.actions[index] {
+      case .group(var subgroup):
+        insertItemInGroup(item, in: &subgroup, at: currentPath)
+        group.actions[index] = .group(subgroup)
+      case .layer(var layer):
+        insertItemInItems(item, in: &layer.actions, at: currentPath)
+        group.actions[index] = .layer(layer)
+      case .action:
+        return
+      }
+    }
+  }
+
+  private func insertItemInItems(_ item: ActionOrGroup, in items: inout [ActionOrGroup], at path: [Int]) {
+    guard !path.isEmpty else {
+      items.append(item)
+      return
+    }
+
+    var currentPath = path
+    let index = currentPath.removeFirst()
+
+    guard index >= 0 && index <= items.count else {
+      return
+    }
+
+    if currentPath.isEmpty {
+      items.insert(item, at: index)
+      return
+    }
+
+    guard index < items.count else { return }
+
+    switch items[index] {
+    case .group(var subgroup):
+      insertItemInItems(item, in: &subgroup.actions, at: currentPath)
+      items[index] = .group(subgroup)
+    case .layer(var layer):
+      insertItemInItems(item, in: &layer.actions, at: currentPath)
+      items[index] = .layer(layer)
+    case .action:
+      return
     }
   }
 
@@ -1003,14 +1190,45 @@ final class ConfigEditorSession: ObservableObject {
     }
 
     let index = path[0]
-    guard index >= 0 && index < group.actions.count,
-      case .group(var subgroup) = group.actions[index]
-    else {
+    guard index >= 0 && index < group.actions.count else {
       return
     }
 
-    deleteItemFromGroup(in: &subgroup, at: Array(path.dropFirst()))
-    group.actions[index] = .group(subgroup)
+    switch group.actions[index] {
+    case .group(var subgroup):
+      deleteItemFromGroup(in: &subgroup, at: Array(path.dropFirst()))
+      group.actions[index] = .group(subgroup)
+    case .layer(var layer):
+      deleteItemFromItems(in: &layer.actions, at: Array(path.dropFirst()))
+      group.actions[index] = .layer(layer)
+    case .action:
+      return
+    }
+  }
+
+  private func deleteItemFromItems(in items: inout [ActionOrGroup], at path: [Int]) {
+    guard !path.isEmpty else { return }
+
+    if path.count == 1 {
+      let index = path[0]
+      guard index >= 0 && index < items.count else { return }
+      items.remove(at: index)
+      return
+    }
+
+    let index = path[0]
+    guard index >= 0 && index < items.count else { return }
+
+    switch items[index] {
+    case .group(var subgroup):
+      deleteItemFromItems(in: &subgroup.actions, at: Array(path.dropFirst()))
+      items[index] = .group(subgroup)
+    case .layer(var layer):
+      deleteItemFromItems(in: &layer.actions, at: Array(path.dropFirst()))
+      items[index] = .layer(layer)
+    case .action:
+      return
+    }
   }
 
   private func validateAndCleanItem(_ item: ActionOrGroup, parentPath: [Int]) -> ActionOrGroup {
@@ -1023,6 +1241,10 @@ final class ConfigEditorSession: ObservableObject {
       case .group(let parentGroup) = parentItem
     {
       existingKeys = parentGroup.actions.compactMap { $0.item.key }
+    } else if let parentItem = itemAtPath(parentPath),
+      case .layer(let parentLayer) = parentItem
+    {
+      existingKeys = parentLayer.actions.compactMap { $0.item.key }
     } else {
       existingKeys = []
     }
@@ -1038,6 +1260,11 @@ final class ConfigEditorSession: ObservableObject {
         group.key = generateUniqueKey(base: key, existingKeys: existingKeys)
       }
       cleanedItem = .group(group)
+    case .layer(var layer):
+      if let key = layer.key, existingKeys.contains(key) {
+        layer.key = generateUniqueKey(base: key, existingKeys: existingKeys)
+      }
+      cleanedItem = .layer(layer)
     }
 
     return cleanedItem
@@ -1172,6 +1399,8 @@ private struct ConfigInspectorView: View {
             switch record.item {
             case .group(let group):
               groupEditor(group: group)
+            case .layer(let layer):
+              layerEditor(layer: layer)
             case .action(let action):
               actionEditor(action: action)
             }
@@ -1202,6 +1431,14 @@ private struct ConfigInspectorView: View {
           session.insertGroup()
         } label: {
           Label("Add Group", systemImage: "folder.badge.plus")
+        }
+
+        if session.isNormalModeConfig {
+          Button {
+            session.insertLayer()
+          } label: {
+            Label("Add Layer", systemImage: "square.stack.3d.up")
+          }
         }
       }
       .disabled(session.isInspectorNavigating)
@@ -1259,6 +1496,137 @@ private struct ConfigInspectorView: View {
       .toggleStyle(.checkbox)
 
       if group.isFromFallback {
+        Button("Make Editable") {
+          session.makeSelectedEditable()
+        }
+      }
+
+      HStack(spacing: 8) {
+        Button("Copy") { session.copy(session.inspectorSelectedID) }
+        Button("Paste") { session.paste(into: session.inspectorSelectedID) }
+          .disabled(!ClipboardManager.shared.canPaste())
+        Button("Duplicate") { session.duplicate(session.inspectorSelectedID) }
+        Button("Delete", role: .destructive) { session.delete(session.inspectorSelectedID) }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func layerEditor(layer: Layer) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      TextField(
+        "Layer key",
+        text: Binding(
+          get: { keyValue },
+          set: { newValue in
+            keyValue = newValue
+            var updated = layer
+            updated.key = newValue.isEmpty ? nil : newValue
+            session.updateSelectedLayer(updated)
+          }
+        )
+      )
+
+      TextField(
+        "Label",
+        text: Binding(
+          get: { labelValue },
+          set: { newValue in
+            labelValue = newValue
+            var updated = layer
+            updated.label = newValue.isEmpty ? nil : newValue
+            session.updateSelectedLayer(updated)
+          }
+        )
+      )
+
+      Divider()
+
+      Text("Tap Action")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      if let tapAction = layer.tapAction {
+        Picker(
+          "Type",
+          selection: Binding(
+            get: { tapAction.type },
+            set: { newType in
+              var updated = layer
+              var action = tapAction
+              action.type = newType
+              if newType.isModeControlAction {
+                action.value = ""
+              }
+              updated.tapAction = action
+              session.updateSelectedLayer(updated)
+            }
+          )
+        ) {
+          Text("Shortcut").tag(Type.shortcut)
+          Text("Application").tag(Type.application)
+          Text("URL").tag(Type.url)
+          Text("Command").tag(Type.command)
+          Text("Folder").tag(Type.folder)
+          Text("Type Text").tag(Type.text)
+          Text("Menu").tag(Type.menu)
+          Text("IntelliJ").tag(Type.intellij)
+          Text("Keystroke").tag(Type.keystroke)
+          Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+          Text("Normal Mode Enable").tag(Type.normalModeEnable)
+          Text("Normal Mode Input").tag(Type.normalModeInput)
+          Text("Normal Mode Disable").tag(Type.normalModeDisable)
+          Text("Macro").tag(Type.macro)
+        }
+
+        if !tapAction.type.isModeControlAction {
+          TextField(
+            "Tap value",
+            text: Binding(
+              get: { tapAction.value },
+              set: { newValue in
+                var updated = layer
+                var action = tapAction
+                action.value = newValue
+                updated.tapAction = action
+                session.updateSelectedLayer(updated)
+              }
+            )
+          )
+        }
+
+        Picker(
+          "Normal Mode After",
+          selection: Binding(
+            get: { tapAction.normalModeAfter ?? .normal },
+            set: { newValue in
+              var updated = layer
+              var action = tapAction
+              action.normalModeAfter = newValue == .normal ? nil : newValue
+              updated.tapAction = action
+              session.updateSelectedLayer(updated)
+            }
+          )
+        ) {
+          Text("Normal").tag(NormalModeAfter.normal)
+          Text("Input").tag(NormalModeAfter.input)
+          Text("Disabled").tag(NormalModeAfter.disabled)
+        }
+
+        Button("Remove Tap Action") {
+          var updated = layer
+          updated.tapAction = nil
+          session.updateSelectedLayer(updated)
+        }
+      } else {
+        Button("Add Tap Action") {
+          var updated = layer
+          updated.tapAction = Action(key: nil, type: .shortcut, value: "")
+          session.updateSelectedLayer(updated)
+        }
+      }
+
+      if layer.isFromFallback {
         Button("Make Editable") {
           session.makeSelectedEditable()
         }
@@ -1578,6 +1946,12 @@ private struct ConfigInspectorView: View {
       descriptionValue = ""
       aiDescriptionValue = ""
       valueValue = ""
+    case .layer(let layer):
+      keyValue = layer.key ?? ""
+      labelValue = layer.label ?? ""
+      descriptionValue = ""
+      aiDescriptionValue = ""
+      valueValue = layer.tapAction?.value ?? ""
     case .action(let action):
       keyValue = action.key ?? ""
       labelValue = ""
