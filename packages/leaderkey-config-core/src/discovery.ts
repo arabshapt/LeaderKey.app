@@ -8,6 +8,9 @@ import {
   GLOBAL_CONFIG_DISPLAY_NAME,
   GLOBAL_CONFIG_FILE_NAME,
   META_FILE_SUFFIX,
+  NORMAL_APP_CONFIG_PREFIX,
+  NORMAL_FALLBACK_CONFIG_DISPLAY_NAME,
+  NORMAL_FALLBACK_CONFIG_FILE_NAME,
   defaultConfigDirectory,
 } from "./constants.js";
 import { cocoaAbsoluteTime, stringifyConfig } from "./utils.js";
@@ -75,6 +78,7 @@ export async function discoverLiveConfigs(
 
   const globalFilePath = path.join(configDirectory, GLOBAL_CONFIG_FILE_NAME);
   const fallbackFilePath = path.join(configDirectory, FALLBACK_CONFIG_FILE_NAME);
+  const normalFallbackFilePath = path.join(configDirectory, NORMAL_FALLBACK_CONFIG_FILE_NAME);
   const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json") && !entry.name.endsWith(META_FILE_SUFFIX));
 
   for (const entry of files) {
@@ -94,6 +98,13 @@ export async function discoverLiveConfigs(
     } else if (filePath === fallbackFilePath) {
       scope = "fallback";
       defaultDisplayName = FALLBACK_CONFIG_DISPLAY_NAME;
+    } else if (filePath === normalFallbackFilePath) {
+      scope = "normalFallback";
+      defaultDisplayName = NORMAL_FALLBACK_CONFIG_DISPLAY_NAME;
+    } else if (entry.name.startsWith(NORMAL_APP_CONFIG_PREFIX)) {
+      scope = "normalApp";
+      bundleId = entry.name.slice(NORMAL_APP_CONFIG_PREFIX.length, -".json".length);
+      defaultDisplayName = `Normal: ${bundleId}`;
     } else if (entry.name.startsWith(APP_CONFIG_PREFIX)) {
       scope = "app";
       bundleId = entry.name.slice(APP_CONFIG_PREFIX.length, -".json".length);
@@ -118,18 +129,18 @@ export async function discoverLiveConfigs(
     });
   }
 
+  const scopeRank: Record<DiscoveredConfigFile["scope"], number> = {
+    global: 0,
+    fallback: 1,
+    normalFallback: 2,
+    app: 3,
+    normalApp: 4,
+  };
+
   return discovered.sort((left, right) => {
-    if (left.scope === "global") {
-      return -1;
-    }
-    if (right.scope === "global") {
-      return 1;
-    }
-    if (left.scope === "fallback") {
-      return -1;
-    }
-    if (right.scope === "fallback") {
-      return 1;
+    const rankDelta = scopeRank[left.scope] - scopeRank[right.scope];
+    if (rankDelta !== 0) {
+      return rankDelta;
     }
     return left.displayName.localeCompare(right.displayName);
   });
@@ -156,4 +167,3 @@ export function toConfigSummaries(configs: DiscoveredConfigFile[]): ConfigSummar
     scope: config.scope,
   }));
 }
-

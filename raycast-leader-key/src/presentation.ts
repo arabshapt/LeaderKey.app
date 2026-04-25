@@ -51,6 +51,12 @@ function compactActionSummary(record: FlatIndexRecord): string {
       return withNote(`⌨ ${label.replace(/^Shortcut:\s*/i, "") || record.valuePreview}`);
     case "text":
       return withNote(`✎ ${truncateText(label.replace(/^Type\s+/i, "") || record.valuePreview)}`);
+    case "normalModeDisable":
+      return withNote("N Off");
+    case "normalModeEnable":
+      return withNote("N On");
+    case "normalModeInput":
+      return withNote("N Input");
     case "toggleStickyMode":
       return withNote("⇄ Sticky");
     case "url":
@@ -133,6 +139,10 @@ export function recordIcon(record: FlatIndexRecord): Image.ImageLike {
       return Icon.AppWindowSidebarLeft;
     case "text":
       return Icon.Text;
+    case "normalModeDisable":
+    case "normalModeEnable":
+    case "normalModeInput":
+      return Icon.Switch;
     case "toggleStickyMode":
       return Icon.Bolt;
     case "url":

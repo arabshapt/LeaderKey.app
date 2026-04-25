@@ -63,6 +63,18 @@ test("generates deterministic human labels for dominant action patterns", () => 
     labelFor({ key: " ", type: "toggleStickyMode", value: "" }),
     "Toggle Sticky Mode",
   );
+  assert.equal(
+    labelFor({ key: "n", type: "normalModeEnable", value: "" }),
+    "Normal Mode Enable",
+  );
+  assert.equal(
+    labelFor({ key: "i", type: "normalModeInput", value: "" }),
+    "Normal Mode Input",
+  );
+  assert.equal(
+    labelFor({ key: "d", type: "normalModeDisable", value: "" }),
+    "Normal Mode Disable",
+  );
 });
 
 test("fills common group labels only when the current label is placeholder-like", () => {

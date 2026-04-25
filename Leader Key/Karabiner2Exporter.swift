@@ -1824,6 +1824,7 @@ final class Karabiner2Exporter {
       return [
         karSetVariable(name: normalModeInputVariable, value: 1),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+        karSendUserCommand("normal_input"),
       ]
     case .normalModeDisable:
       return [
@@ -1852,6 +1853,7 @@ final class Karabiner2Exporter {
       events.append(karSetVariable(name: normalModeInputVariable, value: 0))
     case .input:
       events.append(karSetVariable(name: normalModeInputVariable, value: 1))
+      events.append(karSendUserCommand("normal_input"))
     case .disabled:
       events.append(karSetVariable(name: normalModeEnabledVariable, value: 0))
       events.append(karSetVariable(name: normalModeInputVariable, value: 0))

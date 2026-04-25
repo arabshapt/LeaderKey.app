@@ -463,6 +463,7 @@ export function cloneRecordToConfigItem(record: FlatIndexRecord): ConfigItem {
       key: record.key,
       label: record.label,
       menuFallbackPaths: record.menuFallbackPaths,
+      normalModeAfter: record.normalModeAfter,
       stickyMode: record.stickyMode,
       type: record.actionType as ActionNode["type"],
       value: record.rawValue,

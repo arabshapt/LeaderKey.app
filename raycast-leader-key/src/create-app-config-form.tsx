@@ -24,6 +24,7 @@ interface CreateAppConfigFormProps {
   bundleId: string;
   configDirectory: string;
   initialPayload: CachePayload;
+  normalMode?: boolean;
   onDidCreate?: (payload: CachePayload) => Promise<void> | void;
 }
 
@@ -49,7 +50,7 @@ function resolveTemplate(configs: ConfigSummary[], templateValue: string) {
 }
 
 export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
-  const { bundleId, configDirectory, initialPayload, onDidCreate } = props;
+  const { bundleId, configDirectory, initialPayload, normalMode = false, onDidCreate } = props;
   const [resolvedApp, setResolvedApp] = useState<Application>();
   const [customName, setCustomName] = useState("");
   const [templateValue, setTemplateValue] = useState(EMPTY_TEMPLATE_VALUE);
@@ -103,6 +104,7 @@ export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
       await createAppConfig(configDirectory, {
         bundleId,
         customName: customName.trim() || undefined,
+        normalMode,
         template: template.kind === "empty" ? { kind: "empty" } : { filePath: template.filePath, kind: "config" },
       });
 
@@ -125,7 +127,7 @@ export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
             }
           : {
               style: Toast.Style.Success,
-              title: `Created ${appName} config`,
+              title: `Created ${normalMode ? "normal " : ""}${appName} config`,
               message: "Triggered Leader Key reload",
             },
       );
@@ -147,12 +149,12 @@ export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
           <Action.SubmitForm
             icon={Icon.PlusCircle}
             onSubmit={handleSubmit}
-            title={isSaving ? "Creating…" : "Create App Config"}
+            title={isSaving ? "Creating…" : normalMode ? "Create Normal App Config" : "Create App Config"}
           />
         </ActionPanel>
       }
       isLoading={isSaving}
-      navigationTitle={`Create Config for ${appName}`}
+      navigationTitle={`Create ${normalMode ? "Normal " : ""}Config for ${appName}`}
     >
       <Form.TextField
         id="appName"
@@ -165,6 +167,12 @@ export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
         onChange={() => {}}
         title="Bundle ID"
         value={bundleId}
+      />
+      <Form.TextField
+        id="configScope"
+        onChange={() => {}}
+        title="Scope"
+        value={normalMode ? "Normal Mode App Config" : "Leader Key App Config"}
       />
       <Form.Dropdown
         id="template"

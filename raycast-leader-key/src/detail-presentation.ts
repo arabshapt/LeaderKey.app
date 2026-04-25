@@ -57,6 +57,12 @@ function humanTitle(record: FlatIndexRecord): string {
       return `Send ${record.valuePreview || record.displayLabel.replace(/^Shortcut:\s*/i, "")}`;
     case "text":
       return record.displayLabel.startsWith("Type ") ? record.displayLabel : `Type ${record.displayLabel}`;
+    case "normalModeDisable":
+      return "Disable Normal Mode";
+    case "normalModeEnable":
+      return "Enable Normal Mode";
+    case "normalModeInput":
+      return "Enter Normal Input Mode";
     case "toggleStickyMode":
       return "Toggle Sticky Mode";
     case "url":
@@ -123,6 +129,12 @@ function plainEnglishSummary(record: FlatIndexRecord): string {
       return `Sends ${record.valuePreview || record.displayLabel.replace(/^Shortcut:\s*/i, "")} to the frontmost app.`;
     case "text":
       return "Types this text value.";
+    case "normalModeDisable":
+      return "Disables persistent normal mode and returns keys to the frontmost app.";
+    case "normalModeEnable":
+      return "Enables persistent normal mode.";
+    case "normalModeInput":
+      return "Leaves normal mode enabled but passes keys through for text input.";
     case "toggleStickyMode":
       return "Turns sticky mode on or off for the current sequence.";
     case "url":
@@ -237,6 +249,10 @@ function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
 
   if (record.stickyMode !== undefined) {
     rows.push({ title: "Sticky Mode", text: record.stickyMode ? "On" : "Off" });
+  }
+
+  if (record.normalModeAfter) {
+    rows.push({ title: "Normal Mode After", text: record.normalModeAfter });
   }
 
   if (record.activates !== undefined) {

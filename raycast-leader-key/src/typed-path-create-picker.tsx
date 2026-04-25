@@ -23,11 +23,13 @@ function configSections(configs: ConfigSummary[]): Array<{ title: string; values
   return [
     {
       title: "Global And Fallback",
-      values: configs.filter((config) => config.scope === "global" || config.scope === "fallback"),
+      values: configs.filter((config) =>
+        config.scope === "global" || config.scope === "fallback" || config.scope === "normalFallback"
+      ),
     },
     {
       title: "App Configs",
-      values: configs.filter((config) => config.scope === "app"),
+      values: configs.filter((config) => config.scope === "app" || config.scope === "normalApp"),
     },
   ].filter((section) => section.values.length > 0);
 }
@@ -61,7 +63,7 @@ export function TypedPathCreatePicker(props: TypedPathCreatePickerProps) {
           {section.values.map((config) => (
             <List.Item
               accessories={[{ tag: { value: config.scope } }]}
-              icon={config.scope === "app" ? Icon.AppWindow : Icon.Book}
+              icon={config.scope === "app" || config.scope === "normalApp" ? Icon.AppWindow : Icon.Book}
               id={`typed-path-create:${itemType}:${config.filePath}`}
               key={config.filePath}
               subtitle={config.filePath}

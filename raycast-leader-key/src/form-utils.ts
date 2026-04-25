@@ -5,6 +5,7 @@ import {
   type ConfigItem,
   type FlatIndexRecord,
   type MacroStep,
+  type NormalModeAfter,
 } from "@leaderkey/config-core";
 
 const KEY_ALIASES = new Map<string, string>([
@@ -69,6 +70,7 @@ export interface ItemFormState {
   macroSteps: MacroStep[];
   menuFallbackPaths: string[];
   menuValue: string;
+  normalModeAfter: NormalModeAfter;
   shortcutValue: string;
   stickyMode: boolean;
   textValue: string;
@@ -100,6 +102,7 @@ export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormS
     macroSteps: [],
     menuFallbackPaths: [],
     menuValue: "",
+    normalModeAfter: "normal",
     shortcutValue: "",
     stickyMode: false,
     textValue: "",
@@ -241,6 +244,7 @@ export function recordToFormState(record?: FlatIndexRecord): ItemFormState {
     macroSteps: [],
     menuFallbackPaths: record.actionType === "menu" ? record.menuFallbackPaths ?? [] : [],
     menuValue: record.actionType === "menu" ? record.rawValue : "",
+    normalModeAfter: record.normalModeAfter ?? "normal",
     shortcutValue: record.actionType === "shortcut" ? record.rawValue : "",
     stickyMode: record.stickyMode ?? false,
     textValue: record.actionType === "text" ? record.rawValue : "",
@@ -273,6 +277,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
     label: "",
     macroSteps: item.type === "macro" ? cloneMacroActionSteps(item.macroSteps) : [],
     menuFallbackPaths: item.type === "menu" ? [...(item.menuFallbackPaths ?? [])] : [],
+    normalModeAfter: item.normalModeAfter ?? "normal",
     stickyMode: item.stickyMode ?? false,
     type: item.type,
   };
@@ -296,6 +301,10 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
       return { ...baseState, shortcutValue: item.value };
     case "text":
       return { ...baseState, textValue: item.value };
+    case "normalModeDisable":
+    case "normalModeEnable":
+    case "normalModeInput":
+      return baseState;
     case "toggleStickyMode":
       return baseState;
     case "url":

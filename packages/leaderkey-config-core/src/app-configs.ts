@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { APP_CONFIG_PREFIX, META_FILE_SUFFIX } from "./constants.js";
+import { APP_CONFIG_PREFIX, META_FILE_SUFFIX, NORMAL_APP_CONFIG_PREFIX } from "./constants.js";
 import { loadGroupFromFile, saveMetadata, writeGroupToFile } from "./discovery.js";
 import type { ConfigSummary, GroupNode } from "./types.js";
 
@@ -14,11 +14,12 @@ export type AppConfigTemplateSource =
 export interface CreateAppConfigOptions {
   bundleId: string;
   customName?: string;
+  normalMode?: boolean;
   template?: AppConfigTemplateSource;
 }
 
-function buildAppConfigFilePath(configDirectory: string, bundleId: string): string {
-  return path.join(configDirectory, `${APP_CONFIG_PREFIX}${bundleId}.json`);
+function buildAppConfigFilePath(configDirectory: string, bundleId: string, normalMode = false): string {
+  return path.join(configDirectory, `${normalMode ? NORMAL_APP_CONFIG_PREFIX : APP_CONFIG_PREFIX}${bundleId}.json`);
 }
 
 function buildMetaPath(filePath: string): string {
@@ -38,7 +39,8 @@ export async function createAppConfig(
     throw new Error("Bundle identifier cannot be empty.");
   }
 
-  const filePath = buildAppConfigFilePath(configDirectory, bundleId);
+  const normalMode = options.normalMode ?? false;
+  const filePath = buildAppConfigFilePath(configDirectory, bundleId, normalMode);
   const template = options.template ?? { kind: "empty" };
 
   const sourceGroup = template.kind === "config"
@@ -65,8 +67,8 @@ export async function createAppConfig(
 
   return {
     bundleId,
-    displayName: customName || `App: ${bundleId}`,
+    displayName: customName || (normalMode ? `Normal: ${bundleId}` : `App: ${bundleId}`),
     filePath,
-    scope: "app",
+    scope: normalMode ? "normalApp" : "app",
   };
 }

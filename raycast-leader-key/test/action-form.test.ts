@@ -191,3 +191,31 @@ test("menu actions use selected app context for path-only drafts", () => {
   const menuAction = formStateToActionNode(menuState, { menuAppName: "Path Finder" });
   assert.equal(menuAction.value, "Path Finder > Go > Home > Desktop");
 });
+
+test("normal mode after serializes only non-default terminal actions", () => {
+  const shortcutState = emptyFormState("shortcut");
+  shortcutState.shortcutValue = "Cs";
+  shortcutState.normalModeAfter = "input";
+
+  const shortcutAction = formStateToActionNode(shortcutState);
+  assert.equal(shortcutAction.normalModeAfter, "input");
+
+  shortcutState.normalModeAfter = "normal";
+  const defaultAction = formStateToActionNode(shortcutState);
+  assert.equal(defaultAction.normalModeAfter, undefined);
+});
+
+test("normal mode control actions need no value and do not add normalModeAfter", () => {
+  const enableState = emptyFormState("normalModeEnable");
+  enableState.normalModeAfter = "disabled";
+
+  const enableAction = formStateToActionNode(enableState);
+  assert.equal(enableAction.type, "normalModeEnable");
+  assert.equal(enableAction.value, "");
+  assert.equal(enableAction.normalModeAfter, undefined);
+  assert.equal(validateActionNode(enableAction), undefined);
+
+  const disableState = emptyFormState("normalModeDisable");
+  const disableAction = formStateToActionNode(disableState);
+  assert.equal(validateActionNode(disableAction), undefined);
+});

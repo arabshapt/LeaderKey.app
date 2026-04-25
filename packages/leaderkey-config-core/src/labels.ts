@@ -239,6 +239,12 @@ export function generateActionLabel(action: ActionNode, context: ItemContext): s
       }
       return `Type ${snippet(action.value, 24)}`;
     }
+    case "normalModeDisable":
+      return "Normal Mode Disable";
+    case "normalModeEnable":
+      return "Normal Mode Enable";
+    case "normalModeInput":
+      return "Normal Mode Input";
     case "toggleStickyMode":
       return "Toggle Sticky Mode";
     case "url":
@@ -300,6 +306,12 @@ export function actionValuePreview(action: ActionNode): string {
       return humanizeShortcutSequence(action.value);
     case "text":
       return snippet(action.value, 48);
+    case "normalModeDisable":
+      return "Disable normal mode";
+    case "normalModeEnable":
+      return "Enable normal mode";
+    case "normalModeInput":
+      return "Enter normal input mode";
     case "toggleStickyMode":
       return "Toggle sticky mode on or off";
     case "url":

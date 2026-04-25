@@ -43,10 +43,12 @@ Normal mode is a persistent shortcut mode:
 - Swift suppresses overlay behavior for normal-mode state mappings so normal actions run silently.
 - Status item normal-mode state is driven by Karabiner string commands:
   - `normal_on`
+  - `normal_input`
   - `normal_off`
-- Raycast support is deferred. It is in-repo work, not an external package-release blocker:
+- Raycast support is in-repo and implemented for Browse Configs, Search Shortcuts, Add/Edit by Path, and config creation:
   - `packages/leaderkey-config-core`
   - `raycast-leader-key`
+- Command Scout remains restricted to regular app configs.
 
 ## User-Facing Config Shape
 
@@ -190,10 +192,13 @@ Main changes:
 - `Karabiner2InputMethod.exportCurrentConfiguration()` discovers and loads normal app configs.
 - Added normal config metadata loading.
 - Added `loadAndMergeNormalAppConfig`.
-- `KarabinerCommandRouter` handles `normal_on` and `normal_off`.
-- `UnixSocketServerDelegate` now has `unixSocketServerDidReceiveNormalModeStatus(active:)`.
+- `KarabinerCommandRouter` handles `normal_on`, `normal_input`, and `normal_off`.
+- `UnixSocketServerDelegate` now has `unixSocketServerDidReceiveNormalModeStatus(_:)`.
 - `AppDelegate` updates status-item normal mode state.
-- `StatusItem` has `normalModeActive` and shows a blue filled variant when normal mode is active and the overlay is not active.
+- `StatusItem` has distinct menu-bar states for idle, Leader overlay, sticky mode, normal mode,
+  normal input mode, and reload success.
+- Status item mode indicators are drawn as non-template colored badges instead of tinting the filled
+  template asset. This avoids the black cutout rendering issue in the menu bar.
 - `Controller.runAction` handles:
   - `.normalModeEnable`
   - `.normalModeInput`
@@ -203,6 +208,47 @@ Main changes:
 - Normal override mappings resolve against the mapped bundle ID.
 - Normal group state IDs are ignored in Swift because group transitions are Karabiner-only.
 
+### Raycast And Config Core
+
+Touched files:
+
+- `packages/leaderkey-config-core/src/app-configs.ts`
+- `packages/leaderkey-config-core/src/constants.ts`
+- `packages/leaderkey-config-core/src/discovery.ts`
+- `packages/leaderkey-config-core/src/index.ts`
+- `packages/leaderkey-config-core/src/indexing.ts`
+- `packages/leaderkey-config-core/src/labels.ts`
+- `packages/leaderkey-config-core/src/mutations.ts`
+- `packages/leaderkey-config-core/src/types.ts`
+- `raycast-leader-key/src/action-form.ts`
+- `raycast-leader-key/src/add-edit-by-path.tsx`
+- `raycast-leader-key/src/browse-configs.tsx`
+- `raycast-leader-key/src/create-app-config-form.tsx`
+- `raycast-leader-key/src/deeplinks.ts`
+- `raycast-leader-key/src/detail-presentation.ts`
+- `raycast-leader-key/src/editor-form.tsx`
+- `raycast-leader-key/src/form-utils.ts`
+- `raycast-leader-key/src/macro-editor.tsx`
+- `raycast-leader-key/src/presentation.ts`
+- `raycast-leader-key/src/search-shortcuts.tsx`
+- `raycast-leader-key/src/typed-path-create-picker.tsx`
+
+Main changes:
+
+- Config-core discovers `normal-fallback-config.json` and `normal-app.<bundleId>.json`.
+- Normal app configs inherit from the normal fallback config in the generated cache payload.
+- Config-core can create empty or templated normal app configs.
+- Flat index records preserve `normalModeAfter`.
+- Labels, previews, and mutation cloning understand the three normal-mode control actions.
+- Raycast Browse Configs and Add/Edit by Path can target normal fallback and normal app scopes.
+- Raycast Search Shortcuts surfaces normal records through the shared cache and labels inherited
+  normal fallback overrides as normal app overrides.
+- Raycast exposes current-app normal config deeplink templates.
+- Raycast can create missing normal app configs from a normal app target.
+- Raycast action forms include the three normal-mode control actions.
+- Raycast action forms expose `normalModeAfter` for non-mode-control terminal actions.
+- Macro editor options include normal-mode control actions.
+
 ## Tests Added Or Updated
 
 Touched files:
@@ -210,6 +256,13 @@ Touched files:
 - `Leader KeyTests/Karabiner2ExporterKarConfigTests.swift`
 - `Leader KeyTests/KarabinerCommandRouterTests.swift`
 - `Leader KeyTests/UserConfigTests.swift`
+- `Leader KeyTests/KarCompilerServiceTests.swift`
+- `packages/leaderkey-config-core/test/app-configs.test.ts`
+- `packages/leaderkey-config-core/test/discovery-indexing.test.ts`
+- `packages/leaderkey-config-core/test/labels.test.ts`
+- `raycast-leader-key/test/action-form.test.ts`
+- `raycast-leader-key/test/deeplinks.test.ts`
+- `raycast-leader-key/test/form-utils.test.ts`
 
 Coverage added:
 
@@ -219,8 +272,12 @@ Coverage added:
 - App override before fallback.
 - `normalModeAfter`.
 - Escape/Caps Lock cascade.
-- Router handling for `normal_on` and `normal_off`.
+- Router handling for `normal_on`, `normal_input`, and `normal_off`.
 - Normal state scopes and collision-free namespace behavior.
+- Status item mode badges use non-template images and no tint.
+- Config-core discovery/indexing of normal fallback and normal app configs.
+- Raycast deep links for normal fallback and normal app scopes.
+- Raycast serialization for `normalModeAfter` and normal-mode control actions.
 
 Regression coverage preserved:
 
@@ -253,7 +310,25 @@ xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test CODE_SIGNING_ALLOWED=N
 Result:
 
 ```text
-153 tests, 1 skipped, 0 failures
+154 tests, 1 skipped, 0 failures
+```
+
+TypeScript tests and typechecks passed after installing workspace dev dependencies with `npm install`:
+
+```sh
+npm --prefix packages/leaderkey-config-core test
+npm --prefix packages/leaderkey-config-core run typecheck
+npm --prefix raycast-leader-key test
+npm --prefix raycast-leader-key run typecheck
+```
+
+Results:
+
+```text
+config-core: 33 tests, 0 failures
+raycast-leader-key: 42 tests, 0 failures
+both typechecks passed
+root workspace typecheck passed
 ```
 
 There are existing swift-format warnings in the project, but the build and tests passed with signing disabled.
@@ -283,8 +358,35 @@ Leader Key/UserConfig.swift
 Leader Key/Views/ConfigEditorView.swift
 Leader Key/Views/NativeConfigEditorView.swift
 Leader KeyTests/Karabiner2ExporterKarConfigTests.swift
+Leader KeyTests/KarCompilerServiceTests.swift
 Leader KeyTests/KarabinerCommandRouterTests.swift
 Leader KeyTests/UserConfigTests.swift
+packages/leaderkey-config-core/src/app-configs.ts
+packages/leaderkey-config-core/src/constants.ts
+packages/leaderkey-config-core/src/discovery.ts
+packages/leaderkey-config-core/src/index.ts
+packages/leaderkey-config-core/src/indexing.ts
+packages/leaderkey-config-core/src/labels.ts
+packages/leaderkey-config-core/src/mutations.ts
+packages/leaderkey-config-core/src/types.ts
+packages/leaderkey-config-core/test/app-configs.test.ts
+packages/leaderkey-config-core/test/discovery-indexing.test.ts
+packages/leaderkey-config-core/test/labels.test.ts
+raycast-leader-key/src/action-form.ts
+raycast-leader-key/src/add-edit-by-path.tsx
+raycast-leader-key/src/browse-configs.tsx
+raycast-leader-key/src/create-app-config-form.tsx
+raycast-leader-key/src/deeplinks.ts
+raycast-leader-key/src/detail-presentation.ts
+raycast-leader-key/src/editor-form.tsx
+raycast-leader-key/src/form-utils.ts
+raycast-leader-key/src/macro-editor.tsx
+raycast-leader-key/src/presentation.ts
+raycast-leader-key/src/search-shortcuts.tsx
+raycast-leader-key/src/typed-path-create-picker.tsx
+raycast-leader-key/test/action-form.test.ts
+raycast-leader-key/test/deeplinks.test.ts
+raycast-leader-key/test/form-utils.test.ts
 tasks/normal-mode-handoff.md
 ```
 
@@ -328,21 +430,6 @@ Use these checks before shipping:
 
 ## Deferred Work
 
-### Raycast
-
-Raycast support is deferred. The work is in this repo:
-
-- `packages/leaderkey-config-core`
-- `raycast-leader-key`
-
-Needed later:
-
-- Add discovery patterns for:
-  - `normal-fallback-config.json`
-  - `normal-app.<bundleId>.json`
-- Update Browse Configs and Search Shortcuts to surface normal scopes.
-- Ensure Raycast writes JSON directly and notifies Leader Key over `/tmp/leaderkey.sock`.
-
 ### UX Polish
 
 Possible follow-ups:
@@ -352,6 +439,8 @@ Possible follow-ups:
 - Add validation warnings if a user tries to bind Escape or Caps Lock in normal configs.
 - Add help text or examples for normal mode configs in docs.
 - Add a small sample normal fallback config.
+- Run a manual Raycast session to confirm Browse Configs and Add/Edit by Path workflows after
+  installing the extension locally.
 
 ## Useful Commands For A New Session
 
@@ -367,6 +456,16 @@ Run tests with signing disabled:
 xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test CODE_SIGNING_ALLOWED=NO
 ```
 
+Run TypeScript package checks:
+
+```sh
+npm install
+npm --prefix packages/leaderkey-config-core test
+npm --prefix packages/leaderkey-config-core run typecheck
+npm --prefix raycast-leader-key test
+npm --prefix raycast-leader-key run typecheck
+```
+
 Run the signed test command if local signing is configured:
 
 ```sh
@@ -376,7 +475,7 @@ xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test
 Search normal-mode implementation points:
 
 ```sh
-rg "normalMode|normal_mode|leaderkey_normal|normalShared|normalOverride|normalSuppress|normal_on|normal_off"
+rg "normalMode|normal_mode|leaderkey_normal|normalShared|normalOverride|normalSuppress|normal_on|normal_input|normal_off"
 ```
 
 Inspect Karabiner export output after applying config:
@@ -393,4 +492,3 @@ Read tasks/normal-mode-handoff.md first.
 The feature adds Vim-like persistent normal mode using normal-fallback-config.json and normal-app.<bundleId>.json, Karabiner variables leaderkey_normal_enabled/input/state, state-mapped terminal actions, Karabiner-only group transitions, Escape/Caps Lock cascade, and overlay suppression for normal scopes.
 Please inspect the current worktree, do not revert pre-existing dirty kar or karabiner.ts/configs/leaderkey/leaderkey-generated.json changes, run tests with CODE_SIGNING_ALLOWED=NO, then continue with the next requested task.
 ```
-

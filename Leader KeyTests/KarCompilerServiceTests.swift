@@ -411,14 +411,16 @@ final class StatusItemTests: XCTestCase {
 
     XCTAssertTrue(statusItem.isShowingReloadSuccessFeedback)
     XCTAssertEqual(statusItem.renderedAppearance, .reloadSuccess)
-    XCTAssertNotNil(statusItem.testButton.contentTintColor)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
     XCTAssertEqual(statusItem.testButton.alphaValue, 1.0)
 
     statusItem.fireLatestScheduledReset()
 
     XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
-    XCTAssertEqual(statusItem.renderedAppearance, .active)
+    XCTAssertEqual(statusItem.renderedAppearance, .leaderMode)
     XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
     XCTAssertEqual(statusItem.testButton.alphaValue, 1.0)
   }
 
@@ -437,6 +439,36 @@ final class StatusItemTests: XCTestCase {
     statusItem.fireLatestScheduledReset()
 
     XCTAssertFalse(statusItem.isShowingReloadSuccessFeedback)
+    XCTAssertEqual(statusItem.renderedAppearance, .normal)
+  }
+
+  func testModeAppearancesAreDistinct() {
+    XCTAssertEqual(statusItem.renderedAppearance, .normal)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+
+    statusItem.appearance = .active
+    XCTAssertEqual(statusItem.renderedAppearance, .leaderMode)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
+
+    statusItem.stickyModeActive = true
+    XCTAssertEqual(statusItem.renderedAppearance, .stickyMode)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
+
+    statusItem.stickyModeActive = false
+    statusItem.appearance = .normal
+    statusItem.normalModeStatus = .normal
+    XCTAssertEqual(statusItem.renderedAppearance, .normalMode)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
+
+    statusItem.normalModeStatus = .input
+    XCTAssertEqual(statusItem.renderedAppearance, .normalInputMode)
+    XCTAssertNil(statusItem.testButton.contentTintColor)
+    XCTAssertEqual(statusItem.testButton.image?.isTemplate, false)
+
+    statusItem.normalModeStatus = .inactive
     XCTAssertEqual(statusItem.renderedAppearance, .normal)
   }
 

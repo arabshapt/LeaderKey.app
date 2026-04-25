@@ -458,15 +458,19 @@ class Controller {
       }
     case .normalModeEnable:
       if let appDelegate = appDelegate {
-        appDelegate.setNormalModeStatus(active: true)
+        appDelegate.setNormalModeStatus(.normal)
       } else {
         debugLog("[Controller] runAction: Cannot enable normal mode status - appDelegate is nil")
       }
     case .normalModeInput:
-      debugLog("[Controller] runAction: Normal mode input transition is handled by Karabiner")
+      if let appDelegate = appDelegate {
+        appDelegate.setNormalModeStatus(.input)
+      } else {
+        debugLog("[Controller] runAction: Cannot set normal mode input status - appDelegate is nil")
+      }
     case .normalModeDisable:
       if let appDelegate = appDelegate {
-        appDelegate.setNormalModeStatus(active: false)
+        appDelegate.setNormalModeStatus(.inactive)
       } else {
         debugLog("[Controller] runAction: Cannot disable normal mode status - appDelegate is nil")
       }

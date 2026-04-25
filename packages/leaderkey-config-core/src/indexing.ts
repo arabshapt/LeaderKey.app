@@ -178,8 +178,8 @@ function buildFlatRecord(
 
     return {
       actionType: "group",
-      activates: undefined,
-      appName: undefined,
+    activates: undefined,
+    appName: undefined,
       breadcrumbDisplay: breadcrumbPath.join(" -> "),
       breadcrumbPath,
       childCount,
@@ -201,7 +201,8 @@ function buildFlatRecord(
       kind: "group",
       label,
       macroStepSummary: undefined,
-      menuFallbackPaths: undefined,
+    menuFallbackPaths: undefined,
+    normalModeAfter: undefined,
       parentEffectiveKeyPath,
       rawValue: "",
       searchText: [
@@ -270,6 +271,7 @@ function buildFlatRecord(
     label: node.item.label,
     macroStepSummary: macroStepSummary(node.item),
     menuFallbackPaths: node.item.menuFallbackPaths,
+    normalModeAfter: node.item.normalModeAfter,
     parentEffectiveKeyPath,
     rawValue: node.item.value,
     searchText: [
@@ -321,6 +323,10 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
   const fingerprint = configFingerprint(configs);
   const fallbackDescriptor = configs.find((config) => config.scope === "fallback");
   const fallbackGroup = fallbackDescriptor ? await loadGroupFromFile(fallbackDescriptor.filePath) : undefined;
+  const normalFallbackDescriptor = configs.find((config) => config.scope === "normalFallback");
+  const normalFallbackGroup = normalFallbackDescriptor
+    ? await loadGroupFromFile(normalFallbackDescriptor.filePath)
+    : undefined;
   const records: FlatIndexRecord[] = [];
 
   for (const descriptor of configs) {
@@ -333,14 +339,25 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
     };
 
     let mergedRoot: InternalGroupNode;
-    if (descriptor.scope === "app" && fallbackGroup && fallbackDescriptor) {
+    const inheritedDescriptor = descriptor.scope === "app"
+      ? fallbackDescriptor
+      : descriptor.scope === "normalApp"
+        ? normalFallbackDescriptor
+        : undefined;
+    const inheritedGroup = descriptor.scope === "app"
+      ? fallbackGroup
+      : descriptor.scope === "normalApp"
+        ? normalFallbackGroup
+        : undefined;
+
+    if ((descriptor.scope === "app" || descriptor.scope === "normalApp") && inheritedGroup && inheritedDescriptor) {
       const fallbackSource: InternalSource = {
-        configDisplayName: fallbackDescriptor.displayName,
-        configPath: fallbackDescriptor.filePath,
+        configDisplayName: inheritedDescriptor.displayName,
+        configPath: inheritedDescriptor.filePath,
         nodePath: [],
-        scope: fallbackDescriptor.scope,
+        scope: inheritedDescriptor.scope,
       };
-      mergedRoot = mergeGroups(descriptor, sourceGroup, localSource, fallbackGroup, fallbackSource);
+      mergedRoot = mergeGroups(descriptor, sourceGroup, localSource, inheritedGroup, fallbackSource);
     } else {
       mergedRoot = createInternalNode(sourceGroup, localSource, [], false) as InternalGroupNode;
     }

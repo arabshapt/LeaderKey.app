@@ -311,6 +311,9 @@ export default function SearchShortcutsCommand() {
         const showDetailsShortcut: Keyboard.Shortcut = record.kind === "group"
           ? { modifiers: ["cmd"], key: "return" }
           : { modifiers: ["cmd"], key: "." };
+        const createOverrideTitle = record.effectiveScope === "normalApp"
+          ? "Create Normal App Override"
+          : "Create App Override";
 
         return (
           <List.Item
@@ -424,10 +427,10 @@ export default function SearchShortcutsCommand() {
                           setPayload(nextPayload);
                         }}
                         targetRecord={record}
-                        title={`Create Override for ${record.displayLabel}`}
-                      />
-                    }
-                    title="Create App Override"
+                    title={`Create Override for ${record.displayLabel}`}
+                  />
+                }
+                    title={createOverrideTitle}
                   />
                 ) : null}
                 <Action.Push

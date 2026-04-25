@@ -570,6 +570,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
         fromKeyCode(in: $0) == "i" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
       }))
       XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_input", value: 1))
+      XCTAssertTrue(hasSendUserCommand(manipulator: inputMapping, prefix: "normal_input"))
 
       let disabledMapping = try XCTUnwrap(allManipulators.first(where: {
         fromKeyCode(in: $0) == "d" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")

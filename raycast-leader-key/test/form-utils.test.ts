@@ -66,6 +66,7 @@ test("recordToFormState still preserves edit-source data", () => {
     sourceScope: "global",
     sourceStatus: "local",
     stickyMode: false,
+    normalModeAfter: "input",
     valuePreview: "gh pr checkout 123",
   });
 
@@ -74,6 +75,7 @@ test("recordToFormState still preserves edit-source data", () => {
   assert.equal(state.description, "Checkout the current PR");
   assert.equal(state.aiDescription, "Run GitHub checkout for the active PR");
   assert.equal(state.fullPath, "r -> g");
+  assert.equal(state.normalModeAfter, "input");
 });
 
 test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {

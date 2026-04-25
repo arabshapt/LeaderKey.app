@@ -113,11 +113,15 @@ enum KarabinerCommandRouter {
       return "OK"
 
     case "normal_on":
-      delegate?.unixSocketServerDidReceiveNormalModeStatus(active: true)
+      delegate?.unixSocketServerDidReceiveNormalModeStatus(.normal)
+      return "OK"
+
+    case "normal_input":
+      delegate?.unixSocketServerDidReceiveNormalModeStatus(.input)
       return "OK"
 
     case "normal_off":
-      delegate?.unixSocketServerDidReceiveNormalModeStatus(active: false)
+      delegate?.unixSocketServerDidReceiveNormalModeStatus(.inactive)
       return "OK"
 
     case "state":

@@ -3,6 +3,9 @@ export {
   FALLBACK_CONFIG_FILE_NAME,
   GLOBAL_CONFIG_DISPLAY_NAME,
   GLOBAL_CONFIG_FILE_NAME,
+  NORMAL_APP_CONFIG_PREFIX,
+  NORMAL_FALLBACK_CONFIG_DISPLAY_NAME,
+  NORMAL_FALLBACK_CONFIG_FILE_NAME,
   defaultConfigDirectory,
 } from "./constants.js";
 export { EMPTY_APP_CONFIG_TEMPLATE, createAppConfig } from "./app-configs.js";
@@ -51,6 +54,7 @@ export type {
   FlatIndexRecord,
   GroupNode,
   MacroStep,
+  NormalModeAfter,
   ScopeType,
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";

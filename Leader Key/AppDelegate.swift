@@ -1259,9 +1259,9 @@ extension AppDelegate {
     inputMethodDidReceiveStateId(stateId, sticky: sticky)
   }
 
-  func unixSocketServerDidReceiveNormalModeStatus(active: Bool) {
-    debugLog("[AppDelegate] Control socket normal mode status: \(active)")
-    setNormalModeStatus(active: active)
+  func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
+    debugLog("[AppDelegate] Control socket normal mode status: \(status)")
+    setNormalModeStatus(status)
   }
 
   func unixSocketServerDidReceiveShake() {
@@ -1287,8 +1287,18 @@ extension AppDelegate {
   }
 
   func setNormalModeStatus(active: Bool) {
+    setNormalModeStatus(active ? .normal : .inactive)
+  }
+
+  func setNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
     DispatchQueue.main.async { [weak self] in
-      self?.statusItem.normalModeActive = active
+      self?.statusItem.normalModeStatus = status
+    }
+  }
+
+  func setStickyModeStatus(active: Bool) {
+    DispatchQueue.main.async { [weak self] in
+      self?.statusItem.stickyModeActive = active
     }
   }
 }
@@ -1331,7 +1341,10 @@ extension AppDelegate {
   }
   private var stickyModeToggled: Bool {
     get { getAssociatedObject(self, &AssociatedKeys.stickyModeToggled) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.stickyModeToggled, newValue) }
+    set {
+      setAssociatedObject(self, &AssociatedKeys.stickyModeToggled, newValue)
+      setStickyModeStatus(active: newValue)
+    }
   }
   private var lastModifierFlags: NSEvent.ModifierFlags {
     get {
@@ -2358,6 +2371,7 @@ extension AppDelegate {
 
     // Sticky mode is active if either the modifier is held OR it's been toggled on
     let isSticky = modifierStickyMode || stickyModeToggled
+    setStickyModeStatus(active: currentSequenceGroup != nil && isSticky)
     #if DEBUG
       print(
         "[AppDelegate] isInStickyMode: Config = \(config), Mods = \(describeModifiers(modifierFlags)), Toggled = \(stickyModeToggled), IsSticky = \(isSticky)"

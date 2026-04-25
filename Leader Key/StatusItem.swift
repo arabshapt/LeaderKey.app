@@ -9,10 +9,18 @@ class StatusItem {
     case active
   }
 
+  enum NormalModeStatus: Equatable {
+    case inactive
+    case normal
+    case input
+  }
+
   enum ResolvedAppearance: Equatable {
     case normal
-    case active
+    case leaderMode
+    case stickyMode
     case normalMode
+    case normalInputMode
     case reloadSuccess
   }
 
@@ -30,7 +38,16 @@ class StatusItem {
   var statusItem: NSStatusItem?
   var reloadSuccessFeedbackTiming = ReloadSuccessFeedbackTiming()
   private(set) var isShowingReloadSuccessFeedback = false
-  var normalModeActive = false {
+  var normalModeStatus: NormalModeStatus = .inactive {
+    didSet {
+      updateStatusItemAppearance()
+    }
+  }
+  var normalModeActive: Bool {
+    get { normalModeStatus != .inactive }
+    set { normalModeStatus = newValue ? .normal : .inactive }
+  }
+  var stickyModeActive = false {
     didSet {
       updateStatusItemAppearance()
     }
@@ -38,6 +55,7 @@ class StatusItem {
   private(set) var renderedAppearance: ResolvedAppearance = .normal
   private var cancellables = Set<AnyCancellable>()
   private var reloadSuccessResetWorkItem: DispatchWorkItem?
+  private var modeStatusMenuItem: NSMenuItem?
 
   var handlePreferences: (() -> Void)?
   var handleReloadConfig: (() -> Void)?
@@ -62,6 +80,14 @@ class StatusItem {
     }
 
     let menu = NSMenu()
+
+    let modeStatusItem = NSMenuItem(
+      title: "Mode: Idle", action: nil, keyEquivalent: ""
+    )
+    modeStatusItem.isEnabled = false
+    modeStatusMenuItem = modeStatusItem
+    menu.addItem(modeStatusItem)
+    menu.addItem(NSMenuItem.separator())
 
     let preferencesItem = NSMenuItem(
       title: "Preferences…", action: #selector(showPreferences),
@@ -141,6 +167,7 @@ class StatusItem {
     cancellables.removeAll()
     NSStatusBar.system.removeStatusItem(item)
     statusItem = nil
+    modeStatusMenuItem = nil
   }
 
   func indicateReloadSuccess() {
@@ -153,7 +180,11 @@ class StatusItem {
       self.updateStatusItemAppearance()
 
       button.alphaValue = 0.76
-      self.animate(button: button, toAlpha: 1.0, duration: self.reloadSuccessFeedbackTiming.fadeDuration)
+      self.animate(
+        button: button,
+        toAlpha: 1.0,
+        duration: self.reloadSuccessFeedbackTiming.fadeDuration
+      )
 
       if shouldPlaySound {
         self.playReloadSuccessSoundIfNeeded()
@@ -172,7 +203,11 @@ class StatusItem {
           self.isShowingReloadSuccessFeedback = false
           self.reloadSuccessResetWorkItem = nil
           self.updateStatusItemAppearance()
-          self.animate(button: button, toAlpha: 1.0, duration: self.reloadSuccessFeedbackTiming.fadeDuration)
+          self.animate(
+            button: button,
+            toAlpha: 1.0,
+            duration: self.reloadSuccessFeedbackTiming.fadeDuration
+          )
         }
       }
 
@@ -212,18 +247,13 @@ class StatusItem {
     let resolvedAppearance = currentResolvedAppearance()
     renderedAppearance = resolvedAppearance
 
+    modeStatusMenuItem?.title = menuTitle(for: resolvedAppearance)
+
     guard let button = feedbackButton() else { return }
 
     button.image = image(for: resolvedAppearance)
-
-    switch resolvedAppearance {
-    case .normal, .active:
-      button.contentTintColor = nil
-    case .normalMode:
-      button.contentTintColor = NSColor.systemBlue
-    case .reloadSuccess:
-      button.contentTintColor = NSColor.systemGreen
-    }
+    button.toolTip = tooltip(for: resolvedAppearance)
+    button.contentTintColor = nil
   }
 
   private func currentResolvedAppearance() -> ResolvedAppearance {
@@ -231,24 +261,129 @@ class StatusItem {
       return .reloadSuccess
     }
 
-    if normalModeActive && appearance == .normal {
-      return .normalMode
+    if stickyModeActive {
+      return .stickyMode
     }
 
-    switch appearance {
-    case .normal:
+    if appearance == .active {
+      return .leaderMode
+    }
+
+    switch normalModeStatus {
+    case .inactive:
       return .normal
-    case .active:
-      return .active
+    case .normal:
+      return .normalMode
+    case .input:
+      return .normalInputMode
     }
   }
 
   private func image(for appearance: ResolvedAppearance) -> NSImage? {
+    modeImage(for: appearance)
+  }
+
+  private func modeImage(for appearance: ResolvedAppearance) -> NSImage {
+    let visual = modeVisual(for: appearance)
+    let size = NSSize(width: 18, height: 18)
+    let image = NSImage(size: size)
+
+    image.lockFocus()
+
+    NSColor.clear.setFill()
+    NSRect(origin: .zero, size: size).fill()
+
+    let badgeRect = NSRect(x: 2, y: 2, width: 14, height: 14)
+    let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4)
+    visual.fillColor.setFill()
+    badgePath.fill()
+
+    if let strokeColor = visual.strokeColor {
+      strokeColor.setStroke()
+      badgePath.lineWidth = 1
+      badgePath.stroke()
+    }
+
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+      .foregroundColor: visual.textColor,
+    ]
+    let textSize = visual.label.size(withAttributes: attributes)
+    let textOrigin = NSPoint(
+      x: floor((size.width - textSize.width) / 2),
+      y: floor((size.height - textSize.height) / 2) - 1
+    )
+    visual.label.draw(at: textOrigin, withAttributes: attributes)
+
+    image.unlockFocus()
+    image.isTemplate = false
+    return image
+  }
+
+  private func modeVisual(for appearance: ResolvedAppearance) -> (
+    label: String,
+    fillColor: NSColor,
+    strokeColor: NSColor?,
+    textColor: NSColor
+  ) {
     switch appearance {
     case .normal:
-      return NSImage(named: NSImage.Name("StatusItem"))
-    case .active, .normalMode, .reloadSuccess:
-      return NSImage(named: NSImage.Name("StatusItem-filled"))
+      return (
+        label: "K",
+        fillColor: NSColor.windowBackgroundColor,
+        strokeColor: NSColor.secondaryLabelColor,
+        textColor: NSColor.labelColor
+      )
+    case .leaderMode:
+      return (
+        label: "L",
+        fillColor: NSColor.systemOrange,
+        strokeColor: nil,
+        textColor: NSColor.white
+      )
+    case .stickyMode:
+      return (
+        label: "S",
+        fillColor: NSColor.systemPurple,
+        strokeColor: nil,
+        textColor: NSColor.white
+      )
+    case .normalMode:
+      return (label: "N", fillColor: NSColor.systemBlue, strokeColor: nil, textColor: NSColor.white)
+    case .normalInputMode:
+      return (label: "I", fillColor: NSColor.systemTeal, strokeColor: nil, textColor: NSColor.white)
+    case .reloadSuccess:
+      return (
+        label: "R",
+        fillColor: NSColor.systemGreen,
+        strokeColor: nil,
+        textColor: NSColor.white
+      )
+    }
+  }
+
+  private func menuTitle(for appearance: ResolvedAppearance) -> String {
+    "Mode: \(modeName(for: appearance))"
+  }
+
+  private func tooltip(for appearance: ResolvedAppearance) -> String {
+    "Leader Key: \(modeName(for: appearance))"
+  }
+
+  private func modeName(for appearance: ResolvedAppearance) -> String {
+    switch appearance {
+    case .normal:
+      return "Idle"
+    case .leaderMode:
+      return "Leader"
+    case .stickyMode:
+      return "Sticky"
+    case .normalMode:
+      return "Normal"
+    case .normalInputMode:
+      return "Input"
+    case .reloadSuccess:
+      return "Config Reloaded"
     }
   }
 

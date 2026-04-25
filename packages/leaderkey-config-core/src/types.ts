@@ -9,10 +9,15 @@ export type ActionType =
   | "menu"
   | "shortcut"
   | "text"
+  | "normalModeDisable"
+  | "normalModeEnable"
+  | "normalModeInput"
   | "toggleStickyMode"
   | "url";
 
-export type ScopeType = "app" | "fallback" | "global";
+export type NormalModeAfter = "disabled" | "input" | "normal";
+
+export type ScopeType = "app" | "fallback" | "global" | "normalApp" | "normalFallback";
 
 export interface MacroStep {
   action: ActionNode;
@@ -30,6 +35,7 @@ export interface ActionNode {
   iconPath?: string;
   activates?: boolean;
   menuFallbackPaths?: string[];
+  normalModeAfter?: NormalModeAfter;
   stickyMode?: boolean;
   macroSteps?: MacroStep[];
 }
@@ -98,6 +104,7 @@ export interface FlatIndexRecord {
   inherited: boolean;
   sourceStatus: "fallback" | "local";
   stickyMode?: boolean;
+  normalModeAfter?: NormalModeAfter;
   activates?: boolean;
   childCount?: number;
   macroStepSummary?: string[];

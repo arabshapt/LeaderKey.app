@@ -19,6 +19,7 @@ import {
   buildBrowseConfigsDeeplink,
   buildPathEditorDeeplink,
   configTargetForSummary,
+  normalAppBundleIdForConfigTarget,
   resolveConfigTarget,
 } from "./deeplinks.js";
 import { PathEditorView } from "./path-editor-view.js";
@@ -122,9 +123,16 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
   }, [payload, requestedTarget]);
 
   const requestedAppBundleId = useMemo(() => appBundleIdForConfigTarget(requestedTarget), [requestedTarget]);
-  const needsCreateAppConfig = Boolean(payload && requestedAppBundleId && !resolvedLaunchTarget);
+  const requestedNormalAppBundleId = useMemo(() => normalAppBundleIdForConfigTarget(requestedTarget), [requestedTarget]);
+  const missingRequestedBundleId = requestedAppBundleId ?? requestedNormalAppBundleId;
+  const needsCreateAppConfig = Boolean(payload && missingRequestedBundleId && !resolvedLaunchTarget);
   const currentAppDeeplinkTemplate = buildBrowseConfigsDeeplink(
     `app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
+    ownerOrAuthorName,
+    extensionName,
+  );
+  const currentNormalAppDeeplinkTemplate = buildBrowseConfigsDeeplink(
+    `normal-app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
     ownerOrAuthorName,
     extensionName,
   );
@@ -154,12 +162,13 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
     return openConfigTarget(resolvedLaunchTarget, configDirectory, payload, setPayload, preferredEditor);
   }
 
-  if (payload && requestedAppBundleId && needsCreateAppConfig) {
+  if (payload && missingRequestedBundleId && needsCreateAppConfig) {
     return (
       <CreateAppConfigForm
-        bundleId={requestedAppBundleId}
+        bundleId={missingRequestedBundleId}
         configDirectory={configDirectory}
         initialPayload={payload}
+        normalMode={Boolean(requestedNormalAppBundleId)}
         onDidCreate={setPayload}
       />
     );
@@ -278,6 +287,21 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
                 content={currentAppDeeplinkTemplate}
                 icon={Icon.Link}
                 title="Copy Current App Config Deeplink"
+              />
+            </ActionPanel>
+          }
+        />
+        <List.Item
+          icon={Icon.Link}
+          id="current-normal-app-config-template"
+          subtitle="Leader Key expands {frontmostBundleId} before Raycast opens"
+          title="Current App Normal Config Deeplink Template"
+          actions={
+            <ActionPanel>
+              <Action.CopyToClipboard
+                content={currentNormalAppDeeplinkTemplate}
+                icon={Icon.Link}
+                title="Copy Current App Normal Config Deeplink"
               />
             </ActionPanel>
           }

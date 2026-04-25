@@ -11,6 +11,13 @@ import { encodeKeystrokeRawValue, menuPathValue, type ItemFormState } from "./fo
 
 export type MacroStepActionType = Exclude<ConfigItem["type"], "group">;
 
+export function isModeControlActionType(type: ConfigItem["type"]): boolean {
+  return type === "toggleStickyMode"
+    || type === "normalModeDisable"
+    || type === "normalModeEnable"
+    || type === "normalModeInput";
+}
+
 function trimOptionalText(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
@@ -67,6 +74,11 @@ export function formStateToActionNode(
     iconPath: preservedAction?.iconPath,
     key: preservedAction?.key,
     label: preservedAction?.label,
+    normalModeAfter: preserveHiddenMetadata || isModeControlActionType(state.type)
+      ? preservedAction?.normalModeAfter
+      : state.normalModeAfter === "normal"
+        ? undefined
+        : state.normalModeAfter,
     stickyMode: preserveHiddenMetadata ? preservedAction?.stickyMode : state.stickyMode || undefined,
     type: state.type,
   } as const;
@@ -111,6 +123,10 @@ export function formStateToActionNode(
       return { ...baseAction, value: state.shortcutValue.trim() };
     case "text":
       return { ...baseAction, value: state.textValue };
+    case "normalModeDisable":
+    case "normalModeEnable":
+    case "normalModeInput":
+      return { ...baseAction, value: "" };
     case "toggleStickyMode":
       return { ...baseAction, value: "" };
     case "url":
@@ -123,7 +139,7 @@ export function validateActionNode(action: ActionNode): string | undefined {
     return validateMacroSteps(action.macroSteps);
   }
 
-  if (action.type === "toggleStickyMode") {
+  if (isModeControlActionType(action.type)) {
     return undefined;
   }
 

@@ -62,6 +62,29 @@ test("creates an app config from an existing template file", async () => {
   assert.equal(discovered.find((config) => config.bundleId === "com.google.Chrome")?.displayName, "App: com.google.Chrome");
 });
 
+test("creates a normal-mode app config with normal scope and file name", async () => {
+  const configDirectory = await createTempConfigDirectory();
+
+  const created = await createAppConfig(configDirectory, {
+    bundleId: "com.google.Chrome",
+    normalMode: true,
+    template: { kind: "empty" },
+  });
+
+  assert.deepEqual(created, {
+    bundleId: "com.google.Chrome",
+    displayName: "Normal: com.google.Chrome",
+    filePath: path.join(configDirectory, "normal-app.com.google.Chrome.json"),
+    scope: "normalApp",
+  });
+
+  const group = await readJsonFile<GroupNode>(created.filePath);
+  assert.deepEqual(group, { actions: [], type: "group" });
+
+  const discovered = await discoverLiveConfigs(configDirectory);
+  assert.equal(discovered.find((config) => config.scope === "normalApp")?.displayName, "Normal: com.google.Chrome");
+});
+
 test("EMPTY_APP_CONFIG_TEMPLATE matches the native empty-template sentinel", () => {
   assert.equal(EMPTY_APP_CONFIG_TEMPLATE, "EMPTY_TEMPLATE");
 });

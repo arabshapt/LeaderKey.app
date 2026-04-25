@@ -16,6 +16,8 @@ import {
   FRONTMOST_BUNDLE_ID_PLACEHOLDER,
   appBundleIdForConfigTarget,
   buildPathEditorDeeplink,
+  configTargetForSummary,
+  normalAppBundleIdForConfigTarget,
   resolveConfigTarget,
 } from "./deeplinks.js";
 import { PathEditorView } from "./path-editor-view.js";
@@ -107,9 +109,16 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
   }, [payload, requestedTarget]);
 
   const requestedAppBundleId = useMemo(() => appBundleIdForConfigTarget(requestedTarget), [requestedTarget]);
-  const needsCreateAppConfig = Boolean(payload && requestedAppBundleId && !resolvedLaunchTarget);
+  const requestedNormalAppBundleId = useMemo(() => normalAppBundleIdForConfigTarget(requestedTarget), [requestedTarget]);
+  const missingRequestedBundleId = requestedAppBundleId ?? requestedNormalAppBundleId;
+  const needsCreateAppConfig = Boolean(payload && missingRequestedBundleId && !resolvedLaunchTarget);
   const currentAppTemplate = buildPathEditorDeeplink(
     `app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
+    ownerOrAuthorName,
+    extensionName,
+  );
+  const currentNormalAppTemplate = buildPathEditorDeeplink(
+    `normal-app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
     ownerOrAuthorName,
     extensionName,
   );
@@ -145,12 +154,13 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
     );
   }
 
-  if (payload && requestedAppBundleId && needsCreateAppConfig) {
+  if (payload && missingRequestedBundleId && needsCreateAppConfig) {
     return (
       <CreateAppConfigForm
-        bundleId={requestedAppBundleId}
+        bundleId={missingRequestedBundleId}
         configDirectory={configDirectory}
         initialPayload={payload}
+        normalMode={Boolean(requestedNormalAppBundleId)}
         onDidCreate={async (nextPayload) => {
           setPayload(nextPayload);
         }}
@@ -275,13 +285,36 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
             </ActionPanel>
           }
         />
+        <List.Item
+          icon={Icon.Link}
+          id="current-normal-app-path-template"
+          subtitle="Leader Key expands {frontmostBundleId} before Raycast opens"
+          title="Current App Normal Path Deeplink Template"
+          actions={
+            <ActionPanel>
+              <Action.CopyToClipboard
+                content={currentNormalAppTemplate}
+                icon={Icon.Link}
+                title="Copy Current App Normal Path Deeplink"
+              />
+            </ActionPanel>
+          }
+        />
       </List.Section>
 
       <List.Section title="Global And Fallback">
         {payload.configs
-          .filter((config) => (config.scope === "global" || config.scope === "fallback") && visibleConfigs.includes(config))
+          .filter((config) => (
+            config.scope === "global" ||
+            config.scope === "fallback" ||
+            config.scope === "normalFallback"
+          ) && visibleConfigs.includes(config))
           .map((config) => {
-            const deeplink = buildPathEditorDeeplink(config.scope, ownerOrAuthorName, extensionName);
+            const deeplink = buildPathEditorDeeplink(
+              configTargetForSummary(config),
+              ownerOrAuthorName,
+              extensionName,
+            );
 
             return (
               <List.Item
@@ -320,13 +353,17 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
 
       <List.Section title="App Configs">
         {payload.configs
-          .filter((config) => config.scope === "app" && visibleConfigs.includes(config))
+          .filter((config) => (config.scope === "app" || config.scope === "normalApp") && visibleConfigs.includes(config))
           .map((config) => {
-            const deeplink = buildPathEditorDeeplink(`app:${config.bundleId}`, ownerOrAuthorName, extensionName);
+            const deeplink = buildPathEditorDeeplink(
+              config.scope === "normalApp" ? `normal-app:${config.bundleId}` : `app:${config.bundleId}`,
+              ownerOrAuthorName,
+              extensionName,
+            );
 
             return (
               <List.Item
-                accessories={[{ tag: { value: "app" } }]}
+                accessories={[{ tag: { value: config.scope === "normalApp" ? "normal" : "app" } }]}
                 icon={Icon.AppWindow}
                 id={config.filePath}
                 key={config.filePath}

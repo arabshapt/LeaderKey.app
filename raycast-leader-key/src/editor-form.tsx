@@ -16,6 +16,7 @@ import {
   deleteRecord,
   FALLBACK_CONFIG_FILE_NAME,
   GLOBAL_CONFIG_FILE_NAME,
+  NORMAL_FALLBACK_CONFIG_FILE_NAME,
   validateRecordPath,
   materializeRecordToConfigItem,
   type CachePayload,
@@ -29,7 +30,7 @@ import {
 } from "@leaderkey/config-core";
 import { useEffect, useMemo, useState } from "react";
 
-import { formStateToActionNode, validateActionNode } from "./action-form.js";
+import { formStateToActionNode, isModeControlActionType, validateActionNode } from "./action-form.js";
 import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
 import {
@@ -124,7 +125,7 @@ function validateItem(item: ConfigItem): string | undefined {
     return validateActionNode(item);
   }
 
-  if (item.type === "toggleStickyMode") {
+  if (isModeControlActionType(item.type)) {
     return undefined;
   }
 
@@ -217,7 +218,11 @@ function inferredMenuAppName(
     }
 
     const fileName = createAtPath.configPath.split("/").at(-1);
-    if (fileName === GLOBAL_CONFIG_FILE_NAME || fileName === FALLBACK_CONFIG_FILE_NAME) {
+    if (
+      fileName === GLOBAL_CONFIG_FILE_NAME ||
+      fileName === FALLBACK_CONFIG_FILE_NAME ||
+      fileName === NORMAL_FALLBACK_CONFIG_FILE_NAME
+    ) {
       return undefined;
     }
 
@@ -229,10 +234,14 @@ function inferredMenuAppName(
   }
 
   if (mode === "edit-source") {
-    return targetRecord.sourceScope === "app" ? targetRecord.sourceConfigDisplayName.trim() || undefined : undefined;
+    return targetRecord.sourceScope === "app" || targetRecord.sourceScope === "normalApp"
+      ? targetRecord.sourceConfigDisplayName.trim() || undefined
+      : undefined;
   }
 
-  return targetRecord.effectiveScope === "app" ? targetRecord.effectiveConfigDisplayName.trim() || undefined : undefined;
+  return targetRecord.effectiveScope === "app" || targetRecord.effectiveScope === "normalApp"
+    ? targetRecord.effectiveConfigDisplayName.trim() || undefined
+    : undefined;
 }
 
 export function RecordEditorForm(props: RecordEditorFormProps) {
@@ -543,7 +552,8 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
   }
 
-  const showStickyModeField = formState.type !== "toggleStickyMode";
+  const showStickyModeField = !isModeControlActionType(formState.type);
+  const showNormalModeAfterField = formState.type !== "group" && !isModeControlActionType(formState.type);
   const fullPathInfo = pathIsEditable(mode)
     ? [
         "Use tokenized syntax like a -> left -> space.",
@@ -673,6 +683,9 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Menu" value="menu" />
         <Form.Dropdown.Item title="Shortcut" value="shortcut" />
         <Form.Dropdown.Item title="Text" value="text" />
+        <Form.Dropdown.Item title="Normal Mode Enable" value="normalModeEnable" />
+        <Form.Dropdown.Item title="Normal Mode Input" value="normalModeInput" />
+        <Form.Dropdown.Item title="Normal Mode Disable" value="normalModeDisable" />
         <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>
@@ -734,6 +747,19 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           onChange={(value) => setFormState((current) => ({ ...current, stickyMode: value }))}
           value={formState.stickyMode}
         />
+      ) : null}
+      {showNormalModeAfterField ? (
+        <Form.Dropdown
+          id="normalModeAfter"
+          info="State after this action runs from normal mode."
+          onChange={(value) => setFormState((current) => ({ ...current, normalModeAfter: value as ItemFormState["normalModeAfter"] }))}
+          title="Normal Mode After"
+          value={formState.normalModeAfter}
+        >
+          <Form.Dropdown.Item title="Normal" value="normal" />
+          <Form.Dropdown.Item title="Input" value="input" />
+          <Form.Dropdown.Item title="Disabled" value="disabled" />
+        </Form.Dropdown>
       ) : null}
     </Form>
   );

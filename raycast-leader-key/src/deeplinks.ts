@@ -13,6 +13,14 @@ export function configTargetForSummary(config: ConfigSummary): string {
     return "fallback";
   }
 
+  if (config.scope === "normalFallback") {
+    return "normal-fallback";
+  }
+
+  if (config.scope === "normalApp" && config.bundleId) {
+    return `normal-app:${config.bundleId}`;
+  }
+
   if (config.bundleId) {
     return `app:${config.bundleId}`;
   }
@@ -73,6 +81,19 @@ export function appBundleIdForConfigTarget(configTarget: string | undefined): st
   return bundleId || undefined;
 }
 
+export function normalAppBundleIdForConfigTarget(configTarget: string | undefined): string | undefined {
+  if (!configTarget) {
+    return undefined;
+  }
+
+  if (!configTarget.startsWith("normal-app:")) {
+    return undefined;
+  }
+
+  const bundleId = configTarget.slice("normal-app:".length).trim();
+  return bundleId || undefined;
+}
+
 export function resolveConfigTarget(
   configs: ConfigSummary[],
   configTarget: string | undefined,
@@ -87,6 +108,15 @@ export function resolveConfigTarget(
 
   if (configTarget === "fallback") {
     return configs.find((config) => config.scope === "fallback");
+  }
+
+  if (configTarget === "normal-fallback") {
+    return configs.find((config) => config.scope === "normalFallback");
+  }
+
+  const normalBundleId = normalAppBundleIdForConfigTarget(configTarget);
+  if (normalBundleId) {
+    return configs.find((config) => config.scope === "normalApp" && config.bundleId === normalBundleId);
   }
 
   const bundleId = appBundleIdForConfigTarget(configTarget);
