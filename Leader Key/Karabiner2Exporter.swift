@@ -700,6 +700,28 @@ final class Karabiner2Exporter {
     return mapping
   }
 
+  private static func generateKarNormalModeActivationMapping(
+    additionalConditions: [[String: Any]] = []
+  ) -> [String: Any]? {
+    let toEvents: [Any] = [
+      karSetVariable(name: "leaderkey_sticky", value: 0),
+      karSetVariable(name: "leader_state", value: inactiveStateId),
+      karSetVariable(name: normalModeEnabledVariable, value: 1),
+      karSetVariable(name: normalModeActiveVariable, value: 1),
+      karSetVariable(name: normalModeInputVariable, value: 0),
+      karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
+      karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
+      karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId),
+      karSendUserCommand("normal_on"),
+    ]
+
+    return [
+      "from": karFrom(keyCode: "quote", modifiers: []),
+      "to": toEvents,
+      "condition": [variableCondition(name: "leader_state", value: inactiveStateId)] + additionalConditions,
+    ]
+  }
+
   private static func generateKarEscapeMapping(
     additionalConditions: [[String: Any]] = []
   ) -> [String: Any]? {
@@ -1175,6 +1197,8 @@ final class Karabiner2Exporter {
   private static func builtInActivationConditions(appBundleId: String? = nil) -> [[String: Any]] {
     var conditions: [[String: Any]] = [
       variableUnlessCondition(name: "caps_lock-mode", value: 1),
+      variableUnlessCondition(name: "a-mode", value: 1),
+      variableUnlessCondition(name: "d-mode", value: 1),
       variableUnlessCondition(name: "f-mode", value: 1),
       variableUnlessCondition(name: "tilde-mode", value: 1),
     ]
@@ -2759,6 +2783,12 @@ final class Karabiner2Exporter {
       activationMappings.append(builtInGlobalActivation)
     }
 
+    if let builtInNormalModeActivation = generateKarNormalModeActivationMapping(
+      additionalConditions: builtInActivationConditions()
+    ) {
+      activationMappings.append(builtInNormalModeActivation)
+    }
+
     if let kinesisFallbackActivation = generateKarActivationMapping(
       keyCode: "keypad_4",
       modifiers: ["left_command", "left_option", "left_control", "left_shift"],
@@ -3475,6 +3505,12 @@ final class Karabiner2Exporter {
       additionalConditions: builtInActivationConditions()
     ) {
       activationMappings.append(builtInGlobalActivation)
+    }
+
+    if let builtInNormalModeActivation = generateKarNormalModeActivationMapping(
+      additionalConditions: builtInActivationConditions()
+    ) {
+      activationMappings.append(builtInNormalModeActivation)
     }
 
     if let kinesisFallbackActivation = generateKarActivationMapping(

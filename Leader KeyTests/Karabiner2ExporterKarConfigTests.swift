@@ -498,6 +498,35 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }))
   }
 
+  func testQuoteActivatesNormalModeFromBaseStateOnly() throws {
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
+      globalConfig: makeSampleConfig(),
+      appConfigs: []
+    )
+    let activationRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/ActivationShortcuts" }))
+    let quoteMapping = try XCTUnwrap(flattenManipulators(from: [activationRule]).first(where: {
+      fromKeyCode(in: $0) == "quote" && hasSendUserCommand(manipulator: $0, prefix: "normal_on")
+    }))
+
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_sticky", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leader_state", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_enabled", value: 1))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_active", value: 1))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_input", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_state", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_layer_state", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: quoteMapping, name: "leaderkey_normal_layer_sequence_state", value: 0))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "leader_state", value: 0, type: "variable_if"))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "caps_lock-mode", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "a-mode", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "d-mode", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "f-mode", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasVariableCondition(quoteMapping, name: "tilde-mode", value: 1, type: "variable_unless"))
+    XCTAssertTrue(hasConditionType(quoteMapping, type: "device_if"))
+    XCTAssertFalse(hasConditionType(quoteMapping, type: "frontmost_application_if"))
+  }
+
   func testGenerateKarabinerTSExportIncludesModeGuards() throws {
     let globalConfig = makeSampleConfig()
     let appConfig = makeSampleConfig()
@@ -1599,8 +1628,10 @@ final class Karabiner2ExporterEDNInjectionTests: XCTestCase {
 
     XCTAssertTrue(specificRules.contains(":key_code \"semicolon\""))
     XCTAssertTrue(specificRules.contains(":key_code \"right_command\""))
+    XCTAssertTrue(specificRules.contains(":key_code \"quote\""))
     XCTAssertTrue(specificRules.contains(":payload \"activate com.raycast.macos\""))
     XCTAssertTrue(specificRules.contains(":payload \"activate\""))
+    XCTAssertTrue(specificRules.contains(":payload \"normal_on\""))
     XCTAssertTrue(specificRules.contains(":payload \"activate __FALLBACK__\""))
     XCTAssertTrue(specificRules.contains(":key_code \"escape\""))
     XCTAssertTrue(specificRules.contains(":payload \"deactivate\""))
@@ -1668,6 +1699,9 @@ final class Karabiner2ExporterEDNInjectionTests: XCTestCase {
     let globalRange = try XCTUnwrap(
       specificRules.range(of: ":key_code \"right_command\"")
     )
+    let normalModeRange = try XCTUnwrap(
+      specificRules.range(of: ":payload \"normal_on\"")
+    )
     let fallbackRange = try XCTUnwrap(
       specificRules.range(of: ":payload \"activate __FALLBACK__\"")
     )
@@ -1679,7 +1713,8 @@ final class Karabiner2ExporterEDNInjectionTests: XCTestCase {
     )
 
     XCTAssertLessThan(raycastRange.lowerBound, globalRange.lowerBound)
-    XCTAssertLessThan(globalRange.lowerBound, fallbackRange.lowerBound)
+    XCTAssertLessThan(globalRange.lowerBound, normalModeRange.lowerBound)
+    XCTAssertLessThan(normalModeRange.lowerBound, fallbackRange.lowerBound)
     XCTAssertLessThan(fallbackRange.lowerBound, escapeRange.lowerBound)
     XCTAssertLessThan(escapeRange.lowerBound, settingsRange.lowerBound)
   }
