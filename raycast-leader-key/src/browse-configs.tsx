@@ -136,6 +136,16 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
     ownerOrAuthorName,
     extensionName,
   );
+  const currentAppPathDeeplinkTemplate = buildPathEditorDeeplink(
+    `app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
+    ownerOrAuthorName,
+    extensionName,
+  );
+  const currentNormalAppPathDeeplinkTemplate = buildPathEditorDeeplink(
+    `normal-app:${FRONTMOST_BUNDLE_ID_PLACEHOLDER}`,
+    ownerOrAuthorName,
+    extensionName,
+  );
   const [searchText, setSearchText] = useState("");
   const literalTypedPath = Array.from(searchText.trim());
   const typedPathTitle = literalTypedPath.length > 0 ? keyPathText(literalTypedPath) : undefined;
@@ -214,6 +224,78 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
       </List>
     );
   }
+
+  const readyPayload = payload;
+
+  function renderConfigItem(config: ConfigSummary, icon: Icon, scopeTag: string = config.scope) {
+    const deeplink = buildBrowseConfigsDeeplink(
+      configTargetForSummary(config),
+      ownerOrAuthorName,
+      extensionName,
+    );
+    const pathEditorDeeplink = buildPathEditorDeeplink(
+      configTargetForSummary(config),
+      ownerOrAuthorName,
+      extensionName,
+    );
+
+    return (
+      <List.Item
+        accessories={[{ tag: { value: scopeTag } }]}
+        icon={icon}
+        id={config.filePath}
+        key={config.filePath}
+        subtitle={config.filePath}
+        title={config.displayName}
+        actions={
+          <ActionPanel>
+            <Action.Push
+              icon={Icon.ChevronRight}
+              target={openConfigTarget(config, configDirectory, readyPayload, setPayload, preferredEditor)}
+              title="Open Config"
+            />
+            <Action.Push
+              icon={Icon.Pencil}
+              shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
+              target={openPathEditor(config, configDirectory, readyPayload, setPayload, preferredEditor)}
+              title="Open Path Editor"
+            />
+            <Action.CopyToClipboard
+              content={deeplink}
+              icon={Icon.Link}
+              title="Copy Config Deeplink"
+            />
+            <Action.CopyToClipboard
+              content={pathEditorDeeplink}
+              icon={Icon.AppWindowSidebarLeft}
+              title="Copy Path Editor Deeplink"
+            />
+            <Action.CreateQuicklink
+              quicklink={{
+                link: deeplink,
+                name: quicklinkName(config.displayName),
+              }}
+              title="Create Config Quicklink"
+            />
+            <Action.CreateQuicklink
+              quicklink={{
+                link: pathEditorDeeplink,
+                name: pathEditorQuicklinkName(config.displayName),
+              }}
+              title="Create Path Editor Quicklink"
+            />
+          </ActionPanel>
+        }
+      />
+    );
+  }
+
+  const globalAndFallbackConfigs = visibleConfigs.filter((config) => (
+    config.scope === "global" ||
+    config.scope === "fallback" ||
+    config.scope === "normalFallback"
+  ));
+  const appConfigs = visibleConfigs.filter((config) => config.scope === "app" || config.scope === "normalApp");
 
   return (
     <List
@@ -330,71 +412,48 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
             </ActionPanel>
           }
         />
+        <List.Item
+          icon={Icon.AppWindowSidebarLeft}
+          id="current-app-path-template"
+          subtitle="Leader Key expands {frontmostBundleId} before Raycast opens"
+          title="Current App Path Deeplink Template"
+          actions={
+            <ActionPanel>
+              <Action.CopyToClipboard
+                content={currentAppPathDeeplinkTemplate}
+                icon={Icon.AppWindowSidebarLeft}
+                title="Copy Current App Path Deeplink"
+              />
+            </ActionPanel>
+          }
+        />
+        <List.Item
+          icon={Icon.AppWindowSidebarLeft}
+          id="current-normal-app-path-template"
+          subtitle="Leader Key expands {frontmostBundleId} before Raycast opens"
+          title="Current App Normal Path Deeplink Template"
+          actions={
+            <ActionPanel>
+              <Action.CopyToClipboard
+                content={currentNormalAppPathDeeplinkTemplate}
+                icon={Icon.AppWindowSidebarLeft}
+                title="Copy Current App Normal Path Deeplink"
+              />
+            </ActionPanel>
+          }
+        />
       </List.Section>
 
-      <List.Section title="Configs">
-        {visibleConfigs.map((config) => {
-          const deeplink = buildBrowseConfigsDeeplink(
-            configTargetForSummary(config),
-            ownerOrAuthorName,
-            extensionName,
-          );
-          const pathEditorDeeplink = buildPathEditorDeeplink(
-            configTargetForSummary(config),
-            ownerOrAuthorName,
-            extensionName,
-          );
+      <List.Section title="Global And Fallback">
+        {globalAndFallbackConfigs.map((config) => renderConfigItem(config, Icon.Book))}
+      </List.Section>
 
-          return (
-            <List.Item
-              accessories={[{ tag: { value: config.scope } }]}
-              icon={Icon.Book}
-              id={config.filePath}
-              key={config.filePath}
-              subtitle={config.filePath}
-              title={config.displayName}
-              actions={
-                <ActionPanel>
-                  <Action.Push
-                    icon={Icon.ChevronRight}
-                    target={openConfigTarget(config, configDirectory, payload, setPayload, preferredEditor)}
-                    title="Open Config"
-                  />
-                  <Action.Push
-                    icon={Icon.Pencil}
-                    shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
-                    target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
-                    title="Open Path Editor"
-                  />
-                  <Action.CopyToClipboard
-                    content={deeplink}
-                    icon={Icon.Link}
-                    title="Copy Config Deeplink"
-                  />
-                  <Action.CopyToClipboard
-                    content={pathEditorDeeplink}
-                    icon={Icon.AppWindowSidebarLeft}
-                    title="Copy Path Editor Deeplink"
-                  />
-                  <Action.CreateQuicklink
-                    quicklink={{
-                      link: deeplink,
-                      name: quicklinkName(config.displayName),
-                    }}
-                    title="Create Config Quicklink"
-                  />
-                  <Action.CreateQuicklink
-                    quicklink={{
-                      link: pathEditorDeeplink,
-                      name: pathEditorQuicklinkName(config.displayName),
-                    }}
-                    title="Create Path Editor Quicklink"
-                  />
-                </ActionPanel>
-              }
-            />
-          );
-        })}
+      <List.Section title="App Configs">
+        {appConfigs.map((config) => renderConfigItem(
+          config,
+          Icon.AppWindow,
+          config.scope === "normalApp" ? "normal" : "app",
+        ))}
       </List.Section>
     </List>
   );
