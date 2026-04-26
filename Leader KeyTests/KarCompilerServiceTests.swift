@@ -165,6 +165,43 @@ final class KarabinerTsExportServiceTests: XCTestCase {
     XCTAssertEqual(metadata["rules"] as? Int, 1)
     XCTAssertEqual(metadata["removed_legacy_leaderkey_rules"] as? Int, 2)
     XCTAssertEqual(metadata["removed_legacy_leaderkey_manipulators"] as? Int, 3)
+    XCTAssertEqual(metadata["goku_exit_code"] as? Int, 0)
+  }
+
+  func testMigrateGokuProfileAcceptsValidJSONWhenGokuExitsNonZero() throws {
+    let repoURL = try makeTemporaryDirectory()
+    try "{}".write(to: repoURL.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+
+    let ednURL = repoURL.appendingPathComponent("karabiner.edn")
+    try "{:profiles {:Default {:default true}}}\n".write(to: ednURL, atomically: true, encoding: .utf8)
+
+    let fakeGokuURL = repoURL.appendingPathComponent("fake-goku-nonzero")
+    try """
+      #!/bin/sh
+      cat <<'JSON'
+      {"complex_modifications":{"parameters":{"basic.to_if_alone_timeout_milliseconds":260},"rules":[{"description":"KeepManual","manipulators":[{"type":"basic"}]}]}}
+      JSON
+      exit 1
+      """.write(to: fakeGokuURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeGokuURL.path)
+
+    let result = KarabinerTsExportService.shared.migrateGokuProfileToKarabinerTs(
+      repoPath: repoURL.path,
+      ednPath: ednURL.path,
+      profileName: "Default",
+      gokuBinaryPath: fakeGokuURL.path
+    )
+
+    XCTAssertTrue(result.success, result.message)
+
+    let snapshotURL = repoURL.appendingPathComponent(
+      KarabinerTsExportService.migratedGokuComplexModificationsRelativePath)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: snapshotURL.path))
+
+    let metadataURL = repoURL.appendingPathComponent(
+      KarabinerTsExportService.migratedGokuMetadataRelativePath)
+    let metadata = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: metadataURL)) as? [String: Any])
+    XCTAssertEqual(metadata["goku_exit_code"] as? Int, 1)
   }
 
   func testCompileAndApplyDoesNotTouchKarabinerJSONWhenRepoExportFails() throws {

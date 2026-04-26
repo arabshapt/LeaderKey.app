@@ -28,7 +28,7 @@ Karabiner Elements (captures keys, detects frontmost app)
 - **Two export backends** — Goku (EDN) and kar (TypeScript). Both use `send_user_command` for IPC via `Karabiner2Exporter`
 - **v1 payload protocol** — `KarabinerUserCommandReceiver` handles `{v:1, type:...}` payloads: `open_app`/`open_app_toggle` → seqd, `open` (URLs) → `NSWorkspace`, `open_with_app` → seqd, `menu` → AX API, `intellij` → UDS at `/tmp/intellij-leaderkey.sock`. String payloads → `KarabinerCommandRouter`
 - **Config merging** — app-specific configs merged with fallback via `mergeConfigWithFallback()`
-- **Goku = personal Karabiner source of truth** — `~/.config/karabiner.edn` canonical for arabshapt's setup. `karabiner.ts/configs/arabshapt/default-profile.ts` = generated migration snapshot, not hand-edited. Re-sync: `cd karabiner.ts && npm run sync:arabshapt`
+- **Goku = personal Karabiner source of truth** — `~/.config/karabiner.edn` canonical for arabshapt's setup. `karabiner.ts/configs/arabshapt/default-profile.ts` and `default-complex-modifications.json` are generated migration snapshots, not hand-edited. Re-sync through Leader Key via Raycast `Sync Goku Profile` or `printf 'sync-goku-profile\n' | nc -U /tmp/leaderkey.sock`
 
 ### Normal Mode Work In Progress
 
@@ -205,4 +205,4 @@ sock.close()
 - **JVM UDS stream-only** — Java's `UnixDomainSocketAddress` only supports `SOCK_STREAM`. Protocol: newline-delimited (connect → write → read response → close). Leader Key uses fire-and-forget (no read)
 - **`leaderkey://` gone** — external config apply → local socket (`/tmp/leaderkey.sock`). Don't add new URL handlers for reload/apply/navigation
 - **Some Goku builds advertise `-c` but crash** — prefer `GOKU_EDN_CONFIG_FILE=/path/to/karabiner.edn goku` over `goku -c /path/to/karabiner.edn`. Leader Key uses env-var form
-- **Don't hand-edit arabshapt migration snapshot** — `karabiner.ts/configs/arabshapt/default-profile.ts` must regenerate from Goku. If `~/.config/karabiner.edn` changes: `cd /Users/arabshaptukaev/personalProjects/LeaderKeyapp/karabiner.ts && npm run sync:arabshapt`. Leader Key export only updates `karabiner.ts/configs/leaderkey/leaderkey-generated.ts`
+- **Don't hand-edit arabshapt migration snapshot** — `karabiner.ts/configs/arabshapt/default-profile.ts` and `default-complex-modifications.json` must regenerate from Goku through Leader Key. If `~/.config/karabiner.edn` changes, run Raycast `Sync Goku Profile` or send `sync-goku-profile` to `/tmp/leaderkey.sock`. Leader Key export updates `karabiner.ts/configs/leaderkey/leaderkey-generated.json` separately from the migrated Goku snapshot

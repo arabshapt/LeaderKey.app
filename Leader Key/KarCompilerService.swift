@@ -63,20 +63,14 @@ final class KarabinerTsExportService {
         workingDirectory: resolvedRepoPath
       )
 
-      guard processOutput.terminationStatus == 0 else {
-        throw Self.error(
-          "goku --dry-run failed with exit code \(processOutput.terminationStatus): \(processOutput.diagnostics)",
-          code: 21
-        )
-      }
-
       let migration = try Self.migratedGokuProfile(from: processOutput.stdout)
       try writeMigratedGokuProfile(
         migration,
         repoPath: resolvedRepoPath,
         profileName: profileName,
         ednPath: expandedEDNPath,
-        gokuDiagnostics: processOutput.stderrText
+        gokuDiagnostics: processOutput.stderrText,
+        gokuExitCode: processOutput.terminationStatus
       )
 
       return KarabinerTsExportResult(
@@ -188,7 +182,8 @@ final class KarabinerTsExportService {
     repoPath: String,
     profileName: String,
     ednPath: String,
-    gokuDiagnostics: String
+    gokuDiagnostics: String,
+    gokuExitCode: Int32
   ) throws {
     let outputDirectory = (repoPath as NSString).appendingPathComponent(Self.migratedGokuProfileDirectoryRelativePath)
     try FileManager.default.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
@@ -211,6 +206,7 @@ final class KarabinerTsExportService {
       "rules": migration.ruleCount,
       "removed_legacy_leaderkey_rules": migration.removedLegacyLeaderKeyRules,
       "removed_legacy_leaderkey_manipulators": migration.removedLegacyLeaderKeyManipulators,
+      "goku_exit_code": gokuExitCode,
       "goku_stderr": gokuDiagnostics,
     ]
     let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys])

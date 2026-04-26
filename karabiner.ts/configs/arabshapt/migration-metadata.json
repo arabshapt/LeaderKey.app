@@ -1,0 +1,13 @@
+{
+  "bytes" : 366229,
+  "edn" : "\/Users\/arabshaptukaev\/.config\/karabiner.edn",
+  "generated_at" : "2026-04-26T07:46:42Z",
+  "goku_exit_code" : 1,
+  "goku_stderr" : "",
+  "profile" : "Default",
+  "removed_legacy_leaderkey_manipulators" : 2438,
+  "removed_legacy_leaderkey_rules" : 35,
+  "rules" : 44,
+  "sha256" : "90bb48ea0526cc6172a8fc1f3f1b56b7b521cb2a465f0d6511ef9fa3eb0be542",
+  "source_rules" : 79
+}
