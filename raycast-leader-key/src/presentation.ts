@@ -62,6 +62,8 @@ function compactActionSummary(record: FlatIndexRecord): string {
       return withNote("N On");
     case "normalModeInput":
       return withNote("N Input");
+    case "toggleHintOverlay":
+      return withNote("Hints");
     case "toggleStickyMode":
       return withNote("⇄ Sticky");
     case "url":
@@ -150,6 +152,7 @@ export function recordIcon(record: FlatIndexRecord): Image.ImageLike {
     case "normalModeDisable":
     case "normalModeEnable":
     case "normalModeInput":
+    case "toggleHintOverlay":
       return Icon.Switch;
     case "toggleStickyMode":
       return Icon.Bolt;

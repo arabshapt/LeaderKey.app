@@ -13,6 +13,7 @@ export type ActionType =
   | "normalModeDisable"
   | "normalModeEnable"
   | "normalModeInput"
+  | "toggleHintOverlay"
   | "toggleStickyMode"
   | "url";
 

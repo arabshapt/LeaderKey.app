@@ -63,6 +63,8 @@ function humanTitle(record: FlatIndexRecord): string {
       return "Enable Normal Mode";
     case "normalModeInput":
       return "Enter Normal Input Mode";
+    case "toggleHintOverlay":
+      return "Toggle Hint Overlay";
     case "toggleStickyMode":
       return "Toggle Sticky Mode";
     case "url":
@@ -137,6 +139,8 @@ function plainEnglishSummary(record: FlatIndexRecord): string {
       return "Enables persistent normal mode.";
     case "normalModeInput":
       return "Leaves normal mode enabled but passes keys through for text input.";
+    case "toggleHintOverlay":
+      return "Shows or hides the Leader Key hint overlay.";
     case "toggleStickyMode":
       return "Turns sticky mode on or off for the current sequence.";
     case "url":

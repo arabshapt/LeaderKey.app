@@ -249,6 +249,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
         contentView: { OpacityPane() }
       ),
       Settings.Pane(
+        identifier: .preferences,
+        title: "Preferences",
+        toolbarIcon: NSImage(
+          systemSymbolName: "switch.2", accessibilityDescription: "Preferences")!,
+        contentView: { PreferencesPane() }
+      ),
+      Settings.Pane(
         identifier: .search, title: "Search",
         toolbarIcon: NSImage(
           systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
@@ -402,6 +409,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     menuBarIconObserverTask?.cancel()
     autoUpdateObserverTask?.cancel()
     inputMethodPrefObserverTask?.cancel()
+    timeoutSettingsObserverTask?.cancel()
     print("[AppDelegate] applicationWillTerminate completed.")
   }
 
@@ -415,6 +423,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private var menuBarIconObserverTask: Task<Void, Never>?
   private var autoUpdateObserverTask: Task<Void, Never>?
   private var inputMethodPrefObserverTask: Task<Void, Never>?
+  private var timeoutSettingsObserverTask: Task<Void, Never>?
   private var permissionPollingStartTime: Date?
 
   private func setupStateRecoveryTimer() {
@@ -1115,6 +1124,36 @@ extension AppDelegate {
         }
       }
     }
+
+    timeoutSettingsObserverTask = Task { [weak self] in
+      await withTaskGroup(of: Void.self) { group in
+        group.addTask {
+          for await _ in Defaults.updates(.leaderSequenceTimeoutEnabled) {
+            await self?.refreshExportForPreferenceChange()
+          }
+        }
+        group.addTask {
+          for await _ in Defaults.updates(.leaderSequenceTimeoutMS) {
+            await self?.refreshExportForPreferenceChange()
+          }
+        }
+        group.addTask {
+          for await _ in Defaults.updates(.normalSequenceTimeoutEnabled) {
+            await self?.refreshExportForPreferenceChange()
+          }
+        }
+        group.addTask {
+          for await _ in Defaults.updates(.normalSequenceTimeoutMS) {
+            await self?.refreshExportForPreferenceChange()
+          }
+        }
+      }
+    }
+  }
+
+  @MainActor
+  private func refreshExportForPreferenceChange() {
+    refreshStateMappingsIfNeeded()
   }
 
   fileprivate func configureImageCaching() {
@@ -1262,6 +1301,20 @@ extension AppDelegate {
   func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
     debugLog("[AppDelegate] Control socket normal mode status: \(status)")
     setNormalModeStatus(status)
+  }
+
+  func unixSocketServerDidReceiveHintOverlay(_ command: HintOverlayCommand) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      switch command {
+      case .on:
+        self.controller.setHintOverlayVisible(true)
+      case .off:
+        self.controller.setHintOverlayVisible(false)
+      case .toggle:
+        self.controller.toggleHintOverlay()
+      }
+    }
   }
 
   func unixSocketServerDidReceiveShake() {
@@ -2603,6 +2656,19 @@ extension AppDelegate {
     return incomingRelevantModifiers == requiredModifiers
   }
 
+  private func ensureControllerReady() {
+    if state == nil {
+      state = UserState(userConfig: config)
+    }
+    if controller == nil {
+      controller = Controller(userState: state, userConfig: config, appDelegate: self)
+    }
+    if controller.window == nil {
+      let windowClass = Theme.classFor(Defaults[.theme])
+      controller.window = windowClass.init(controller: controller)
+    }
+  }
+
   // MARK: - InputMethodDelegate
 
   func inputMethodDidReceiveApplyConfig() {
@@ -2615,6 +2681,7 @@ extension AppDelegate {
     // Handle activation from Karabiner
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
+      self.ensureControllerReady()
 
       if let bundleId = bundleId {
         debugLog("[InputMethod] Activation received with bundleId: \(bundleId)")
@@ -2870,6 +2937,7 @@ extension AppDelegate {
     // Handle state ID from Karabiner 2.0
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
+      self.ensureControllerReady()
       
       debugLog("[InputMethod] State ID received: \(stateId), sticky: \(sticky)")
       

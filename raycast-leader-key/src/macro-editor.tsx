@@ -36,6 +36,7 @@ const MACRO_STEP_TYPE_OPTIONS: Array<{ title: string; value: MacroStepActionType
   { title: "Normal Mode Enable", value: "normalModeEnable" },
   { title: "Normal Mode Input", value: "normalModeInput" },
   { title: "Normal Mode Disable", value: "normalModeDisable" },
+  { title: "Toggle Hint Overlay", value: "toggleHintOverlay" },
   { title: "Toggle Sticky Mode", value: "toggleStickyMode" },
   { title: "URL", value: "url" },
 ];

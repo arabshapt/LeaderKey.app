@@ -42,6 +42,9 @@ class Controller {
     self.userConfig = userConfig
     self.appDelegate = appDelegate  // Store the reference
 
+    let initialWindowClass = Theme.classFor(Defaults[.theme])
+    self.window = initialWindowClass.init(controller: self)
+
     Task {
       for await value in Defaults.updates(.theme) {
         let windowClass = Theme.classFor(value)
@@ -124,6 +127,16 @@ class Controller {
     userState.activeConfigKey = configKeyForSettings  // Store the config key for settings
     userState.activeBundleId = bundleId == "__FALLBACK__" ? nil : bundleId
     userState.isActive = true  // Mark Leader Key as active
+
+    guard Defaults[.hintOverlayVisible] else {
+      if window.isVisible {
+        window.orderOut(nil)
+      }
+      Events.send(.didActivate)
+      completion?()
+      os_signpost(.end, log: signpostLog, name: "Controller.show", signpostID: spid)
+      return
+    }
 
     // --- Start Screen Positioning Logic (Moved back before show) ---
     var calculatedOrigin: NSPoint?  // Store calculated origin
@@ -213,6 +226,24 @@ class Controller {
 
     // Proactively drop in-memory image caches when panel is hidden
     KingfisherManager.shared.cache.clearMemoryCache()
+  }
+
+  func setHintOverlayVisible(_ isVisible: Bool) {
+    Defaults[.hintOverlayVisible] = isVisible
+
+    if isVisible {
+      guard userState.isActive, userState.activeRoot != nil else { return }
+      repositionWindowNearMouse()
+      window.orderFront(nil)
+      window.alphaValue = Defaults[.normalModeOpacity]
+      window.ignoresMouseEvents = Defaults[.panelClickThrough]
+    } else if window.isVisible {
+      window.orderOut(nil)
+    }
+  }
+
+  func toggleHintOverlay() {
+    setHintOverlayVisible(!Defaults[.hintOverlayVisible])
   }
 
   func keyDown(with event: NSEvent) {
@@ -482,6 +513,8 @@ class Controller {
       } else {
         debugLog("[Controller] runAction: Cannot disable normal mode status - appDelegate is nil")
       }
+    case .toggleHintOverlay:
+      toggleHintOverlay()
     case .macro:
       runMacro(action)
     case .menu:

@@ -63,6 +63,16 @@ extension Defaults.Keys {
     "reactivateBehavior", default: .reset, suite: defaultsSuite)
   static let resetOnCmdRelease = Key<Bool>(
     "resetOnCmdRelease", default: false, suite: defaultsSuite)
+  static let leaderSequenceTimeoutEnabled = Key<Bool>(
+    "leaderSequenceTimeoutEnabled", default: false, suite: defaultsSuite)
+  static let leaderSequenceTimeoutMS = Key<Int>(
+    "leaderSequenceTimeoutMS", default: 2000, suite: defaultsSuite)
+  static let normalSequenceTimeoutEnabled = Key<Bool>(
+    "normalSequenceTimeoutEnabled", default: false, suite: defaultsSuite)
+  static let normalSequenceTimeoutMS = Key<Int>(
+    "normalSequenceTimeoutMS", default: 2000, suite: defaultsSuite)
+  static let hintOverlayVisible = Key<Bool>(
+    "hintOverlayVisible", default: true, suite: defaultsSuite)
   static let normalModeOpacity = Key<Double>(
     "normalModeOpacity", default: 0.9, suite: defaultsSuite)
   static let stickyModeOpacity = Key<Double>(

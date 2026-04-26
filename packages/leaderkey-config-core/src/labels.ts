@@ -245,6 +245,8 @@ export function generateActionLabel(action: ActionNode, context: ItemContext): s
       return "Normal Mode Enable";
     case "normalModeInput":
       return "Normal Mode Input";
+    case "toggleHintOverlay":
+      return "Toggle Hint Overlay";
     case "toggleStickyMode":
       return "Toggle Sticky Mode";
     case "url":
@@ -322,6 +324,8 @@ export function actionValuePreview(action: ActionNode): string {
       return "Enable normal mode";
     case "normalModeInput":
       return "Enter normal input mode";
+    case "toggleHintOverlay":
+      return "Toggle hint overlay";
     case "toggleStickyMode":
       return "Toggle sticky mode on or off";
     case "url":

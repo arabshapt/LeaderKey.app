@@ -984,12 +984,13 @@ enum Type: String, Codable {
   case normalModeEnable
   case normalModeInput
   case normalModeDisable
+  case toggleHintOverlay
 }
 
 extension Type {
   var isModeControlAction: Bool {
     switch self {
-    case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
+    case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable, .toggleHintOverlay:
       return true
     default:
       return false

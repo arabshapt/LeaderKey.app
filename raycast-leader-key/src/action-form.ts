@@ -13,6 +13,7 @@ export type MacroStepActionType = ActionNode["type"];
 
 export function isModeControlActionType(type: ConfigItem["type"]): boolean {
   return type === "toggleStickyMode"
+    || type === "toggleHintOverlay"
     || type === "normalModeDisable"
     || type === "normalModeEnable"
     || type === "normalModeInput";
@@ -126,6 +127,7 @@ export function formStateToActionNode(
     case "normalModeDisable":
     case "normalModeEnable":
     case "normalModeInput":
+    case "toggleHintOverlay":
       return { ...baseAction, value: "" };
     case "toggleStickyMode":
       return { ...baseAction, value: "" };

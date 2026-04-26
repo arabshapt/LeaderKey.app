@@ -203,7 +203,14 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveSequence(_ sequence: String)
   func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
   func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus)
+  func unixSocketServerDidReceiveHintOverlay(_ command: HintOverlayCommand)
   func unixSocketServerDidReceiveShake()
   func unixSocketServerRequestState() -> [String: Any]
   func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String)
+}
+
+enum HintOverlayCommand {
+  case on
+  case off
+  case toggle
 }

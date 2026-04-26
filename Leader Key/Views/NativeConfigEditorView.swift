@@ -1574,6 +1574,7 @@ private struct ConfigInspectorView: View {
           Text("IntelliJ").tag(Type.intellij)
           Text("Keystroke").tag(Type.keystroke)
           Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+          Text("Toggle Hint Overlay").tag(Type.toggleHintOverlay)
           Text("Normal Mode Enable").tag(Type.normalModeEnable)
           Text("Normal Mode Input").tag(Type.normalModeInput)
           Text("Normal Mode Disable").tag(Type.normalModeDisable)
@@ -1684,6 +1685,7 @@ private struct ConfigInspectorView: View {
         Text("IntelliJ").tag(Type.intellij)
         Text("Keystroke").tag(Type.keystroke)
         Text("Toggle Sticky Mode").tag(Type.toggleStickyMode)
+        Text("Toggle Hint Overlay").tag(Type.toggleHintOverlay)
         Text("Normal Mode Enable").tag(Type.normalModeEnable)
         Text("Normal Mode Input").tag(Type.normalModeInput)
         Text("Normal Mode Disable").tag(Type.normalModeDisable)
@@ -1813,7 +1815,7 @@ private struct ConfigInspectorView: View {
           .lineLimit(1)
           .truncationMode(.middle)
       }
-    case .toggleStickyMode, .normalModeEnable, .normalModeInput, .normalModeDisable:
+    case .toggleStickyMode, .toggleHintOverlay, .normalModeEnable, .normalModeInput, .normalModeDisable:
       Text("No value required")
         .font(.caption)
         .foregroundColor(.secondary)

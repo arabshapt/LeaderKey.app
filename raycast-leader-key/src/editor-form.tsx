@@ -364,6 +364,7 @@ function LayerTapActionEditor(props: LayerTapActionEditorProps) {
         <Form.Dropdown.Item title="Normal Mode Enable" value="normalModeEnable" />
         <Form.Dropdown.Item title="Normal Mode Input" value="normalModeInput" />
         <Form.Dropdown.Item title="Normal Mode Disable" value="normalModeDisable" />
+        <Form.Dropdown.Item title="Toggle Hint Overlay" value="toggleHintOverlay" />
         <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>
@@ -920,6 +921,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Normal Mode Enable" value="normalModeEnable" />
         <Form.Dropdown.Item title="Normal Mode Input" value="normalModeInput" />
         <Form.Dropdown.Item title="Normal Mode Disable" value="normalModeDisable" />
+        <Form.Dropdown.Item title="Toggle Hint Overlay" value="toggleHintOverlay" />
         <Form.Dropdown.Item title="Toggle Sticky Mode" value="toggleStickyMode" />
         <Form.Dropdown.Item title="URL" value="url" />
       </Form.Dropdown>

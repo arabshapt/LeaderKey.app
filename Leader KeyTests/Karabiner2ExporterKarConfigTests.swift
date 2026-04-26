@@ -617,6 +617,102 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testSequenceTimeoutsExportOnlyWhenEnabled() throws {
+    Defaults[.leaderSequenceTimeoutEnabled] = false
+    Defaults[.normalSequenceTimeoutEnabled] = false
+    defer {
+      Defaults[.leaderSequenceTimeoutEnabled] = false
+      Defaults[.normalSequenceTimeoutEnabled] = false
+      Defaults[.leaderSequenceTimeoutMS] = 2000
+      Defaults[.normalSequenceTimeoutMS] = 2000
+    }
+
+    let globalConfig = UserConfig()
+    globalConfig.root.actions = [
+      .group(
+        Group(
+          key: "g",
+          label: "Group",
+          iconPath: nil,
+          stickyMode: nil,
+          actions: [.action(makeCommandAction(key: "x", label: "Run", value: "echo x"))]
+        )
+      )
+    ]
+    let normalFallbackRoot = Group(
+      key: nil,
+      label: "Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "n",
+            label: "Normal Group",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [.action(makeCommandAction(key: "x", label: "Normal Run", value: "echo normal"))]
+          )
+        )
+      ]
+    )
+
+    try withTemporaryConfigDirectory(normalFallbackRoot: normalFallbackRoot) {
+      let disabled = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: globalConfig, appConfigs: [])
+      let disabledManipulators = flattenManipulators(from: disabled.managedRules)
+      let disabledActivation = try XCTUnwrap(disabledManipulators.first(where: isLeaderActivationManipulator))
+      XCTAssertNil(disabledActivation["to_delayed_action"])
+      XCTAssertNil(disabledManipulators.first(where: { fromKeyCode(in: $0) == "g" })?["to_delayed_action"])
+      XCTAssertNil(disabledManipulators.first(where: { fromKeyCode(in: $0) == "n" })?["to_delayed_action"])
+
+      Defaults[.leaderSequenceTimeoutEnabled] = true
+      Defaults[.leaderSequenceTimeoutMS] = 123
+      Defaults[.normalSequenceTimeoutEnabled] = true
+      Defaults[.normalSequenceTimeoutMS] = 20_000
+
+      let enabled = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: globalConfig, appConfigs: [])
+      let enabledManipulators = flattenManipulators(from: enabled.managedRules)
+
+      let activation = try XCTUnwrap(enabledManipulators.first(where: isLeaderActivationManipulator))
+      XCTAssertEqual(delayedActionDelay(in: activation), 250)
+      XCTAssertTrue(delayedInvokedEvents(in: activation).contains(where: {
+        eventHasSetVariable($0, name: "leader_state", value: 0)
+      }))
+      XCTAssertTrue(delayedInvokedEvents(in: activation).contains(where: {
+        eventHasSetVariable($0, name: "leaderkey_sticky", value: 0)
+      }))
+      XCTAssertTrue(delayedInvokedEvents(in: activation).contains(where: {
+        eventHasSendUserCommand($0, prefix: "deactivate")
+      }))
+
+      let leaderGroup = try XCTUnwrap(enabledManipulators.first(where: { fromKeyCode(in: $0) == "g" }))
+      XCTAssertEqual(delayedActionDelay(in: leaderGroup), 250)
+      XCTAssertTrue(delayedInvokedEvents(in: leaderGroup).contains(where: {
+        eventHasSetVariable($0, name: "leader_state", value: 0)
+      }))
+      XCTAssertTrue(delayedInvokedEvents(in: leaderGroup).contains(where: {
+        eventHasSetVariable($0, name: "leaderkey_sticky", value: 0)
+      }))
+      XCTAssertTrue(delayedInvokedEvents(in: leaderGroup).contains(where: {
+        eventHasSendUserCommand($0, prefix: "deactivate")
+      }))
+
+      let normalGroup = try XCTUnwrap(enabledManipulators.first(where: {
+        fromKeyCode(in: $0) == "n" && hasSetVariableNamed($0, name: "leaderkey_normal_state")
+      }))
+      XCTAssertEqual(delayedActionDelay(in: normalGroup), 10000)
+      XCTAssertTrue(delayedInvokedEvents(in: normalGroup).contains(where: {
+        eventHasSetVariable($0, name: "leaderkey_normal_state", value: 0)
+      }))
+      XCTAssertFalse(delayedInvokedEvents(in: normalGroup).contains(where: {
+        eventHasSetVariable($0, name: "leaderkey_normal_enabled", value: 0)
+      }))
+      XCTAssertFalse(delayedInvokedEvents(in: normalGroup).contains(where: {
+        eventHasSendUserCommand($0, prefix: "normal_off")
+      }))
+    }
+  }
+
   func testNormalModeAfterAndEscapeCascadeExport() throws {
     let normalFallbackRoot = Group(
       key: nil,
@@ -817,6 +913,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       XCTAssertTrue(hasSetVariableNamed(childGroup, name: "leaderkey_normal_layer_sequence_state"))
       XCTAssertFalse(hasSetVariableNamed(childGroup, name: "leaderkey_normal_state"))
       XCTAssertFalse(hasSendUserCommand(manipulator: childGroup, prefix: "stateid "))
+      XCTAssertNil(childGroup["to_delayed_action"])
 
       XCTAssertTrue(result.stateMappings.contains(where: {
         $0.scope == .normalShared && $0.path == ["f", "b"]
@@ -1395,6 +1492,22 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       }
       return payload.hasPrefix(prefix)
     }
+  }
+
+  private func isLeaderActivationManipulator(_ manipulator: [String: Any]) -> Bool {
+    hasSendUserCommand(manipulator: manipulator, prefix: "activate")
+      && hasSetVariableNamed(manipulator, name: "leader_state")
+      && hasSetVariable(manipulator: manipulator, name: "leaderkey_sticky", value: 0)
+  }
+
+  private func delayedActionDelay(in manipulator: [String: Any]) -> Int? {
+    let parameters = manipulator["parameters"] as? [String: Any]
+    return (parameters?["basic.to_delayed_action_delay_milliseconds"] as? NSNumber)?.intValue
+  }
+
+  private func delayedInvokedEvents(in manipulator: [String: Any]) -> [Any] {
+    let delayedAction = manipulator["to_delayed_action"] as? [String: Any]
+    return delayedAction?["to_if_invoked"] as? [Any] ?? []
   }
 
   private func hasSetVariable(manipulator: [String: Any], name: String, value: Int) -> Bool {

@@ -1,6 +1,6 @@
 # Normal Mode Handoff
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26
 
 This document captures the normal-mode plan and implementation state so a new Codex session can continue without needing the original conversation.
 
@@ -48,6 +48,13 @@ Normal mode is a persistent shortcut mode:
   - `normal_on`
   - `normal_input`
   - `normal_off`
+- Sequence timeouts are configurable and default off:
+  - Leader Key activation/root timeout and pending group timeout reset `leader_state` to base, clear
+    sticky mode, and emit `deactivate`.
+  - Normal-mode pending group timeout resets only `leaderkey_normal_state` to base normal mode.
+  - Normal-mode held layer groups do not have timeouts in v1.
+- The main Leader Key hint overlay can be hidden without disabling sequences, sticky mode, normal
+  mode, or Karabiner state. This is controlled by Settings, socket command, and `toggleHintOverlay`.
 - Raycast support is in-repo and implemented for Browse Configs, Search Shortcuts, Add/Edit by Path, and config creation:
   - `packages/leaderkey-config-core`
   - `raycast-leader-key`
@@ -72,6 +79,12 @@ New action types:
 ```json
 {
   "type": "normalModeDisable"
+}
+```
+
+```json
+{
+  "type": "toggleHintOverlay"
 }
 ```
 
@@ -168,6 +181,9 @@ Main changes:
 
 Touched files:
 
+- `Leader Key/Defaults.swift`
+- `Leader Key/Settings.swift`
+- `Leader Key/Settings/PreferencesPane.swift`
 - `Leader Key/Settings/GeneralPane.swift`
 - `Leader Key/Views/ConfigEditorView.swift`
 - `Leader Key/Views/NativeConfigEditorView.swift`
@@ -179,9 +195,15 @@ Main changes:
 - Add Config sheet can create `normal-app.<bundleId>.json`.
 - Normal mode configs are excluded from Command Scout.
 - Type pickers include the three normal-mode control actions.
+- Type pickers include `toggleHintOverlay`.
 - Normal-mode control actions are rendered as no-value actions.
 - Sticky-mode toggles are hidden for mode-control actions.
 - Editors expose the `normalModeAfter` picker for applicable actions.
+- Added a scrollable Preferences pane:
+  - Leader Key sequence timeout toggle and millisecond value.
+  - Normal-mode sequence timeout toggle and millisecond value.
+  - Leader Key hint overlay visibility toggle.
+- Timeout values are clamped to `250...10000` ms. Disabling uses the boolean setting, not `0`.
 
 ### Karabiner Export
 
@@ -219,6 +241,12 @@ Main changes:
 - Normal terminal actions apply `normalModeAfter`.
 - `.normalModeEnable`, `.normalModeInput`, and `.normalModeDisable` export as direct Karabiner variable transitions.
 - Regular Leader Key terminal mappings special-case these actions so a Leader Key action can enable/input/disable normal mode directly.
+- Leader Key activation/root mappings and group transitions emit Karabiner `to_delayed_action` only when
+  `leaderSequenceTimeoutEnabled == true`.
+- Normal-mode group transitions emit Karabiner `to_delayed_action` only when
+  `normalSequenceTimeoutEnabled == true`.
+- Timeout delayed actions are omitted by default, preserving current behavior.
+- Normal-mode layer group timeout remains out of scope for v1.
 - Sticky-mode shortcut key-event-last behavior was not changed.
 - Added normal-mode hold-layer export:
   - `leaderkey_normal_layer_state`
@@ -257,8 +285,16 @@ Main changes:
 - Added normal config metadata loading.
 - Added `loadAndMergeNormalAppConfig`.
 - `KarabinerCommandRouter` handles `normal_on`, `normal_input`, and `normal_off`.
+- `KarabinerCommandRouter` handles:
+  - `hint-overlay toggle`
+  - `hint-overlay on`
+  - `hint-overlay off`
 - `UnixSocketServerDelegate` now has `unixSocketServerDidReceiveNormalModeStatus(_:)`.
+- `UnixSocketServerDelegate` now has `unixSocketServerDidReceiveHintOverlay(_:)`.
 - `AppDelegate` updates status-item normal mode state.
+- `AppDelegate` observes sequence timeout preference changes and refreshes the Karabiner export.
+- `AppDelegate` defensively initializes controller/window for socket/input-method entrypoints so
+  early events do not crash on implicitly-unwrapped window state.
 - `StatusItem` has distinct menu-bar states for idle, Leader overlay, sticky mode, normal mode,
   normal input mode, and reload success.
 - Status item mode indicators are drawn as non-template colored badges instead of tinting the filled
@@ -267,6 +303,11 @@ Main changes:
   - `.normalModeEnable`
   - `.normalModeInput`
   - `.normalModeDisable`
+  - `.toggleHintOverlay`
+- `Controller.show` respects `hintOverlayVisible == false`: it updates active sequence state, but
+  does not show the main hint panel.
+- `Controller.setHintOverlayVisible(_:)` hides an already visible overlay without resetting
+  Karabiner or sequence state; turning it back on refreshes the panel when Leader Key is active.
 - `executeActionByStateId` detects normal mapping scopes and runs normal terminal actions silently, without showing or focusing the overlay.
 - Normal-mode state-id action resolution descends through both groups and layers. Layer child mappings
   use paths like `["f", "j"]`, and layer tap-action mappings resolve through the layer key itself.
@@ -306,6 +347,8 @@ Main changes:
 - Config-core can create empty or templated normal app configs.
 - Flat index records preserve `normalModeAfter`.
 - Labels, previews, and mutation cloning understand the three normal-mode control actions.
+- Labels, previews, forms, validation, and macro editor options understand `toggleHintOverlay` as a
+  no-value terminal action.
 - Raycast Browse Configs and Add/Edit by Path can target normal fallback and normal app scopes.
 - Raycast Search Shortcuts surfaces normal records through the shared cache and labels inherited
   normal fallback overrides as normal app overrides.
@@ -350,6 +393,10 @@ Coverage added:
 - `normalModeAfter`.
 - Escape/Caps Lock cascade.
 - Router handling for `normal_on`, `normal_input`, and `normal_off`.
+- Router handling for `hint-overlay toggle|on|off`.
+- Timeout export when disabled/enabled for Leader Key activation/root mappings, Leader Key groups,
+  and normal-mode groups.
+- No normal-mode layer timeout export in v1.
 - Normal state scopes and collision-free namespace behavior.
 - Status item mode badges use non-template images and no tint.
 - Config-core discovery/indexing of normal fallback and normal app configs.
@@ -368,6 +415,7 @@ Regression coverage preserved:
 - Existing Leader Key mappings.
 - Sticky mode.
 - Sticky shortcut direct key-event export behavior.
+- Timeout-disabled behavior for existing Leader Key and normal-mode groups.
 - App fallback.
 - Activation rules.
 
@@ -417,6 +465,25 @@ config-core: 36 tests, 0 failures
 raycast-leader-key: 43 tests, 0 failures
 both typechecks passed
 root workspace typecheck passed
+```
+
+For the sequence-timeout/hint-overlay work, these additional checks passed:
+
+```sh
+xcodebuild -scheme "Leader Key" -configuration Debug build CODE_SIGNING_ALLOWED=NO
+npm --prefix packages/leaderkey-config-core test
+npm --prefix packages/leaderkey-config-core run typecheck
+npm --prefix raycast-leader-key test
+npm --prefix raycast-leader-key run typecheck
+xcodebuild -scheme "Leader Key" -testPlan "TestPlan" test CODE_SIGNING_ALLOWED=NO \
+  -only-testing:'Leader KeyTests/KarabinerCommandRouterTests' \
+  -only-testing:'Leader KeyTests/Karabiner2ExporterKarabinerTSExportTests/testSequenceTimeoutsExportOnlyWhenEnabled'
+```
+
+The full signing-disabled Xcode test plan passed after the AppDelegate hardening:
+
+```text
+169 tests, 1 skipped, 0 failures
 ```
 
 There are existing swift-format warnings in the project, but the build and tests passed with signing disabled.
@@ -519,6 +586,7 @@ Possible follow-ups:
 
 - Add a user setting for status-item normal-mode indicator style.
 - Add visual feedback for pending-state invalid-key reset.
+- Add normal-mode held-layer group timeout if needed.
 - Add validation warnings if a user tries to bind Escape or Caps Lock in normal configs.
 - Add help text or examples for normal mode configs in docs.
 - Add a small sample normal fallback config.

@@ -91,6 +91,7 @@ export function validateActionValue(action: ActionNode): string | undefined {
     action.type === "normalModeDisable" ||
     action.type === "normalModeEnable" ||
     action.type === "normalModeInput" ||
+    action.type === "toggleHintOverlay" ||
     action.type === "toggleStickyMode"
   ) {
     return undefined;

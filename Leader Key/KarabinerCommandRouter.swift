@@ -51,6 +51,22 @@ enum KarabinerCommandRouter {
     let action = String(parts[0]).lowercased()
 
     switch action {
+    case "hint-overlay":
+      guard parts.count > 1 else {
+        return "ERROR: hint-overlay requires a subcommand (toggle, on, off)"
+      }
+      switch String(parts[1]).lowercased() {
+      case "toggle":
+        delegate?.unixSocketServerDidReceiveHintOverlay(.toggle)
+      case "on":
+        delegate?.unixSocketServerDidReceiveHintOverlay(.on)
+      case "off":
+        delegate?.unixSocketServerDidReceiveHintOverlay(.off)
+      default:
+        return "ERROR: Unknown hint-overlay subcommand: \(parts[1])"
+      }
+      return "OK"
+
     case "activate":
       let bundleId = parts.count > 1 ? String(parts[1]) : nil
       delegate?.unixSocketServerDidReceiveActivation(bundleId: bundleId)

@@ -16,6 +16,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
     var lastStateId: Int32?
     var lastSticky = false
     var normalModeStatus: StatusItem.NormalModeStatus?
+    var hintOverlayCommand: HintOverlayCommand?
     var state: [String: Any] = ["active": true, "mode": "karabiner2"]
 
     func unixSocketServerDidReceiveActivation(bundleId: String?) {
@@ -55,6 +56,10 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
       normalModeStatus = status
+    }
+
+    func unixSocketServerDidReceiveHintOverlay(_ command: HintOverlayCommand) {
+      hintOverlayCommand = command
     }
 
     func unixSocketServerDidReceiveShake() {
@@ -146,6 +151,24 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertEqual(KarabinerCommandRouter.route(command: "normal_off", delegate: delegate), "OK")
     XCTAssertEqual(delegate.normalModeStatus, .inactive)
+  }
+
+  func testRouteHintOverlayCommands() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "hint-overlay toggle", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.hintOverlayCommand, .toggle)
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "hint-overlay on", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.hintOverlayCommand, .on)
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "hint-overlay off", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.hintOverlayCommand, .off)
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "hint-overlay nope", delegate: delegate),
+      "ERROR: Unknown hint-overlay subcommand: nope"
+    )
   }
 
   func testRouteStateReturnsJSON() {

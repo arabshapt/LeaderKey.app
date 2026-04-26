@@ -318,6 +318,7 @@ export function itemToFormState(item?: ConfigItem): ItemFormState {
     case "normalModeDisable":
     case "normalModeEnable":
     case "normalModeInput":
+    case "toggleHintOverlay":
       return baseState;
     case "toggleStickyMode":
       return baseState;

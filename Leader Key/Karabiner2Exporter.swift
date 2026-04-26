@@ -228,6 +228,29 @@ final class Karabiner2Exporter {
   private static let specificConfigsStartMarker = ";;; LEADERKEY_SPECIFIC_CONFIGS_START"
   private static let specificConfigsEndMarker = ";;; LEADERKEY_SPECIFIC_CONFIGS_END"
 
+  private static func clampedSequenceTimeout(_ value: Int) -> Int {
+    min(max(value, 250), 10000)
+  }
+
+  private static func leaderSequenceTimeoutMilliseconds() -> Int? {
+    Defaults[.leaderSequenceTimeoutEnabled] ? clampedSequenceTimeout(Defaults[.leaderSequenceTimeoutMS]) : nil
+  }
+
+  private static func normalSequenceTimeoutMilliseconds() -> Int? {
+    Defaults[.normalSequenceTimeoutEnabled] ? clampedSequenceTimeout(Defaults[.normalSequenceTimeoutMS]) : nil
+  }
+
+  private static func leaderSequenceTimeoutDelayedAction() -> [String: Any] {
+    [
+      "to_if_invoked": [
+        karSetVariable(name: "leaderkey_sticky", value: 0),
+        karSetVariable(name: "leader_state", value: inactiveStateId),
+        karSendUserCommand("deactivate"),
+      ],
+      "to_if_canceled": [],
+    ]
+  }
+
   static func generateGokuEDN(from config: UserConfig, bundleId: String? = nil) -> String {
     do {
       let managedModel: ManagedExportModel
@@ -509,6 +532,21 @@ final class Karabiner2Exporter {
         manipulator["to_after_key_up"] = compileKarToEvents(toAfterKeyUp)
       }
 
+      if let delayedAction = mapping["to_delayed_action"] as? [String: Any] {
+        var compiledDelayedAction: [String: Any] = [:]
+        if let invoked = delayedAction["to_if_invoked"] {
+          compiledDelayedAction["to_if_invoked"] = compileKarToEvents(invoked)
+        }
+        if let canceled = delayedAction["to_if_canceled"] {
+          compiledDelayedAction["to_if_canceled"] = compileKarToEvents(canceled)
+        }
+        manipulator["to_delayed_action"] = compiledDelayedAction
+      }
+
+      if let parameters = mapping["parameters"] as? [String: Any] {
+        manipulator["parameters"] = parameters
+      }
+
       if !conditions.isEmpty {
         manipulator["conditions"] = conditions
       }
@@ -652,6 +690,10 @@ final class Karabiner2Exporter {
       "from": karFrom(keyCode: keyCode, modifiers: modifiers),
       "to": toEvents
     ]
+    if let timeout = leaderSequenceTimeoutMilliseconds() {
+      mapping["to_delayed_action"] = leaderSequenceTimeoutDelayedAction()
+      mapping["parameters"] = ["basic.to_delayed_action_delay_milliseconds": timeout]
+    }
     if !additionalConditions.isEmpty {
       mapping["condition"] = additionalConditions
     }
@@ -725,10 +767,15 @@ final class Karabiner2Exporter {
       toEvents.append(karSetVariable(name: "leaderkey_sticky", value: 1))
     }
 
-    return [
+    var mapping: [String: Any] = [
       "from": karFrom(keyCode: keyCode, modifiers: modifiers),
       "to": toEvents
     ]
+    if let timeout = leaderSequenceTimeoutMilliseconds() {
+      mapping["to_delayed_action"] = leaderSequenceTimeoutDelayedAction()
+      mapping["parameters"] = ["basic.to_delayed_action_delay_milliseconds": timeout]
+    }
+    return mapping
   }
 
   private static func generateKarTerminalActionMapping(
@@ -2491,11 +2538,19 @@ final class Karabiner2Exporter {
         ]
       }
 
-      return [
+      var mapping: [String: Any] = [
         "from": karFrom(keyCode: keyCode, modifiers: modifiers),
         "to": toEvents,
         "condition": normalModeConditions(parentStateId: binding.parentStateId),
       ]
+      if binding.kind == .group, let timeout = normalSequenceTimeoutMilliseconds() {
+        mapping["to_delayed_action"] = [
+          "to_if_invoked": [karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId)],
+          "to_if_canceled": [],
+        ]
+        mapping["parameters"] = ["basic.to_delayed_action_delay_milliseconds": timeout]
+      }
+      return mapping
     }
   }
 
@@ -3316,7 +3371,8 @@ final class Karabiner2Exporter {
 
   private static func gokuRawEDNMap(_ dictionary: [String: Any]) -> String {
     let preferredOrder = [
-      "type", "from", "to", "to_if_alone", "to_if_held_down", "to_after_key_up", "conditions",
+      "type", "from", "to", "to_if_alone", "to_if_held_down", "to_after_key_up",
+      "to_delayed_action", "to_if_invoked", "to_if_canceled", "conditions",
       "parameters", "key_code", "any", "modifiers", "mandatory", "optional", "set_variable",
       "name", "value", "send_user_command", "payload", "endpoint", "shell_command",
       "bundle_identifiers", "identifiers", "vendor_id", "product_id",
