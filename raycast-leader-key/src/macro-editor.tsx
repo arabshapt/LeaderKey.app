@@ -3,7 +3,6 @@ import {
   ActionPanel,
   Form,
   Icon,
-  Keyboard,
   List,
   Toast,
   showToast,
@@ -22,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type MacroStepActionType, cloneMacroSteps, createEmptyMacroStep, formStateToActionNode, validateActionNode } from "./action-form.js";
 import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { itemToFormState, menuAppPrefix, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 const MACRO_STEP_TYPE_OPTIONS: Array<{ title: string; value: MacroStepActionType }> = [
   { title: "Application", value: "application" },
@@ -190,7 +190,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Plus}
-                shortcut={Keyboard.Shortcut.Common.New}
+                shortcut={SHORTCUTS.newAction}
                 target={
                   <MacroStepEditorForm
                     defaultMenuAppName={defaultMenuAppName}
@@ -219,7 +219,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <MacroStepEditorForm
                     defaultMenuAppName={defaultMenuAppName}
@@ -233,7 +233,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
               />
               <Action.Push
                 icon={Icon.Plus}
-                shortcut={Keyboard.Shortcut.Common.New}
+                shortcut={SHORTCUTS.newAction}
                 target={
                   <MacroStepEditorForm
                     defaultMenuAppName={defaultMenuAppName}
@@ -248,24 +248,25 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
               <Action
                 icon={step.enabled ? Icon.EyeDisabled : Icon.Eye}
                 onAction={() => toggleStepEnabled(index)}
+                shortcut={SHORTCUTS.toggleEnabled}
                 title={step.enabled ? "Disable Step" : "Enable Step"}
               />
               <Action
                 icon={Icon.ArrowUp}
                 onAction={() => moveStep(index, -1)}
-                shortcut={{ key: "u", modifiers: ["cmd", "shift"] }}
+                shortcut={SHORTCUTS.moveUp}
                 title="Move Up"
               />
               <Action
                 icon={Icon.ArrowDown}
                 onAction={() => moveStep(index, 1)}
-                shortcut={{ key: "d", modifiers: ["cmd", "shift"] }}
+                shortcut={SHORTCUTS.moveDown}
                 title="Move Down"
               />
               <Action
                 icon={Icon.Trash}
                 onAction={() => deleteStep(index)}
-                shortcut={Keyboard.Shortcut.Common.Remove}
+                shortcut={SHORTCUTS.delete}
                 style={Action.Style.Destructive}
                 title="Delete Step"
               />
@@ -348,10 +349,11 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
             installedApps={installedApps}
             setFormState={setFormState}
           />
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title="Save Step" />
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title="Save Step" />
           {formState.type === "macro" ? (
             <Action.Push
               icon={Icon.List}
+              shortcut={SHORTCUTS.editMacroSteps}
               target={
                 <MacroStepsEditor
                   defaultMenuAppName={defaultMenuAppName}

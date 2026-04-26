@@ -11,6 +11,7 @@ import {
   type IntelliJActionStats,
   type IntelliJActionExplain,
 } from "./intellij-actions.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 interface IntelliJActionPickerProps {
   currentActionIds: string[];
@@ -331,6 +332,7 @@ export function IntelliJActionPicker(props: IntelliJActionPickerProps) {
                   onAppend(actionId);
                   pop();
                 }}
+                shortcut={SHORTCUTS.primary}
                 title="Append IntelliJ Action"
               />
             </ActionPanel>

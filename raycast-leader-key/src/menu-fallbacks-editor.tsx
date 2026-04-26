@@ -1,7 +1,8 @@
-import { Action, ActionPanel, Form, Icon, Keyboard, List, Toast, showToast, useNavigation } from "@raycast/api";
+import { Action, ActionPanel, Form, Icon, List, Toast, showToast, useNavigation } from "@raycast/api";
 import { useState } from "react";
 
 import { MenuItemPicker } from "./menu-picker.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 interface ManualMenuPathFormProps {
   initialPath: string;
@@ -48,7 +49,7 @@ function ManualMenuPathForm(props: ManualMenuPathFormProps) {
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title="Save Fallback Path" />
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title="Save Fallback Path" />
         </ActionPanel>
       }
       navigationTitle={title}
@@ -105,7 +106,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               {appName ? (
                 <Action.Push
                   icon={Icon.MagnifyingGlass}
-                  shortcut={{ key: "f", modifiers: ["cmd"] }}
+                  shortcut={SHORTCUTS.searchValueSource}
                   target={
                     <MenuItemPicker
                       appName={appName}
@@ -118,7 +119,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               ) : null}
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={Keyboard.Shortcut.Common.New}
+                shortcut={SHORTCUTS.newAction}
                 target={
                   <ManualMenuPathForm
                     initialPath=""
@@ -143,7 +144,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               {appName ? (
                 <Action.Push
                   icon={Icon.MagnifyingGlass}
-                  shortcut={{ key: "f", modifiers: ["cmd"] }}
+                  shortcut={SHORTCUTS.searchValueSource}
                   target={
                     <MenuItemPicker
                       appName={appName}
@@ -156,7 +157,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               ) : null}
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <ManualMenuPathForm
                     initialPath={path}
@@ -168,7 +169,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               />
               <Action.Push
                 icon={Icon.Plus}
-                shortcut={Keyboard.Shortcut.Common.New}
+                shortcut={SHORTCUTS.newAction}
                 target={
                   <ManualMenuPathForm
                     initialPath=""
@@ -181,19 +182,19 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               <Action
                 icon={Icon.ArrowUp}
                 onAction={() => movePath(index, -1)}
-                shortcut={{ key: "u", modifiers: ["cmd", "shift"] }}
+                shortcut={SHORTCUTS.moveUp}
                 title="Move Up"
               />
               <Action
                 icon={Icon.ArrowDown}
                 onAction={() => movePath(index, 1)}
-                shortcut={{ key: "d", modifiers: ["cmd", "shift"] }}
+                shortcut={SHORTCUTS.moveDown}
                 title="Move Down"
               />
               <Action
                 icon={Icon.Trash}
                 onAction={() => deletePath(index)}
-                shortcut={Keyboard.Shortcut.Common.Remove}
+                shortcut={SHORTCUTS.delete}
                 style={Action.Style.Destructive}
                 title="Delete Path"
               />

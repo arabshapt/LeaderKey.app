@@ -2,6 +2,8 @@ import { Action, ActionPanel, Icon, List, useNavigation } from "@raycast/api";
 import { listLeaderKeyMenuItems, type LeaderKeyMenuItem } from "@leaderkey/config-core";
 import { useEffect, useMemo, useState } from "react";
 
+import { SHORTCUTS } from "./shortcuts.js";
+
 interface MenuItemPickerProps {
   appName: string;
   onSelect: (path: string) => void;
@@ -82,6 +84,7 @@ export function MenuItemPicker(props: MenuItemPickerProps) {
                   onSelect(item.path);
                   pop();
                 }}
+                shortcut={SHORTCUTS.primary}
                 title="Use Menu Path"
               />
             </ActionPanel>

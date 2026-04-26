@@ -23,6 +23,7 @@ import {
 import { PathEditorView } from "./path-editor-view.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
@@ -185,6 +186,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                 <Action
                   icon={Icon.ArrowClockwise}
                   onAction={reload}
+                  shortcut={SHORTCUTS.refresh}
                   title="Retry Loading Index"
                 />
               </ActionPanel>
@@ -228,7 +230,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.newAction}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -252,7 +254,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.newGroup}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -276,7 +278,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Layers}
-                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  shortcut={SHORTCUTS.newLayer}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -304,6 +306,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               <Action.CopyToClipboard
                 content={currentAppTemplate}
                 icon={Icon.Link}
+                shortcut={SHORTCUTS.copyPathDeeplink}
                 title="Copy Current App Path Deeplink"
               />
             </ActionPanel>
@@ -319,6 +322,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
               <Action.CopyToClipboard
                 content={currentNormalAppTemplate}
                 icon={Icon.Link}
+                shortcut={SHORTCUTS.copyPathDeeplink}
                 title="Copy Current App Normal Path Deeplink"
               />
             </ActionPanel>
@@ -352,13 +356,14 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                   <ActionPanel>
                     <Action.Push
                       icon={Icon.Pencil}
-                      shortcut={{ key: "return", modifiers: [] }}
+                      shortcut={SHORTCUTS.primary}
                       target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
                       title="Open Path Editor"
                     />
                     <Action.CopyToClipboard
                       content={deeplink}
                       icon={Icon.Link}
+                      shortcut={SHORTCUTS.copyPathDeeplink}
                       title="Copy Path Editor Deeplink"
                     />
                     <Action.CreateQuicklink
@@ -366,6 +371,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                         link: deeplink,
                         name: quicklinkName(config.displayName),
                       }}
+                      shortcut={SHORTCUTS.createPathQuicklink}
                       title="Create Path Editor Quicklink"
                     />
                   </ActionPanel>
@@ -397,13 +403,14 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                   <ActionPanel>
                     <Action.Push
                       icon={Icon.Pencil}
-                      shortcut={{ key: "return", modifiers: [] }}
+                      shortcut={SHORTCUTS.primary}
                       target={openPathEditor(config, configDirectory, payload, setPayload, preferredEditor)}
                       title="Open Path Editor"
                     />
                     <Action.CopyToClipboard
                       content={deeplink}
                       icon={Icon.Link}
+                      shortcut={SHORTCUTS.copyPathDeeplink}
                       title="Copy Path Editor Deeplink"
                     />
                     <Action.CreateQuicklink
@@ -411,6 +418,7 @@ export default function AddEditByPathCommand(props: AddEditByPathProps) {
                         link: deeplink,
                         name: quicklinkName(config.displayName),
                       }}
+                      shortcut={SHORTCUTS.createPathQuicklink}
                       title="Create Path Editor Quicklink"
                     />
                   </ActionPanel>

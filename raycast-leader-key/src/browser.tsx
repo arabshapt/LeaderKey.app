@@ -5,7 +5,6 @@ import {
   confirmAlert,
   environment,
   Icon,
-  Keyboard,
   List,
   Toast,
   showToast,
@@ -33,6 +32,7 @@ import { RecordEditorForm } from "./editor-form.js";
 import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { isNormalScope } from "./scope-utils.js";
 
 interface ConfigNodesListProps {
@@ -399,13 +399,13 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
       <ActionPanel>
         <Action.Push
           icon={Icon.Plus}
-          shortcut={{ modifiers: ["ctrl", "cmd"], key: "n" }}
+          shortcut={SHORTCUTS.childAction}
           target={editorForm("append-child", contextRecord, `Add First Action to ${contextRecord.displayLabel}`)}
           title="Add First Action"
         />
         <Action.Push
           icon={Icon.NewFolder}
-          shortcut={{ modifiers: ["ctrl", "cmd", "shift"], key: "n" }}
+          shortcut={SHORTCUTS.childGroup}
           target={
             <RecordEditorForm
               configDirectory={configDirectory}
@@ -423,7 +423,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
         {canCreateLayerInContext ? (
           <Action.Push
             icon={Icon.Layers}
-            shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+            shortcut={SHORTCUTS.childLayer}
             target={
               <RecordEditorForm
                 configDirectory={configDirectory}
@@ -446,12 +446,13 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
             contextRecord.effectiveKeyPath,
             contextRecord.displayLabel,
           )}
-          shortcut={{ modifiers: ["cmd"], key: "v" }}
+          shortcut={SHORTCUTS.paste}
           title="Paste into This Group"
         />
         <Action
           icon={Icon.Code}
           onAction={() => void openRecordInEditor(contextRecord, preferredEditor)}
+          shortcut={SHORTCUTS.openInEditor}
           title="Open in Editor"
         />
       </ActionPanel>
@@ -491,7 +492,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.newAction}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -534,7 +535,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.newGroup}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -578,7 +579,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 <ActionPanel>
                   <Action.Push
                     icon={Icon.Layers}
-                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    shortcut={SHORTCUTS.newLayer}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}
@@ -621,9 +622,6 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
             : undefined,
         );
         const isSelected = activeSelectedId === record.id;
-        const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
-          ? { modifiers: ["cmd"], key: "return" }
-          : { modifiers: ["cmd"], key: "." };
 
         return (
           <List.Item
@@ -639,7 +637,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.ChevronRight}
-                    shortcut={{ key: "return", modifiers: [] }}
+                    shortcut={SHORTCUTS.primary}
                     target={
                       <ConfigNodesList
                         configDirectory={configDirectory}
@@ -655,21 +653,21 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 ) : (
                   <Action.Push
                     icon={Icon.Pencil}
-                    shortcut={{ key: "return", modifiers: [] }}
+                    shortcut={SHORTCUTS.primary}
                     target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
                     title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
                   />
                 )}
                 <Action.Push
                   icon={Icon.Sidebar}
-                  shortcut={showDetailsShortcut}
+                  shortcut={SHORTCUTS.showDetails}
                   target={<RecordDetailView record={record} />}
                   title="Show Details"
                 />
                 <Action
                   icon={Icon.CopyClipboard}
                   onAction={() => void handleCopy(record)}
-                  shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  shortcut={SHORTCUTS.copy}
                   title={`Copy ${recordKindLabel(record)}`}
                 />
                 <Action
@@ -680,19 +678,19 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                       contextRecord?.effectiveKeyPath ?? parentEffectiveKeyPath,
                       contextRecord?.displayLabel ?? configDisplayName,
                     )}
-                  shortcut={{ modifiers: ["cmd"], key: "v" }}
+                  shortcut={SHORTCUTS.paste}
                   title="Paste into Current Group"
                 />
                 <Action
                   icon={Icon.Code}
                   onAction={() => void openRecordInEditor(record, preferredEditor)}
-                  shortcut={record.kind === "action" ? { modifiers: ["cmd"], key: "return" } : undefined}
+                  shortcut={SHORTCUTS.openInEditor}
                   title="Open in Editor"
                 />
                 {pathEditorDeeplink(record) ? (
                   <Action.Open
                     icon={Icon.AppWindowSidebarLeft}
-                    shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
+                    shortcut={SHORTCUTS.openPathEditor}
                     target={pathEditorDeeplink(record)!}
                     title="Open in Path Editor"
                   />
@@ -700,7 +698,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.Pencil}
-                    shortcut={Keyboard.Shortcut.Common.Edit}
+                    shortcut={SHORTCUTS.edit}
                     target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
                     title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                   />
@@ -708,20 +706,20 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 {record.inherited ? (
                   <Action.Push
                     icon={Icon.PlusCircle}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
+                    shortcut={SHORTCUTS.createOverride}
                     target={editorForm("override-in-effective-config", record, `Create Override for ${record.displayLabel}`)}
                     title="Create App Override"
                   />
                 ) : null}
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.siblingAction}
                   target={editorForm("create-sibling", record, `Create Sibling After ${record.displayLabel}`)}
                   title="Create Sibling Action"
                 />
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.siblingGroup}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -739,7 +737,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                 {isNormalScope(record.effectiveScope) && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.parentEffectiveKeyPath) ? (
                   <Action.Push
                     icon={Icon.Layers}
-                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    shortcut={SHORTCUTS.siblingLayer}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}
@@ -759,13 +757,13 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   <>
                     <Action.Push
                       icon={Icon.Plus}
-                      shortcut={{ modifiers: ["ctrl", "cmd"], key: "n" }}
+                      shortcut={SHORTCUTS.childAction}
                       target={editorForm("append-child", record, `Append Child to ${record.displayLabel}`)}
                       title="Append Child Action"
                     />
                     <Action.Push
                       icon={Icon.NewFolder}
-                      shortcut={{ modifiers: ["ctrl", "cmd", "shift"], key: "n" }}
+                      shortcut={SHORTCUTS.childGroup}
                       target={
                         <RecordEditorForm
                           configDirectory={configDirectory}
@@ -783,7 +781,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                     {isNormalScope(record.effectiveScope) && record.kind !== "layer" && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.effectiveKeyPath) ? (
                       <Action.Push
                         icon={Icon.Layers}
-                        shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+                        shortcut={SHORTCUTS.childLayer}
                         target={
                           <RecordEditorForm
                             configDirectory={configDirectory}
@@ -805,7 +803,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   <Action
                     icon={Icon.Trash}
                     onAction={() => void handleDelete(record)}
-                    shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                    shortcut={SHORTCUTS.delete}
                     style={Action.Style.Destructive}
                     title="Delete"
                   />

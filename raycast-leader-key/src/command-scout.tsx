@@ -3,6 +3,7 @@ import type { CachePayload, ConfigSummary } from "@leaderkey/config-core";
 import { openLeaderKeyCommandScout } from "@leaderkey/config-core";
 
 import { getExtensionPreferences } from "./preferences.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
 function appConfigs(payload: CachePayload | undefined): ConfigSummary[] {
@@ -42,7 +43,7 @@ export default function CommandScoutCommand() {
           icon={Icon.MagnifyingGlass}
           actions={
             <ActionPanel>
-              <Action title="Open Command Scout" icon={Icon.MagnifyingGlass} onAction={() => openScout(config)} />
+              <Action shortcut={SHORTCUTS.openCommandScout} title="Open Command Scout" icon={Icon.MagnifyingGlass} onAction={() => openScout(config)} />
             </ActionPanel>
           }
         />

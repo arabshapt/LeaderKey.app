@@ -8,6 +8,7 @@ import {
 
 import { RecordEditorForm } from "./editor-form.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 type CreateItemType = "group" | "layer" | "shortcut";
 
@@ -106,7 +107,7 @@ export function TypedPathCreatePicker(props: TypedPathCreatePickerProps) {
                 <ActionPanel>
                   <Action.Push
                     icon={iconForItemType(itemType)}
-                    shortcut={{ key: "return", modifiers: [] }}
+                    shortcut={SHORTCUTS.primary}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}

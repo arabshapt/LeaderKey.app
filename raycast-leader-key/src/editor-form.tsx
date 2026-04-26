@@ -50,6 +50,7 @@ import {
   type ItemFormState,
 } from "./form-utils.js";
 import { MacroStepsEditor } from "./macro-editor.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 type EditorMode = "append-child" | "create-at-path" | "create-sibling" | "edit-source" | "override-in-effective-config";
 
@@ -327,6 +328,7 @@ function LayerTapActionEditor(props: LayerTapActionEditorProps) {
           {tapState.type === "macro" ? (
             <Action.Push
               icon={Icon.List}
+              shortcut={SHORTCUTS.editMacroSteps}
               target={
                 <MacroStepsEditor
                   defaultMenuAppName={defaultMenuAppName}
@@ -339,7 +341,7 @@ function LayerTapActionEditor(props: LayerTapActionEditorProps) {
               title="Edit Macro Steps"
             />
           ) : null}
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmitTapAction} title="Save Tap Action" />
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmitTapAction} shortcut={SHORTCUTS.save} title="Save Tap Action" />
         </ActionPanel>
       }
       navigationTitle="Layer Tap Action"
@@ -800,6 +802,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           {formState.type === "macro" ? (
             <Action.Push
               icon={Icon.List}
+              shortcut={SHORTCUTS.editMacroSteps}
               target={
                 <MacroStepsEditor
                   defaultMenuAppName={defaultMenuAppName}
@@ -815,6 +818,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           {formState.type === "layer" ? (
             <Action.Push
               icon={Icon.Layers}
+              shortcut={SHORTCUTS.editTapAction}
               target={
                 <LayerTapActionEditor
                   defaultMenuAppName={defaultMenuAppName}
@@ -830,14 +834,16 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             <Action
               icon={Icon.XMarkCircle}
               onAction={() => setFormState((current) => ({ ...current, tapAction: undefined }))}
+              shortcut={SHORTCUTS.removeTapAction}
               title="Remove Tap Action"
             />
           ) : null}
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title={isSaving ? "Saving…" : "Save"} />
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title={isSaving ? "Saving…" : "Save"} />
           {canDeleteTarget ? (
             <Action
               icon={Icon.Trash}
               onAction={() => void handleDelete()}
+              shortcut={SHORTCUTS.delete}
               style={Action.Style.Destructive}
               title={targetRecord?.kind === "group" ? "Delete Group" : targetRecord?.kind === "layer" ? "Delete Layer" : "Delete Item"}
             />

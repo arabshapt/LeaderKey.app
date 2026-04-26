@@ -25,6 +25,7 @@ import {
 import { PathEditorView } from "./path-editor-view.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
 
@@ -201,6 +202,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
                 <Action
                   icon={Icon.ArrowClockwise}
                   onAction={reload}
+                  shortcut={SHORTCUTS.refresh}
                   title="Retry Loading Index"
                 />
               </ActionPanel>
@@ -251,23 +253,26 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
           <ActionPanel>
             <Action.Push
               icon={Icon.ChevronRight}
+              shortcut={SHORTCUTS.primary}
               target={openConfigTarget(config, configDirectory, readyPayload, setPayload, preferredEditor)}
               title="Open Config"
             />
             <Action.Push
               icon={Icon.Pencil}
-              shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
+              shortcut={SHORTCUTS.openPathEditor}
               target={openPathEditor(config, configDirectory, readyPayload, setPayload, preferredEditor)}
               title="Open Path Editor"
             />
             <Action.CopyToClipboard
               content={deeplink}
               icon={Icon.Link}
+              shortcut={SHORTCUTS.copyDeeplink}
               title="Copy Config Deeplink"
             />
             <Action.CopyToClipboard
               content={pathEditorDeeplink}
               icon={Icon.AppWindowSidebarLeft}
+              shortcut={SHORTCUTS.copyPathDeeplink}
               title="Copy Path Editor Deeplink"
             />
             <Action.CreateQuicklink
@@ -275,6 +280,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
                 link: deeplink,
                 name: quicklinkName(config.displayName),
               }}
+              shortcut={SHORTCUTS.createQuicklink}
               title="Create Config Quicklink"
             />
             <Action.CreateQuicklink
@@ -282,6 +288,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
                 link: pathEditorDeeplink,
                 name: pathEditorQuicklinkName(config.displayName),
               }}
+              shortcut={SHORTCUTS.createPathQuicklink}
               title="Create Path Editor Quicklink"
             />
           </ActionPanel>
@@ -316,7 +323,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.newAction}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -340,7 +347,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.newGroup}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -364,7 +371,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Layers}
-                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  shortcut={SHORTCUTS.newLayer}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -392,6 +399,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <Action.CopyToClipboard
                 content={currentAppDeeplinkTemplate}
                 icon={Icon.Link}
+                shortcut={SHORTCUTS.copyDeeplink}
                 title="Copy Current App Config Deeplink"
               />
             </ActionPanel>
@@ -407,6 +415,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <Action.CopyToClipboard
                 content={currentNormalAppDeeplinkTemplate}
                 icon={Icon.Link}
+                shortcut={SHORTCUTS.copyDeeplink}
                 title="Copy Current App Normal Config Deeplink"
               />
             </ActionPanel>
@@ -422,6 +431,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <Action.CopyToClipboard
                 content={currentAppPathDeeplinkTemplate}
                 icon={Icon.AppWindowSidebarLeft}
+                shortcut={SHORTCUTS.copyPathDeeplink}
                 title="Copy Current App Path Deeplink"
               />
             </ActionPanel>
@@ -437,6 +447,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
               <Action.CopyToClipboard
                 content={currentNormalAppPathDeeplinkTemplate}
                 icon={Icon.AppWindowSidebarLeft}
+                shortcut={SHORTCUTS.copyPathDeeplink}
                 title="Copy Current App Normal Path Deeplink"
               />
             </ActionPanel>

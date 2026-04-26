@@ -11,6 +11,7 @@ import { IntelliJActionPicker } from "./intellij-action-picker.js";
 import { MenuFallbackPathsEditor } from "./menu-fallbacks-editor.js";
 import { MenuItemPicker } from "./menu-picker.js";
 import { composeMenuDraftValue, menuAppPrefix, menuPathValue, replaceMenuAppPrefix, type ItemFormState } from "./form-utils.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 interface ActionValueFieldsProps {
   defaultMenuAppName?: string;
@@ -67,6 +68,7 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
       {formState.type === "menu" && selectedMenuAppName ? (
         <Action.Push
           icon={Icon.MagnifyingGlass}
+          shortcut={SHORTCUTS.searchValueSource}
           target={
             <MenuItemPicker
               appName={selectedMenuAppName}
@@ -89,6 +91,7 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
       {formState.type === "menu" ? (
         <Action.Push
           icon={Icon.List}
+          shortcut={SHORTCUTS.editFallbackPaths}
           target={
             <MenuFallbackPathsEditor
               appName={selectedMenuAppName}
@@ -103,6 +106,7 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
       {formState.type === "intellij" ? (
         <Action.Push
           icon={Icon.MagnifyingGlass}
+          shortcut={SHORTCUTS.searchValueSource}
           target={
             <IntelliJActionPicker
               currentActionIds={parsedIntellij.actionIds}

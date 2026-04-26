@@ -4,7 +4,6 @@ import {
   Alert,
   confirmAlert,
   Icon,
-  Keyboard,
   List,
   Toast,
   environment,
@@ -31,6 +30,7 @@ import { RecordEditorForm } from "./editor-form.js";
 import { getExtensionPreferences } from "./preferences.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { isNormalScope } from "./scope-utils.js";
 import { TypedPathCreatePicker } from "./typed-path-create-picker.js";
 import { useIndexPayload } from "./use-index-payload.js";
@@ -213,6 +213,7 @@ export default function SearchShortcutsCommand() {
                 <Action
                   icon={Icon.ArrowClockwise}
                   onAction={reload}
+                  shortcut={SHORTCUTS.refresh}
                   title="Retry Loading Index"
                 />
               </ActionPanel>
@@ -270,7 +271,7 @@ export default function SearchShortcutsCommand() {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.newAction}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -305,7 +306,7 @@ export default function SearchShortcutsCommand() {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.newGroup}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -340,7 +341,7 @@ export default function SearchShortcutsCommand() {
               <ActionPanel>
                 <Action.Push
                   icon={Icon.Layers}
-                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  shortcut={SHORTCUTS.newLayer}
                   target={
                     <TypedPathCreatePicker
                       configDirectory={configDirectory}
@@ -360,9 +361,6 @@ export default function SearchShortcutsCommand() {
       {visibleResults.map((record) => {
         const row = buildRowPresentation(record);
         const isSelected = activeSelectedId === record.id;
-        const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
-          ? { modifiers: ["cmd"], key: "return" }
-          : { modifiers: ["cmd"], key: "." };
         const createOverrideTitle = record.effectiveScope === "normalApp"
           ? "Create Normal App Override"
           : "Create App Override";
@@ -381,7 +379,7 @@ export default function SearchShortcutsCommand() {
                 {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.ChevronRight}
-                    shortcut={{ key: "return", modifiers: [] }}
+                    shortcut={SHORTCUTS.primary}
                     target={
                       <ConfigNodesList
                         configDirectory={configDirectory}
@@ -397,7 +395,7 @@ export default function SearchShortcutsCommand() {
                 ) : (
                   <Action.Push
                     icon={Icon.Pencil}
-                    shortcut={{ key: "return", modifiers: [] }}
+                    shortcut={SHORTCUTS.primary}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}
@@ -414,33 +412,33 @@ export default function SearchShortcutsCommand() {
                 )}
                 <Action.Push
                   icon={Icon.Sidebar}
-                  shortcut={showDetailsShortcut}
+                  shortcut={SHORTCUTS.showDetails}
                   target={<RecordDetailView record={record} />}
                   title="Show Details"
                 />
                 <Action
                   icon={Icon.CopyClipboard}
                   onAction={() => void handleCopy(record)}
-                  shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  shortcut={SHORTCUTS.copy}
                   title={`Copy ${recordKindLabel(record)}`}
                 />
                 <Action
                   icon={Icon.Code}
                   onAction={() => void handleOpenInEditor(record.id)}
-                  shortcut={record.kind === "action" ? { modifiers: ["cmd"], key: "return" } : undefined}
+                  shortcut={SHORTCUTS.openInEditor}
                   title="Open in Editor"
                 />
                 {pathEditorDeeplink(record) ? (
                   <Action.Open
                     icon={Icon.AppWindowSidebarLeft}
-                    shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
+                    shortcut={SHORTCUTS.openPathEditor}
                     target={pathEditorDeeplink(record)!}
                     title="Open in Path Editor"
                   />
                 ) : null}
                 <Action.Push
                   icon={Icon.ChevronRight}
-                  shortcut={{ modifiers: ["cmd"], key: "o" }}
+                  shortcut={SHORTCUTS.browseInConfig}
                   target={
                     <ConfigNodesList
                       configDirectory={configDirectory}
@@ -456,7 +454,7 @@ export default function SearchShortcutsCommand() {
                 {isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.Pencil}
-                    shortcut={Keyboard.Shortcut.Common.Edit}
+                    shortcut={SHORTCUTS.edit}
                     target={
                       editorForm(
                         "edit-source",
@@ -470,7 +468,7 @@ export default function SearchShortcutsCommand() {
                 {record.inherited ? (
                   <Action.Push
                     icon={Icon.PlusCircle}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
+                    shortcut={SHORTCUTS.createOverride}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}
@@ -487,13 +485,13 @@ export default function SearchShortcutsCommand() {
                 ) : null}
                 <Action.Push
                   icon={Icon.Plus}
-                  shortcut={{ modifiers: ["cmd"], key: "n" }}
+                  shortcut={SHORTCUTS.siblingAction}
                   target={editorForm("create-sibling", record, `Create Sibling After ${record.displayLabel}`)}
                   title="Create Sibling Action"
                 />
                 <Action.Push
                   icon={Icon.NewFolder}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                  shortcut={SHORTCUTS.siblingGroup}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -511,7 +509,7 @@ export default function SearchShortcutsCommand() {
                 {isNormalScope(record.effectiveScope) && payload && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.parentEffectiveKeyPath) ? (
                   <Action.Push
                     icon={Icon.Layers}
-                    shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                    shortcut={SHORTCUTS.siblingLayer}
                     target={
                       <RecordEditorForm
                         configDirectory={configDirectory}
@@ -531,13 +529,13 @@ export default function SearchShortcutsCommand() {
                   <>
                     <Action.Push
                       icon={Icon.Plus}
-                      shortcut={{ modifiers: ["ctrl", "cmd"], key: "n" }}
+                      shortcut={SHORTCUTS.childAction}
                       target={editorForm("append-child", record, `Append Child to ${record.displayLabel}`)}
                       title="Append Child Action"
                     />
                     <Action.Push
                       icon={Icon.NewFolder}
-                      shortcut={{ modifiers: ["ctrl", "cmd", "shift"], key: "n" }}
+                      shortcut={SHORTCUTS.childGroup}
                       target={
                         <RecordEditorForm
                           configDirectory={configDirectory}
@@ -555,7 +553,7 @@ export default function SearchShortcutsCommand() {
                     {isNormalScope(record.effectiveScope) && record.kind !== "layer" && payload && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.effectiveKeyPath) ? (
                       <Action.Push
                         icon={Icon.Layers}
-                        shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}
+                        shortcut={SHORTCUTS.childLayer}
                         target={
                           <RecordEditorForm
                             configDirectory={configDirectory}
@@ -577,7 +575,7 @@ export default function SearchShortcutsCommand() {
                   <Action
                     icon={Icon.Trash}
                     onAction={() => void handleDelete(record)}
-                    shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                    shortcut={SHORTCUTS.delete}
                     style={Action.Style.Destructive}
                     title="Delete"
                   />

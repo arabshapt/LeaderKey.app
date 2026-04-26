@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { rebuildIndex } from "./cache.js";
+import { SHORTCUTS } from "./shortcuts.js";
 
 const EMPTY_TEMPLATE_VALUE = "__empty__";
 
@@ -149,6 +150,7 @@ export function CreateAppConfigForm(props: CreateAppConfigFormProps) {
           <Action.SubmitForm
             icon={Icon.PlusCircle}
             onSubmit={handleSubmit}
+            shortcut={SHORTCUTS.save}
             title={isSaving ? "Creating…" : normalMode ? "Create Normal App Config" : "Create App Config"}
           />
         </ActionPanel>

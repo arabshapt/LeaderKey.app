@@ -4,7 +4,6 @@ import {
   Alert,
   confirmAlert,
   Icon,
-  Keyboard,
   List,
   Toast,
   environment,
@@ -39,6 +38,7 @@ import { RecordEditorForm } from "./editor-form.js";
 import { itemToFormState } from "./form-utils.js";
 import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
+import { SHORTCUTS } from "./shortcuts.js";
 import { isNormalScope } from "./scope-utils.js";
 
 interface PathEditorViewProps {
@@ -132,7 +132,7 @@ function rootOutcomeRow(
       <ActionPanel>
         <Action.Push
           icon={Icon.ChevronRight}
-          shortcut={{ key: "return", modifiers: [] }}
+          shortcut={SHORTCUTS.primary}
           target={
             <ConfigNodesList
               configDirectory={configDirectory}
@@ -147,7 +147,7 @@ function rootOutcomeRow(
         <Action
           icon={Icon.Clipboard}
           onAction={onPaste}
-          shortcut={{ modifiers: ["cmd"], key: "v" }}
+          shortcut={SHORTCUTS.paste}
           title="Paste at Root"
         />
       </ActionPanel>
@@ -521,7 +521,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -538,24 +538,24 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.CopyClipboard}
                 onAction={() => void handleCopy(record)}
-                shortcut={{ modifiers: ["cmd"], key: "c" }}
+                shortcut={SHORTCUTS.copy}
                 title="Copy Action"
               />
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Parent Group"
               />
               <Action
                 icon={Icon.Code}
                 onAction={() => void openRecordInEditor(record, preferredEditor)}
-                shortcut={{ modifiers: ["cmd"], key: "return" }}
+                shortcut={SHORTCUTS.openInEditor}
                 title="Open in Editor"
               />
               <Action.Push
                 icon={Icon.ChevronRight}
-                shortcut={{ modifiers: ["cmd"], key: "o" }}
+                shortcut={SHORTCUTS.browseInConfig}
                 target={
                   <ConfigNodesList
                     configDirectory={configDirectory}
@@ -571,7 +571,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               {record.inherited ? (
                 <Action.Push
                   icon={Icon.PlusCircle}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
+                  shortcut={SHORTCUTS.createOverride}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -590,7 +590,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                 <Action
                   icon={Icon.Trash}
                   onAction={() => void handleDelete(record)}
-                  shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                  shortcut={SHORTCUTS.delete}
                   style={Action.Style.Destructive}
                   title="Delete Action"
                 />
@@ -620,7 +620,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.ChevronRight}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <ConfigNodesList
                     configDirectory={configDirectory}
@@ -635,7 +635,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               />
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={Keyboard.Shortcut.Common.Edit}
+                shortcut={SHORTCUTS.edit}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -652,26 +652,26 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.CopyClipboard}
                 onAction={() => void handleCopy(record)}
-                shortcut={{ modifiers: ["cmd"], key: "c" }}
+                shortcut={SHORTCUTS.copy}
                 title={`Copy ${recordKindLabel(record)}`}
               />
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Group"
               />
               <Action
                 icon={Icon.Code}
                 onAction={() => void openRecordInEditor(record, preferredEditor)}
-                shortcut={{ modifiers: ["cmd"], key: "return" }}
+                shortcut={SHORTCUTS.openInEditor}
                 title="Open in Editor"
               />
               {!record.inherited ? (
                 <Action
                   icon={Icon.Trash}
                   onAction={() => void handleDelete(record)}
-                  shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                  shortcut={SHORTCUTS.delete}
                   style={Action.Style.Destructive}
                   title={record.kind === "layer" ? "Delete Layer" : "Delete Group"}
                 />
@@ -702,7 +702,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -718,7 +718,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               />
               <Action.Push
                 icon={Icon.ChevronRight}
-                shortcut={{ modifiers: ["cmd"], key: "o" }}
+                shortcut={SHORTCUTS.browseInConfig}
                 target={
                   <ConfigNodesList
                     configDirectory={configDirectory}
@@ -734,7 +734,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
@@ -778,7 +778,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Plus}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -801,7 +801,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               />
               <Action.Push
                 icon={Icon.NewFolder}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+                shortcut={SHORTCUTS.newGroup}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -825,7 +825,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               {canCreateLayerAtMissingPath ? (
                 <Action.Push
                   icon={Icon.Layers}
-                  shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+                  shortcut={SHORTCUTS.newLayer}
                   target={
                     <RecordEditorForm
                       configDirectory={configDirectory}
@@ -849,7 +849,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               ) : null}
               <Action.Push
                 icon={Icon.ChevronRight}
-                shortcut={{ modifiers: ["cmd"], key: "o" }}
+                shortcut={SHORTCUTS.browseInConfig}
                 target={
                   <ConfigNodesList
                     configDirectory={configDirectory}
@@ -865,7 +865,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
@@ -892,7 +892,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.NewFolder}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -916,7 +916,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
@@ -943,7 +943,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Layers}
-                shortcut={{ key: "return", modifiers: [] }}
+                shortcut={SHORTCUTS.primary}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -967,7 +967,7 @@ export function PathEditorView(props: PathEditorViewProps) {
               <Action
                 icon={Icon.Clipboard}
                 onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                shortcut={{ modifiers: ["cmd"], key: "v" }}
+                shortcut={SHORTCUTS.paste}
                 title="Paste into Deepest Existing Group"
               />
             </ActionPanel>
@@ -1020,7 +1020,7 @@ export function PathEditorView(props: PathEditorViewProps) {
           <ActionPanel>
             <Action.Push
               icon={Icon.Plus}
-              shortcut={{ modifiers: ["cmd"], key: "n" }}
+              shortcut={SHORTCUTS.newAction}
               target={
                 <RecordEditorForm
                   configDirectory={configDirectory}
@@ -1070,7 +1070,7 @@ export function PathEditorView(props: PathEditorViewProps) {
           <ActionPanel>
             <Action.Push
               icon={Icon.NewFolder}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+              shortcut={SHORTCUTS.newGroup}
               target={
                 <RecordEditorForm
                   configDirectory={configDirectory}
@@ -1120,7 +1120,7 @@ export function PathEditorView(props: PathEditorViewProps) {
           <ActionPanel>
             <Action.Push
               icon={Icon.Layers}
-              shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
+              shortcut={SHORTCUTS.newLayer}
               target={
                 <RecordEditorForm
                   configDirectory={configDirectory}
@@ -1204,9 +1204,6 @@ export function PathEditorView(props: PathEditorViewProps) {
         {childRows.map((record) => {
           const row = buildRowPresentation(record);
           const isSelected = activeSelectedId === record.id;
-          const showDetailsShortcut: Keyboard.Shortcut = isContainerRecord(record)
-            ? { modifiers: ["cmd"], key: "return" }
-            : { modifiers: ["cmd"], key: "." };
 
           return (
             <List.Item
@@ -1223,7 +1220,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                     <>
                       <Action.Push
                         icon={Icon.ChevronRight}
-                        shortcut={{ key: "return", modifiers: [] }}
+                        shortcut={SHORTCUTS.primary}
                         target={
                           <ConfigNodesList
                             configDirectory={configDirectory}
@@ -1238,7 +1235,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                       />
                       <Action.Push
                         icon={Icon.Pencil}
-                        shortcut={Keyboard.Shortcut.Common.Edit}
+                        shortcut={SHORTCUTS.edit}
                         target={
                           <RecordEditorForm
                             configDirectory={configDirectory}
@@ -1256,7 +1253,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                   ) : (
                     <Action.Push
                       icon={Icon.Pencil}
-                      shortcut={{ key: "return", modifiers: [] }}
+                      shortcut={SHORTCUTS.primary}
                       target={
                         <RecordEditorForm
                           configDirectory={configDirectory}
@@ -1273,37 +1270,37 @@ export function PathEditorView(props: PathEditorViewProps) {
                   )}
                   <Action.Push
                     icon={Icon.Sidebar}
-                    shortcut={showDetailsShortcut}
+                    shortcut={SHORTCUTS.showDetails}
                     target={<RecordDetailView record={record} />}
                     title="Show Details"
                   />
                   <Action
                     icon={Icon.CopyClipboard}
                     onAction={() => void handleCopy(record)}
-                    shortcut={{ modifiers: ["cmd"], key: "c" }}
+                    shortcut={SHORTCUTS.copy}
                     title={`Copy ${recordKindLabel(record)}`}
                   />
                   <Action
                     icon={Icon.Clipboard}
                     onAction={() => void handlePasteIntoGroup(currentPasteTarget())}
-                    shortcut={{ modifiers: ["cmd"], key: "v" }}
+                    shortcut={SHORTCUTS.paste}
                     title="Paste into Current Group"
                   />
                   <Action
                     icon={Icon.Code}
                     onAction={() => void openRecordInEditor(record, preferredEditor)}
-                    shortcut={record.kind === "action" ? { modifiers: ["cmd"], key: "return" } : undefined}
+                    shortcut={SHORTCUTS.openInEditor}
                     title="Open in Editor"
                   />
                   <Action.Open
                     icon={Icon.AppWindowSidebarLeft}
-                    shortcut={{ modifiers: ["ctrl", "cmd"], key: "p" }}
+                    shortcut={SHORTCUTS.openPathEditor}
                     target={pathEditorDeeplink(record)}
                     title="Open in Path Editor"
                   />
                   <Action.Push
                     icon={Icon.ChevronRight}
-                    shortcut={{ modifiers: ["cmd"], key: "o" }}
+                    shortcut={SHORTCUTS.browseInConfig}
                     target={
                       <ConfigNodesList
                         configDirectory={configDirectory}
@@ -1320,7 +1317,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                     <Action
                       icon={Icon.Trash}
                       onAction={() => void handleDelete(record)}
-                      shortcut={{ modifiers: ["cmd"], key: "backspace" }}
+                      shortcut={SHORTCUTS.delete}
                       style={Action.Style.Destructive}
                       title="Delete"
                     />
