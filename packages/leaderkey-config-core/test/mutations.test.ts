@@ -11,7 +11,9 @@ import {
   type LayerNode,
   updateRecord,
   updateRecordAtPath,
+  validateConfigItem,
   validateRecordPath,
+  validateSiblingKeyInPayload,
 } from "../src/index.js";
 import { createTempConfigDirectory, expectRecord, readJsonFile, writeConfigFile } from "./helpers.js";
 
@@ -363,6 +365,234 @@ test("appendChildToGroup and createItemAtPath treat existing layers as container
   assert.equal(group.type, "group");
   assert.equal(group.key, "g");
   assert.equal(group.actions[0]?.key, "x");
+});
+
+test("mutation helpers reject duplicate sibling keys across actions groups and layers", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [
+      {
+        key: "f",
+        type: "shortcut",
+        value: "Cf",
+      },
+      {
+        actions: [],
+        key: "g",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const actionRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "f" && candidate.kind === "action"),
+    "expected action record",
+  );
+  const groupRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "g" && candidate.kind === "group"),
+    "expected group record",
+  );
+
+  await assert.rejects(
+    insertSiblingAfter(actionRecord, {
+      actions: [],
+      key: "g",
+      type: "layer",
+    }),
+    /already exists/,
+  );
+
+  assert.equal(
+    validateSiblingKeyInPayload(payload, {
+      configFilePath: actionRecord.effectiveConfigPath,
+      key: "f",
+      parentKeyPath: actionRecord.parentEffectiveKeyPath,
+    }),
+    "An item with key 'f' already exists at this path.",
+  );
+
+  await assert.rejects(
+    insertSiblingAfter(groupRecord, {
+      key: "f",
+      type: "command",
+      value: "echo duplicate",
+    }),
+    /already exists/,
+  );
+});
+
+test("mutation helpers reject duplicate children and nested layers inside layers", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "b",
+            type: "shortcut",
+            value: "Cb",
+          },
+        ],
+        key: "f",
+        type: "layer",
+      },
+    ],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const layerRecord = expectRecord(
+    payload.records.find((candidate) => candidate.keySequence === "f" && candidate.kind === "layer"),
+    "expected layer record",
+  );
+
+  await assert.rejects(
+    appendChildToGroup(layerRecord, {
+      key: "b",
+      type: "command",
+      value: "echo duplicate",
+    }),
+    /already exists/,
+  );
+
+  await assert.rejects(
+    appendChildToGroup(layerRecord, {
+      actions: [],
+      key: "l",
+      type: "layer",
+    }),
+    /Nested layers are not supported/,
+  );
+});
+
+test("normal app overrides materialize inherited fallback layers as layers", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [
+      {
+        actions: [
+          {
+            key: "b",
+            type: "shortcut",
+            value: "Cb",
+          },
+        ],
+        key: "f",
+        type: "layer",
+      },
+    ],
+    type: "group",
+  });
+  const normalAppPath = await writeConfigFile(configDirectory, "normal-app.com.google.Chrome.json", {
+    actions: [],
+    type: "group",
+  }, {
+    customName: "Chrome Normal",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const inheritedLayerRecord = expectRecord(
+    payload.records.find((candidate) =>
+      candidate.effectiveConfigPath === normalAppPath &&
+      candidate.inherited &&
+      candidate.keySequence === "f" &&
+      candidate.kind === "layer"
+    ),
+    "expected inherited normal app layer",
+  );
+  const inheritedChildRecord = expectRecord(
+    payload.records.find((candidate) =>
+      candidate.effectiveConfigPath === normalAppPath &&
+      candidate.inherited &&
+      candidate.keySequence === "f -> b" &&
+      candidate.kind === "action"
+    ),
+    "expected inherited normal app layer child",
+  );
+
+  await appendChildToGroup(inheritedLayerRecord, {
+    key: "x",
+    type: "command",
+    value: "echo child",
+  });
+  await insertSiblingAfter(inheritedChildRecord, {
+    key: "c",
+    type: "shortcut",
+    value: "Cc",
+  });
+
+  const savedRoot = await readJsonFile<GroupNode>(normalAppPath);
+  const layer = savedRoot.actions[0] as LayerNode;
+
+  assert.equal(layer.type, "layer");
+  assert.equal(layer.key, "f");
+  assert.deepEqual(layer.actions.map((item) => item.key), ["x", "c"]);
+});
+
+test("config item validation rejects layer scope and recursive action value errors", () => {
+  assert.equal(
+    validateConfigItem({
+      actions: [],
+      key: "f",
+      type: "layer",
+    }, { scope: "global" }),
+    "Layers are only supported in normal-mode configs.",
+  );
+
+  assert.equal(
+    validateConfigItem({
+      actions: [],
+      key: "f",
+      type: "layer",
+    }, { parentInsideLayer: true, scope: "normalFallback" }),
+    "Nested layers are not supported.",
+  );
+
+  assert.equal(
+    validateConfigItem({
+      actions: [],
+      key: "caps_lock",
+      type: "layer",
+    }, { scope: "normalFallback" }),
+    "Modifier keys cannot be used as normal-mode layer triggers.",
+  );
+
+  assert.match(
+    validateConfigItem({
+      actions: [],
+      key: "f",
+      tapAction: {
+        type: "shortcut",
+        value: "",
+      },
+      type: "layer",
+    }, { scope: "normalFallback" }) ?? "",
+    /Tap action/,
+  );
+
+  assert.match(
+    validateConfigItem({
+      key: "m",
+      macroSteps: [
+        {
+          action: {
+            type: "command",
+            value: "",
+          },
+          delay: 0,
+          enabled: true,
+        },
+      ],
+      type: "macro",
+      value: "",
+    }, { scope: "normalFallback" }) ?? "",
+    /Step 1/,
+  );
 });
 
 test("validateRecordPath allows local overrides of inherited fallback content in app configs", async () => {

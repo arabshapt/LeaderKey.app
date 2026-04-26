@@ -77,6 +77,15 @@ enum UserConfigFileKind: Equatable {
   case normalFallback
   case normalApp(bundleId: String)
   case unknown
+
+  var allowsLayers: Bool {
+    switch self {
+    case .normalFallback, .normalApp:
+      return true
+    case .global, .appFallback, .app, .unknown:
+      return false
+    }
+  }
 }
 
 class UserConfig: ObservableObject {
@@ -256,7 +265,7 @@ class UserConfig: ObservableObject {
         ?? emptyRoot
       selectedConfigKeyForEditing = globalDefaultDisplayName
       // Set initial validation errors based on default config
-      validationErrors = ConfigValidator.validate(group: root)
+      validationErrors = ConfigValidator.validate(group: root, allowsLayers: false)
       // Start with sorted view when loading configs
       isActivelyEditing = false
     } else {

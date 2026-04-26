@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 
 import { FALLBACK_CONFIG_DISPLAY_NAME } from "./constants.js";
+import {
+  scopeForConfigPath,
+  validateConfigItem,
+} from "./config-validation.js";
 import { loadGroupFromFile, writeGroupToFile } from "./discovery.js";
 import {
   generateActionLabel,
@@ -22,6 +26,7 @@ interface JsonNode {
 }
 
 type ContainerNode = GroupNode | LayerNode;
+type ContainerType = "group" | "layer";
 
 function isContainerItem(item: ConfigItem): item is ContainerNode {
   return item.type === "group" || item.type === "layer";
@@ -221,8 +226,42 @@ function getMutableContainerAtPath(group: GroupNode, nodePath: number[]): Contai
   return item;
 }
 
+function getMutableContainerContextAtPath(group: GroupNode, nodePath: number[]): {
+  container: ContainerNode;
+  insideLayer: boolean;
+} {
+  let current: ContainerNode = group;
+  let insideLayer = false;
+
+  for (const pathIndex of nodePath) {
+    const item: ConfigItem | undefined = current.actions[pathIndex];
+    if (!item) {
+      throw new Error(`Invalid node path: ${nodePath.join(".")}`);
+    }
+    if (!isContainerItem(item)) {
+      throw new Error(`Path ${nodePath.join(".")} is not a container`);
+    }
+    if (item.type === "layer") {
+      insideLayer = true;
+    }
+    current = item;
+  }
+
+  return {
+    container: current,
+    insideLayer,
+  };
+}
+
 function getMutableParentContainer(group: GroupNode, nodePath: number[]): ContainerNode {
   return getMutableContainerAtPath(group, nodePath.slice(0, -1));
+}
+
+function getMutableParentContainerContext(group: GroupNode, nodePath: number[]): {
+  container: ContainerNode;
+  insideLayer: boolean;
+} {
+  return getMutableContainerContextAtPath(group, nodePath.slice(0, -1));
 }
 
 function nextGroupLabel(group: GroupNode): string | undefined {
@@ -277,9 +316,51 @@ function normalizeItemBeforeSave(item: ConfigItem): ConfigItem {
   };
 }
 
-function ensureGroupPathByKeys(root: GroupNode, keyPath: string[]): ContainerNode {
+function containerTypesAtPath(root: GroupNode, nodePath: number[]): ContainerType[] {
   let current: ContainerNode = root;
-  for (const key of keyPath) {
+  const types: ContainerType[] = [];
+
+  for (const pathIndex of nodePath) {
+    const item: ConfigItem | undefined = current.actions[pathIndex];
+    if (!item) {
+      throw new Error(`Invalid node path: ${nodePath.join(".")}`);
+    }
+    if (!isContainerItem(item)) {
+      throw new Error(`Path ${nodePath.join(".")} does not point to a container`);
+    }
+    types.push(item.type);
+    current = item;
+  }
+
+  return types;
+}
+
+function makeContainerForKey(key: string, type: ContainerType): ContainerNode {
+  if (type === "layer") {
+    return {
+      actions: [],
+      key,
+      label: undefined,
+      type: "layer",
+    };
+  }
+
+  return {
+    actions: [],
+    key,
+    label: undefined,
+    type: "group",
+  };
+}
+
+function ensureContainerPathByKeys(root: GroupNode, keyPath: string[], containerTypes: ContainerType[] = []): {
+  container: ContainerNode;
+  insideLayer: boolean;
+} {
+  let current: ContainerNode = root;
+  let insideLayer = false;
+
+  for (const [index, key] of keyPath.entries()) {
     const blockingAction = current.actions.find(
       (item) => !isContainerItem(item) && (item.key ?? "") === key,
     );
@@ -292,21 +373,62 @@ function ensureGroupPathByKeys(root: GroupNode, keyPath: string[]): ContainerNod
     );
 
     if (existingGroup) {
+      if (existingGroup.type === "layer") {
+        insideLayer = true;
+      }
       current = existingGroup;
       continue;
     }
 
-    const newGroup: GroupNode = {
-      actions: [],
-      key,
-      label: undefined,
-      type: "group",
-    };
-    current.actions.push(newGroup);
-    current = newGroup;
+    const newContainer = makeContainerForKey(key, containerTypes[index] ?? "group");
+    current.actions.push(newContainer);
+    if (newContainer.type === "layer") {
+      insideLayer = true;
+    }
+    current = newContainer;
   }
 
-  return current;
+  return {
+    container: current,
+    insideLayer,
+  };
+}
+
+function assertCanAddChild(
+  group: ContainerNode,
+  item: ConfigItem,
+  options: {
+    ignoredIndex?: number;
+    parentInsideLayer: boolean;
+    scopePath: string;
+  },
+): ConfigItem {
+  const normalizedItem = normalizeItemBeforeSave(item);
+  const key = normalizedItem.key;
+
+  if (key === undefined || key.length === 0) {
+    throw new Error("A key is required.");
+  }
+
+  const existingIndex = group.actions.findIndex((candidate, index) =>
+    index !== options.ignoredIndex && (candidate.key ?? "") === key
+  );
+  if (existingIndex >= 0) {
+    throw new Error(`An item with key '${key}' already exists at this path.`);
+  }
+
+  const validationError = validateConfigItem(normalizedItem, {
+    parentInsideLayer: options.parentInsideLayer,
+    scope: scopeForConfigPath(options.scopePath),
+  });
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  return {
+    ...normalizedItem,
+    key,
+  };
 }
 
 function replaceOrAppendByKey(group: ContainerNode, item: ConfigItem): void {
@@ -331,17 +453,32 @@ export async function updateRecord(
 ): Promise<string> {
   if (record.inherited && mode === "override-in-effective-config") {
     const effectiveRoot = await loadGroupFromFile(record.effectiveConfigPath);
-    const localParent = ensureGroupPathByKeys(effectiveRoot, record.parentEffectiveKeyPath);
-    replaceOrAppendByKey(localParent, normalizeItemBeforeSave(nextItem));
+    const sourceRoot = await loadGroupFromFile(record.sourceConfigPath);
+    const sourceParentTypes = containerTypesAtPath(sourceRoot, record.sourceNodePath.slice(0, -1));
+    const localParent = ensureContainerPathByKeys(
+      effectiveRoot,
+      record.parentEffectiveKeyPath,
+      sourceParentTypes,
+    );
+    const normalizedItem = assertCanAddChild(localParent.container, nextItem, {
+      parentInsideLayer: localParent.insideLayer,
+      scopePath: record.effectiveConfigPath,
+    });
+    replaceOrAppendByKey(localParent.container, normalizedItem);
     await writeGroupToFile(record.effectiveConfigPath, effectiveRoot);
     return record.effectiveConfigPath;
   }
 
   const targetPath = record.sourceConfigPath;
   const root = await loadGroupFromFile(targetPath);
-  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
+  const parentContext = getMutableParentContainerContext(root, record.sourceNodePath);
   const itemIndex = record.sourceNodePath.at(-1)!;
-  parentGroup.actions.splice(itemIndex, 1, normalizeItemBeforeSave(nextItem));
+  const normalizedItem = assertCanAddChild(parentContext.container, nextItem, {
+    ignoredIndex: itemIndex,
+    parentInsideLayer: parentContext.insideLayer,
+    scopePath: targetPath,
+  });
+  parentContext.container.actions.splice(itemIndex, 1, normalizedItem);
   await writeGroupToFile(targetPath, root);
   return targetPath;
 }
@@ -375,17 +512,16 @@ export async function updateRecordAtPath(
   const itemIndex = record.sourceNodePath.at(-1)!;
   parentGroup.actions.splice(itemIndex, 1);
 
-  const destinationParent = ensureGroupPathByKeys(root, destinationKeyPath.slice(0, -1));
-  const normalizedItem = normalizeItemBeforeSave({
+  const destinationParent = ensureContainerPathByKeys(root, destinationKeyPath.slice(0, -1));
+  const normalizedItem = assertCanAddChild(destinationParent.container, {
     ...nextItem,
     key: destinationKey,
+  }, {
+    parentInsideLayer: destinationParent.insideLayer,
+    scopePath: targetPath,
   });
-  const existingItem = destinationParent.actions.find((candidate) => (candidate.key ?? "") === destinationKey);
-  if (existingItem) {
-    throw new Error(`An item with key '${destinationKey}' already exists at this path.`);
-  }
 
-  destinationParent.actions.push(normalizedItem);
+  destinationParent.container.actions.push(normalizedItem);
   await writeGroupToFile(targetPath, root);
   return targetPath;
 }
@@ -405,16 +541,28 @@ export async function deleteRecord(record: FlatIndexRecord): Promise<string> {
 export async function insertSiblingAfter(record: FlatIndexRecord, item: ConfigItem): Promise<string> {
   if (record.inherited) {
     const effectiveRoot = await loadGroupFromFile(record.effectiveConfigPath);
-    const group = ensureGroupPathByKeys(effectiveRoot, record.parentEffectiveKeyPath);
-    group.actions.push(normalizeItemBeforeSave(item));
+    const sourceRoot = await loadGroupFromFile(record.sourceConfigPath);
+    const sourceParentTypes = containerTypesAtPath(sourceRoot, record.sourceNodePath.slice(0, -1));
+    const group = ensureContainerPathByKeys(
+      effectiveRoot,
+      record.parentEffectiveKeyPath,
+      sourceParentTypes,
+    );
+    group.container.actions.push(assertCanAddChild(group.container, item, {
+      parentInsideLayer: group.insideLayer,
+      scopePath: record.effectiveConfigPath,
+    }));
     await writeGroupToFile(record.effectiveConfigPath, effectiveRoot);
     return record.effectiveConfigPath;
   }
 
   const root = await loadGroupFromFile(record.sourceConfigPath);
-  const parentGroup = getMutableParentContainer(root, record.sourceNodePath);
+  const parentContext = getMutableParentContainerContext(root, record.sourceNodePath);
   const index = record.sourceNodePath.at(-1)! + 1;
-  parentGroup.actions.splice(index, 0, normalizeItemBeforeSave(item));
+  parentContext.container.actions.splice(index, 0, assertCanAddChild(parentContext.container, item, {
+    parentInsideLayer: parentContext.insideLayer,
+    scopePath: record.sourceConfigPath,
+  }));
   await writeGroupToFile(record.sourceConfigPath, root);
   return record.sourceConfigPath;
 }
@@ -426,15 +574,27 @@ export async function appendChildToGroup(record: FlatIndexRecord, item: ConfigIt
 
   if (record.inherited) {
     const effectiveRoot = await loadGroupFromFile(record.effectiveConfigPath);
-    const localGroup = ensureGroupPathByKeys(effectiveRoot, record.effectiveKeyPath);
-    localGroup.actions.push(normalizeItemBeforeSave(item));
+    const sourceRoot = await loadGroupFromFile(record.sourceConfigPath);
+    const sourceContainerTypes = containerTypesAtPath(sourceRoot, record.sourceNodePath);
+    const localGroup = ensureContainerPathByKeys(
+      effectiveRoot,
+      record.effectiveKeyPath,
+      sourceContainerTypes,
+    );
+    localGroup.container.actions.push(assertCanAddChild(localGroup.container, item, {
+      parentInsideLayer: localGroup.insideLayer,
+      scopePath: record.effectiveConfigPath,
+    }));
     await writeGroupToFile(record.effectiveConfigPath, effectiveRoot);
     return record.effectiveConfigPath;
   }
 
   const root = await loadGroupFromFile(record.sourceConfigPath);
-  const group = getMutableContainerAtPath(root, record.sourceNodePath);
-  group.actions.push(normalizeItemBeforeSave(item));
+  const group = getMutableContainerContextAtPath(root, record.sourceNodePath);
+  group.container.actions.push(assertCanAddChild(group.container, item, {
+    parentInsideLayer: group.insideLayer,
+    scopePath: record.sourceConfigPath,
+  }));
   await writeGroupToFile(record.sourceConfigPath, root);
   return record.sourceConfigPath;
 }
@@ -445,23 +605,13 @@ export async function createItemAtPath(
   item: ConfigItem,
 ): Promise<string> {
   const root = await loadGroupFromFile(configFilePath);
-  const group = ensureGroupPathByKeys(root, parentKeyPath);
-  const normalizedItem = normalizeItemBeforeSave(item);
-  const key = normalizedItem.key;
-
-  if (key === undefined || key.length === 0) {
-    throw new Error("A key is required.");
-  }
-
-  const existingItem = group.actions.find((candidate) => (candidate.key ?? "") === key);
-  if (existingItem) {
-    throw new Error(`An item with key '${key}' already exists at this path.`);
-  }
-
-  group.actions.push({
-    ...normalizedItem,
-    key,
+  const group = ensureContainerPathByKeys(root, parentKeyPath);
+  const normalizedItem = assertCanAddChild(group.container, item, {
+    parentInsideLayer: group.insideLayer,
+    scopePath: configFilePath,
   });
+
+  group.container.actions.push(normalizedItem);
   await writeGroupToFile(configFilePath, root);
   return configFilePath;
 }

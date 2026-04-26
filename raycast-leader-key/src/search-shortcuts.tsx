@@ -14,6 +14,7 @@ import {
   deleteRecord,
   locateNodeInFile,
   openInEditor,
+  parentPathIsInsideLayer,
   searchRecords,
   triggerLeaderKeyConfigReload,
   type CachePayload,
@@ -507,7 +508,7 @@ export default function SearchShortcutsCommand() {
                   }
                   title="Create Sibling Group"
                 />
-                {isNormalScope(record.effectiveScope) ? (
+                {isNormalScope(record.effectiveScope) && payload && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.parentEffectiveKeyPath) ? (
                   <Action.Push
                     icon={Icon.Layers}
                     shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
@@ -551,7 +552,7 @@ export default function SearchShortcutsCommand() {
                       }
                       title="Append Child Group"
                     />
-                    {isNormalScope(record.effectiveScope) ? (
+                    {isNormalScope(record.effectiveScope) && record.kind !== "layer" && payload && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.effectiveKeyPath) ? (
                       <Action.Push
                         icon={Icon.Layers}
                         shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}

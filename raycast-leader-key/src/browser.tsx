@@ -16,6 +16,7 @@ import {
   deleteRecord,
   locateNodeInFile,
   openInEditor,
+  parentPathIsInsideLayer,
   searchRecordsInSubtree,
   triggerLeaderKeyConfigReload,
   type CachePayload,
@@ -175,12 +176,22 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
         effectivePathMatches(record.effectiveKeyPath, fullLiteralPath)
       )
     : undefined;
-  const canCreateLayerInContext = Boolean(contextRecord && isNormalScope(contextRecord.effectiveScope));
+  const canCreateLayerInContext = Boolean(
+    contextRecord &&
+    isNormalScope(contextRecord.effectiveScope) &&
+    contextRecord.kind !== "layer" &&
+    !parentPathIsInsideLayer(payload, contextRecord.effectiveConfigPath, contextRecord.effectiveKeyPath),
+  );
+  const canCreateLayerAtLiteralPath = Boolean(
+    contextRecord &&
+    isNormalScope(contextRecord.effectiveScope) &&
+    !parentPathIsInsideLayer(payload, contextRecord.effectiveConfigPath, fullLiteralPath.slice(0, -1)),
+  );
   const typedPathItemIds = literalPathTitle && !literalPathConflict
     ? [
         "typed-path:create-action",
         "typed-path:create-group",
-        ...(canCreateLayerInContext ? ["typed-path:create-layer"] : []),
+        ...(canCreateLayerAtLiteralPath ? ["typed-path:create-layer"] : []),
       ]
     : [];
   const combinedIds = [...typedPathItemIds, ...visibleRecords.map((record) => record.id)];
@@ -546,7 +557,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
               </ActionPanel>
             }
           />
-          {canCreateLayerInContext ? (
+          {canCreateLayerAtLiteralPath ? (
             <List.Item
               detail={activeSelectedId === "typed-path:create-layer" ? (
                 <List.Item.Detail
@@ -725,7 +736,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                   }
                   title="Create Sibling Group"
                 />
-                {isNormalScope(record.effectiveScope) ? (
+                {isNormalScope(record.effectiveScope) && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.parentEffectiveKeyPath) ? (
                   <Action.Push
                     icon={Icon.Layers}
                     shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
@@ -769,7 +780,7 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                       }
                       title="Append Child Group"
                     />
-                    {isNormalScope(record.effectiveScope) ? (
+                    {isNormalScope(record.effectiveScope) && record.kind !== "layer" && !parentPathIsInsideLayer(payload, record.effectiveConfigPath, record.effectiveKeyPath) ? (
                       <Action.Push
                         icon={Icon.Layers}
                         shortcut={{ modifiers: ["ctrl", "cmd", "opt"], key: "n" }}

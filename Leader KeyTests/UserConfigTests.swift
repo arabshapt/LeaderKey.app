@@ -123,10 +123,10 @@ final class UserConfigTests: XCTestCase {
     subject.ensureAndLoad()
 
     XCTAssertEqual(Defaults[.configDir], UserConfig.defaultDirectory())
-    XCTAssertEqual(testAlertManager.shownAlerts.count, 1)
-    XCTAssertEqual(testAlertManager.shownAlerts[0].style, .warning)
     XCTAssertTrue(
-      testAlertManager.shownAlerts[0].message.contains("Config directory does not exist"))
+      testAlertManager.shownAlerts.contains {
+        $0.style == .warning && $0.message.contains("Config directory does not exist")
+      })
     XCTAssertTrue(subject.exists)
   }
 

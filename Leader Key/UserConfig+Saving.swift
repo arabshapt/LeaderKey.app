@@ -35,7 +35,8 @@ extension UserConfig {
     // --- FALLBACK STRIPPING (for app-specific configs only) ---
     var groupToProcess = currentlyEditingGroup
     let isAppSpecificConfig: Bool
-    switch configFileKind(forPath: filePath) {
+    let configKind = configFileKind(forPath: filePath)
+    switch configKind {
     case .app, .normalApp:
       isAppSpecificConfig = true
     case .global, .appFallback, .normalFallback, .unknown:
@@ -70,7 +71,7 @@ extension UserConfig {
 
     // Validate the group being saved
     print("[SAVE LOG] saveCurrentlyEditingConfig: About to validate finalGroup.")
-    let errors = ConfigValidator.validate(group: finalGroup)
+    let errors = ConfigValidator.validate(group: finalGroup, allowsLayers: configKind.allowsLayers)
     print(
       "[SAVE LOG] saveCurrentlyEditingConfig: Validation completed. Number of errors: \(errors.count)"
     )

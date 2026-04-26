@@ -29,6 +29,16 @@ export {
 export { normalizeLabelsInConfigDirectory } from "./normalize.js";
 export { analyzePathInConfig, parsePathInput } from "./path-navigation.js";
 export { validateRecordPath } from "./path-validation.js";
+export {
+  isNormalConfigPath,
+  isNormalScope,
+  parentPathIsInsideLayer,
+  scopeForConfigPath,
+  validateActionValue,
+  validateConfigItem,
+  validateConfigItems,
+  validateSiblingKeyInPayload,
+} from "./config-validation.js";
 export { searchRecords, searchRecordsInSubtree } from "./search.js";
 export {
   actionValuePreview,

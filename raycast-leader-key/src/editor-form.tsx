@@ -18,7 +18,11 @@ import {
   FALLBACK_CONFIG_FILE_NAME,
   GLOBAL_CONFIG_FILE_NAME,
   NORMAL_FALLBACK_CONFIG_FILE_NAME,
+  parentPathIsInsideLayer,
+  scopeForConfigPath,
+  validateConfigItem,
   validateRecordPath,
+  validateSiblingKeyInPayload,
   materializeRecordToConfigItem,
   type CachePayload,
   findInstalledApps,
@@ -35,7 +39,6 @@ import { useEffect, useMemo, useState } from "react";
 import { formStateToActionNode, isModeControlActionType, validateActionNode } from "./action-form.js";
 import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
-import { isNormalConfigPath } from "./scope-utils.js";
 import {
   emptyFormState,
   formatFullPath,
@@ -72,10 +75,6 @@ interface RecordEditorFormProps {
   preserveItem?: ConfigItem;
   targetRecord?: FlatIndexRecord;
   title: string;
-}
-
-function keyPathMatches(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((segment, index) => segment === right[index]);
 }
 
 function selectedMenuAppNameFor(state: ItemFormState, defaultMenuAppName: string | undefined, installedApps: Array<{ bundlePath: string; name: string }>): string | undefined {
@@ -127,38 +126,12 @@ function formStateToItem(
   };
 }
 
-function validateItem(item: ConfigItem): string | undefined {
-  if (item.key === undefined || item.key.length === 0) {
-    return "A key is required.";
-  }
-
-  if (item.type === "group") {
-    return undefined;
-  }
-
-  if (item.type === "layer") {
-    if (item.tapAction) {
-      const tapActionError = validateActionNode(item.tapAction);
-      if (tapActionError) {
-        return `Tap action: ${tapActionError}`;
-      }
-    }
-    return undefined;
-  }
-
-  if (item.type === "macro") {
-    return validateActionNode(item);
-  }
-
-  if (isModeControlActionType(item.type)) {
-    return undefined;
-  }
-
-  return validateActionNode(item);
-}
-
 function pathIsEditable(mode: EditorMode): boolean {
   return mode !== "override-in-effective-config";
+}
+
+function usesScopedKeyField(mode: EditorMode): boolean {
+  return mode === "append-child" || mode === "create-sibling";
 }
 
 function editableConfigPath(mode: EditorMode, createAtPath: PathCreationTarget | undefined, targetRecord: FlatIndexRecord | undefined): string {
@@ -209,15 +182,37 @@ function defaultFullPath(
     return "";
   }
 
-  if (mode === "append-child") {
-    return formatFullPath(targetRecord.effectiveKeyPath);
-  }
-
-  if (mode === "create-sibling") {
-    return formatFullPath(targetRecord.parentEffectiveKeyPath);
+  if (usesScopedKeyField(mode)) {
+    return "";
   }
 
   return formatFullPath(targetRecord.effectiveKeyPath);
+}
+
+function scopedParentKeyPath(mode: EditorMode, targetRecord: FlatIndexRecord | undefined): string[] {
+  if (!targetRecord) {
+    return [];
+  }
+
+  if (mode === "append-child") {
+    return targetRecord.effectiveKeyPath;
+  }
+
+  if (mode === "create-sibling") {
+    return targetRecord.parentEffectiveKeyPath;
+  }
+
+  return [];
+}
+
+function scopedKeyError(parsed: ReturnType<typeof parseTokenizedFullPath>): string | undefined {
+  if (parsed.error) {
+    return parsed.error === "A full path is required."
+      ? "A key is required."
+      : parsed.error.replace(/^Path segment/, "Key");
+  }
+
+  return parsed.keyPath.length === 1 ? undefined : "Key must contain one key.";
 }
 
 function saveResultConfigDisplayName(
@@ -424,7 +419,8 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     const nextType = initialType === "layer"
       && mode === "create-at-path"
       && createAtPath
-      && !isNormalConfigPath(createAtPath.configPath)
+      && scopeForConfigPath(createAtPath.configPath) !== "normalApp"
+      && scopeForConfigPath(createAtPath.configPath) !== "normalFallback"
       ? "shortcut"
       : initialType ?? "shortcut";
     const nextState = emptyFormState(nextType);
@@ -445,19 +441,46 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   const canDeleteTarget = mode === "edit-source" && Boolean(targetRecord && !targetRecord.inherited);
   const destinationConfigPath = editableConfigPath(mode, createAtPath, targetRecord);
   const destinationConfigDisplayName = editableConfigDisplayName(mode, createAtPath, targetRecord);
-  const destinationIsNormalConfig = isNormalConfigPath(destinationConfigPath);
+  const destinationScope = scopeForConfigPath(destinationConfigPath);
+  const destinationIsNormalConfig = destinationScope === "normalApp" || destinationScope === "normalFallback";
   const defaultMenuAppName = inferredMenuAppName(mode, createAtPath, targetRecord);
+  const usesScopedKey = usesScopedKeyField(mode);
+  const fixedParentKeyPath = scopedParentKeyPath(mode, targetRecord);
   const parsedFullPath = useMemo(
     () => pathIsEditable(mode)
       ? parseTokenizedFullPath(formState.fullPath)
       : { keyPath: targetRecord?.effectiveKeyPath ?? [] },
     [formState.fullPath, mode, targetRecord],
   );
-  const destinationKeyPath = parsedFullPath.keyPath;
+  const scopedKey = usesScopedKey && !scopedKeyError(parsedFullPath) ? parsedFullPath.keyPath[0] ?? "" : "";
+  const destinationKeyPath = usesScopedKey
+    ? scopedKey ? [...fixedParentKeyPath, scopedKey] : fixedParentKeyPath
+    : parsedFullPath.keyPath;
+  const destinationParentKeyPath = usesScopedKey ? fixedParentKeyPath : destinationKeyPath.slice(0, -1);
+  const destinationParentInsideLayer = parentPathIsInsideLayer(
+    validationPayload,
+    destinationConfigPath,
+    destinationParentKeyPath,
+  );
   const pathValidation = useMemo(
     () => {
       if (!pathIsEditable(mode) || parsedFullPath.error || !validationPayload) {
         return undefined;
+      }
+
+      if (usesScopedKey) {
+        const keyError = scopedKeyError(parsedFullPath);
+        if (keyError) {
+          return { error: keyError };
+        }
+
+        return {
+          error: validateSiblingKeyInPayload(validationPayload, {
+            configFilePath: destinationConfigPath,
+            key: parsedFullPath.keyPath[0] ?? "",
+            parentKeyPath: fixedParentKeyPath,
+          }),
+        };
       }
 
       return validateRecordPath(validationPayload, {
@@ -466,16 +489,19 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         destinationKeyPath,
       });
     },
-    [destinationConfigPath, destinationKeyPath, mode, parsedFullPath.error, targetRecord, validationPayload],
+    [destinationConfigPath, destinationKeyPath, fixedParentKeyPath, mode, parsedFullPath, targetRecord, usesScopedKey, validationPayload],
   );
   const pathError = pathIsEditable(mode)
-    ? parsedFullPath.error ?? pathValidation?.error
+    ? usesScopedKey
+      ? scopedKeyError(parsedFullPath) ?? pathValidation?.error
+      : parsedFullPath.error ?? pathValidation?.error
     : undefined;
   const currentPathText = targetRecord ? formatFullPath(targetRecord.effectiveKeyPath) : defaultFullPath(mode, createAtPath, targetRecord);
   const fixedPathInfo = !pathIsEditable(mode) && targetRecord
     ? `Overrides stay at ${formatFullPath(targetRecord.effectiveKeyPath)}.`
     : undefined;
   const destinationKey = destinationKeyPath.at(-1) ?? "";
+  const canChooseLayerType = (destinationIsNormalConfig && !destinationParentInsideLayer) || formState.type === "layer";
   const macroSummary = useMemo(
     () => macroStepSummary({
       key: undefined,
@@ -523,6 +549,14 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
   }, [configDirectory]);
 
   useEffect(() => {
+    if (formState.type !== "layer" || canChooseLayerType || mode === "edit-source") {
+      return;
+    }
+
+    setFormState((current) => current.type === "layer" ? { ...current, type: "shortcut" } : current);
+  }, [canChooseLayerType, formState.type, mode]);
+
+  useEffect(() => {
     let isMounted = true;
 
     if (!targetRecord) {
@@ -567,16 +601,15 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     }
 
     if (!destinationKey) {
-      await showToast({ style: Toast.Style.Failure, title: "A full path is required." });
-      return;
-    }
-    if (formState.type === "layer" && !destinationIsNormalConfig) {
-      await showToast({ style: Toast.Style.Failure, title: "Layers are only supported in normal-mode configs." });
+      await showToast({ style: Toast.Style.Failure, title: usesScopedKey ? "A key is required." : "A full path is required." });
       return;
     }
     const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
     const nextItem = formStateToItem(formState, destinationKey, preservedItem, nextMenuAppName);
-    const nextValueError = validateItem(nextItem);
+    const nextValueError = validateConfigItem(nextItem, {
+      parentInsideLayer: destinationParentInsideLayer,
+      scope: destinationScope,
+    });
     if (nextValueError) {
       await showToast({ style: Toast.Style.Failure, title: nextValueError });
       return;
@@ -593,20 +626,12 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         if (!targetRecord) {
           throw new Error("Missing target record for append-child.");
         }
-        if (keyPathMatches(destinationKeyPath.slice(0, -1), targetRecord.effectiveKeyPath)) {
-          await appendChildToGroup(targetRecord, nextItem);
-        } else {
-          await createItemAtPath(destinationConfigPath, destinationKeyPath.slice(0, -1), nextItem);
-        }
+        await appendChildToGroup(targetRecord, nextItem);
       } else if (mode === "create-sibling") {
         if (!targetRecord) {
           throw new Error("Missing target record for create-sibling.");
         }
-        if (keyPathMatches(destinationKeyPath.slice(0, -1), targetRecord.parentEffectiveKeyPath)) {
-          await insertSiblingAfter(targetRecord, nextItem);
-        } else {
-          await createItemAtPath(destinationConfigPath, destinationKeyPath.slice(0, -1), nextItem);
-        }
+        await insertSiblingAfter(targetRecord, nextItem);
       } else {
         if (!targetRecord) {
           throw new Error("Missing target record for edit mode.");
@@ -724,17 +749,26 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
 
   const showStickyModeField = formState.type !== "layer" && !isModeControlActionType(formState.type);
   const showNormalModeAfterField = formState.type !== "group" && formState.type !== "layer" && !isModeControlActionType(formState.type);
+  const autoCreateGroupKeys = !usesScopedKey && pathValidation && "autoCreateGroupKeys" in pathValidation
+    ? pathValidation.autoCreateGroupKeys
+    : [];
+  const overrideRecord = !usesScopedKey && pathValidation && "overrideRecord" in pathValidation
+    ? pathValidation.overrideRecord
+    : undefined;
   const fullPathInfo = pathIsEditable(mode)
     ? [
-        "Use tokenized syntax like a -> left -> space.",
-        pathValidation?.autoCreateGroupKeys.length
-          ? `Missing parent groups will be created automatically: ${formatFullPath(pathValidation.autoCreateGroupKeys)}.`
+        usesScopedKey
+          ? `Parent: ${fixedParentKeyPath.length > 0 ? formatFullPath(fixedParentKeyPath) : "Root"}. Enter one key for the new item.`
+          : "Use tokenized syntax like a -> left -> space.",
+        autoCreateGroupKeys.length
+          ? `Missing parent groups will be created automatically: ${formatFullPath(autoCreateGroupKeys)}.`
           : undefined,
-        pathValidation?.overrideRecord
-          ? `This will create a local override for inherited ${pathValidation.overrideRecord.displayLabel}.`
+        overrideRecord
+          ? `This will create a local override for inherited ${overrideRecord.displayLabel}.`
           : undefined,
       ].filter(Boolean).join("\n")
     : fixedPathInfo;
+  const pathFieldTitle = usesScopedKey ? "Key" : "Full Path";
 
   useEffect(() => {
     if (formState.type !== "menu" || !defaultMenuAppName) {
@@ -838,7 +872,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             }
             setFormState((current) => ({ ...current, fullPath: value }));
           }}
-          title="Full Path"
+          title={pathFieldTitle}
           value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
         />
       ) : null}
@@ -870,7 +904,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
         <Form.Dropdown.Item title="Group" value="group" />
         <Form.Dropdown.Item title="IntelliJ" value="intellij" />
         <Form.Dropdown.Item title="Keystroke" value="keystroke" />
-        {destinationIsNormalConfig || formState.type === "layer" ? (
+        {canChooseLayerType ? (
           <Form.Dropdown.Item title="Layer" value="layer" />
         ) : null}
         <Form.Dropdown.Item title="Macro" value="macro" />
@@ -936,7 +970,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             }
             setFormState((current) => ({ ...current, fullPath: value }));
           }}
-          title="Full Path"
+          title={pathFieldTitle}
           value={pathIsEditable(mode) ? formState.fullPath : currentPathText}
         />
       ) : null}

@@ -242,6 +242,144 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errors.map(\.path).contains([1]))
   }
 
+  func testActionAndLayerDuplicateKeysAreRejectedOnBothNodes() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "f", type: .shortcut, value: "Cf")),
+        .layer(Layer(key: "f", label: "Find", iconPath: nil, tapAction: nil, actions: [])),
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group, allowsLayers: true)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [1] }))
+  }
+
+  func testLayerScopeValidationDependsOnConfigKind() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(Layer(key: "f", label: "Find", iconPath: nil, tapAction: nil, actions: []))
+      ]
+    )
+
+    let regularErrors = ConfigValidator.validate(group: group, allowsLayers: false)
+    let normalErrors = ConfigValidator.validate(group: group, allowsLayers: true)
+
+    XCTAssertTrue(regularErrors.contains(where: { $0.type == .invalidLayerScope && $0.path == [0] }))
+    XCTAssertFalse(normalErrors.contains(where: { $0.type == .invalidLayerScope }))
+  }
+
+  func testDuplicateKeysInsideLayerAreRejectedAcrossItemTypes() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: nil,
+            actions: [
+              .action(Action(key: "b", type: .shortcut, value: "Cb")),
+              .group(Group(key: "b", label: "Browse", stickyMode: nil, actions: [])),
+              .layer(Layer(key: "b", label: "Nested", iconPath: nil, tapAction: nil, actions: [])),
+            ]
+          )
+        )
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group, allowsLayers: true)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [0, 0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [0, 1] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .duplicateKey && $0.path == [0, 2] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .nestedLayer && $0.path == [0, 2] }))
+  }
+
+  func testInvalidActionValuesInsideLayerAreRejected() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: nil,
+            actions: [
+              .action(Action(key: "s", type: .shortcut, value: "")),
+              .action(Action(key: "c", type: .command, value: "")),
+              .action(Action(key: "m", type: .menu, value: "")),
+              .action(Action(key: "i", type: .intellij, value: "")),
+            ]
+          )
+        )
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group, allowsLayers: true)
+
+    XCTAssertEqual(errors.filter { $0.type == .invalidActionValue }.count, 4)
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0, 0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0, 1] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0, 2] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0, 3] }))
+  }
+
+  func testLayerTapActionAndMacroStepValuesAreValidatedRecursively() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: Action(
+              key: nil,
+              type: .macro,
+              value: "",
+              macroSteps: [
+                MacroStep(action: Action(key: nil, type: .command, value: ""), delay: 0, enabled: true)
+              ]
+            ),
+            actions: [
+              .action(
+                Action(
+                  key: "m",
+                  type: .macro,
+                  value: "",
+                  macroSteps: [
+                    MacroStep(action: Action(key: nil, type: .shortcut, value: "Cm"), delay: -1, enabled: true)
+                  ]
+                )
+              )
+            ]
+          )
+        )
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group, allowsLayers: true)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0] }))
+    XCTAssertTrue(errors.contains(where: { $0.type == .invalidActionValue && $0.path == [0, 0] }))
+  }
+
   // Test that the findItem function correctly locates items
   func testFindItem() {
     let group = Group(

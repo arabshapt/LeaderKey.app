@@ -12,7 +12,7 @@ extension UserConfig {
     {
       self.root = loadedRoot
       // Update validationErrors state specifically for the default root
-      self.validationErrors = ConfigValidator.validate(group: self.root)
+      self.validationErrors = ConfigValidator.validate(group: self.root, allowsLayers: false)
       if !validationErrors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
         showValidationAlert()
       }
@@ -217,7 +217,10 @@ extension UserConfig {
       debugLog("[UserConfig] Successfully decoded JSON for: \(configName)")
 
       // Perform validation regardless, but only show alerts/update main state for default config
-      let errors = ConfigValidator.validate(group: decodedRoot)
+      let errors = ConfigValidator.validate(
+        group: decodedRoot,
+        allowsLayers: configFileKind(forPath: filePath).allowsLayers
+      )
       if !errors.isEmpty && !suppressAlerts && !suppressValidationAlerts {
         if isDefaultConfig {
           // Store errors only if it's the default config being decoded in a context

@@ -1,9 +1,13 @@
 import { Action, ActionPanel, Icon, List } from "@raycast/api";
-import { type CachePayload, type ConfigSummary } from "@leaderkey/config-core";
+import {
+  isNormalScope,
+  parentPathIsInsideLayer,
+  type CachePayload,
+  type ConfigSummary,
+} from "@leaderkey/config-core";
 
 import { RecordEditorForm } from "./editor-form.js";
 import { keyPathText } from "./record-formatting.js";
-import { isNormalScope } from "./scope-utils.js";
 
 type CreateItemType = "group" | "layer" | "shortcut";
 
@@ -30,23 +34,34 @@ function iconForItemType(itemType: CreateItemType): Icon {
   return Icon.Plus;
 }
 
-function canCreateItemInConfig(itemType: CreateItemType, config: ConfigSummary): boolean {
-  return itemType !== "layer" || isNormalScope(config.scope);
+function canCreateItemInConfig(
+  itemType: CreateItemType,
+  config: ConfigSummary,
+  payload: CachePayload,
+  parentKeyPath: string[],
+): boolean {
+  return itemType !== "layer"
+    || (isNormalScope(config.scope) && !parentPathIsInsideLayer(payload, config.filePath, parentKeyPath));
 }
 
-function configSections(configs: ConfigSummary[], itemType: CreateItemType): Array<{ title: string; values: ConfigSummary[] }> {
+function configSections(
+  configs: ConfigSummary[],
+  itemType: CreateItemType,
+  payload: CachePayload,
+  parentKeyPath: string[],
+): Array<{ title: string; values: ConfigSummary[] }> {
   return [
     {
       title: "Global And Fallback",
       values: configs.filter((config) =>
-        canCreateItemInConfig(itemType, config)
+        canCreateItemInConfig(itemType, config, payload, parentKeyPath)
         && (config.scope === "global" || config.scope === "fallback" || config.scope === "normalFallback")
       ),
     },
     {
       title: "App Configs",
       values: configs.filter((config) =>
-        canCreateItemInConfig(itemType, config)
+        canCreateItemInConfig(itemType, config, payload, parentKeyPath)
         && (config.scope === "app" || config.scope === "normalApp")
       ),
     },
@@ -77,7 +92,7 @@ export function TypedPathCreatePicker(props: TypedPathCreatePickerProps) {
       navigationTitle={itemType === "group" ? "Create Group by Typed Path" : itemType === "layer" ? "Create Layer by Typed Path" : "Create Action by Typed Path"}
       searchBarPlaceholder={`Choose a config for ${pathTitle}`}
     >
-      {configSections(initialPayload.configs, itemType).map((section) => (
+      {configSections(initialPayload.configs, itemType, initialPayload, parentKeyPath).map((section) => (
         <List.Section key={section.title} title={section.title}>
           {section.values.map((config) => (
             <List.Item

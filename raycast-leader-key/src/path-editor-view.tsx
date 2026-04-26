@@ -19,6 +19,7 @@ import {
   deleteRecord,
   locateNodeInFile,
   openInEditor,
+  parentPathIsInsideLayer,
   triggerLeaderKeyConfigReload,
   type CachePayload,
   type ConfigSummary,
@@ -257,6 +258,8 @@ export function PathEditorView(props: PathEditorViewProps) {
   const extensionName = environment.extensionName;
   const { push } = useNavigation();
   const canCreateLayerInConfig = isNormalScope(configSummary.scope);
+  const canCreateLayerAtParent = (parentKeyPath: string[]) =>
+    canCreateLayerInConfig && !parentPathIsInsideLayer(payload, configSummary.filePath, parentKeyPath);
 
   useEffect(() => {
     setPayload(initialPayload);
@@ -762,6 +765,7 @@ export function PathEditorView(props: PathEditorViewProps) {
 
     if (analysis.state === "missing" && analysis.finalKey) {
       const autoGroups = analysis.autoCreateGroupKeys.length > 0 ? keyPathText(analysis.autoCreateGroupKeys) : "None";
+      const canCreateLayerAtMissingPath = canCreateLayerAtParent(analysis.createParentKeyPath);
       const sharedMetadata = [
         { title: "Parent Path", text: analysis.createParentKeyPath.length > 0 ? keyPathText(analysis.createParentKeyPath) : "Root" },
         { title: "Auto Groups", text: autoGroups },
@@ -818,7 +822,7 @@ export function PathEditorView(props: PathEditorViewProps) {
                 }
                 title="Create Group at Path"
               />
-              {canCreateLayerInConfig ? (
+              {canCreateLayerAtMissingPath ? (
                 <Action.Push
                   icon={Icon.Layers}
                   shortcut={{ modifiers: ["cmd", "opt"], key: "n" }}
@@ -934,7 +938,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             value: typedPathTitle(analysis),
           },
         },
-        {
+        ...(canCreateLayerAtMissingPath ? [{
           actions: (
             <ActionPanel>
               <Action.Push
@@ -984,7 +988,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             tooltip: typedPathTitle(analysis),
             value: typedPathTitle(analysis),
           },
-        },
+        }] : []),
       ];
     }
 
@@ -1002,6 +1006,7 @@ export function PathEditorView(props: PathEditorViewProps) {
       return [];
     }
 
+    const canCreateLiteralLayer = canCreateLayerAtParent(parentKeyPath);
     const metadata = [
       ...baseMetadata(analysis),
       { title: "Literal Path", text: literalPathTitle },
@@ -1110,7 +1115,7 @@ export function PathEditorView(props: PathEditorViewProps) {
           value: literalPathTitle,
         },
       },
-      {
+      ...(canCreateLiteralLayer ? [{
         actions: (
           <ActionPanel>
             <Action.Push
@@ -1159,12 +1164,11 @@ export function PathEditorView(props: PathEditorViewProps) {
           tooltip: literalPathTitle,
           value: literalPathTitle,
         },
-      },
+      }] : []),
     ];
   }
 
-  const topRows = [...literalTypedPathRows(), ...outcomeRows()]
-    .filter((row) => canCreateLayerInConfig || !row.id.includes("create-layer"));
+  const topRows = [...literalTypedPathRows(), ...outcomeRows()];
   const childRows = analysis.visibleChildren;
   const combinedIds = [...topRows.map((row) => row.id), ...childRows.map((record) => record.id)];
   const activeSelectedId = selectedId && combinedIds.includes(selectedId)

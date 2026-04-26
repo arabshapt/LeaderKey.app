@@ -790,9 +790,10 @@ final class ConfigEditorSession: ObservableObject {
   private func scheduleValidation() {
     pendingValidationWorkItem?.cancel()
     let snapshot = root
+    let allowsLayers = userConfig?.configFileKind(forDisplayKey: selectedConfigKey).allowsLayers ?? false
 
     let workItem = DispatchWorkItem { [weak self] in
-      let errors = ConfigValidator.validate(group: snapshot)
+      let errors = ConfigValidator.validate(group: snapshot, allowsLayers: allowsLayers)
       DispatchQueue.main.async {
         guard let self else { return }
         self.validationErrors = errors

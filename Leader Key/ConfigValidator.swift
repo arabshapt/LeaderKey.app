@@ -28,6 +28,8 @@ enum ValidationErrorType {
   case emptyKey
   case nonSingleCharacterKey
   case duplicateKey
+  case invalidActionValue
+  case invalidLayerScope
   case invalidLayerTrigger
   case invalidLayerTapAction
   case nestedLayer
@@ -67,12 +69,12 @@ class ConfigValidator {
     "command",
     "option",
     "control",
-    "shift"
+    "shift",
   ]
 
-  static func validate(group: Group) -> [ValidationError] {
+  static func validate(group: Group, allowsLayers: Bool = true) -> [ValidationError] {
     var errors = [ValidationError]()
-    validateGroup(group, path: [], errors: &errors, insideLayer: false)
+    validateGroup(group, path: [], errors: &errors, insideLayer: false, allowsLayers: allowsLayers)
     return errors
   }
 
@@ -81,6 +83,7 @@ class ConfigValidator {
     path: [Int],
     errors: inout [ValidationError],
     insideLayer: Bool,
+    allowsLayers: Bool,
     validateSelfKey: Bool = true
   ) {
     // Check if the group key is valid (if not root level)
@@ -99,12 +102,25 @@ class ConfigValidator {
       case .action(let action):
         keyToValidate = action.key
         validateKey(keyToValidate, at: currentPath, errors: &errors)
+        validateActionValue(action, at: currentPath, errors: &errors)
       case .group(let subgroup):
         keyToValidate = subgroup.key
-        validateGroup(subgroup, path: currentPath, errors: &errors, insideLayer: insideLayer)
+        validateGroup(
+          subgroup,
+          path: currentPath,
+          errors: &errors,
+          insideLayer: insideLayer,
+          allowsLayers: allowsLayers
+        )
       case .layer(let layer):
         keyToValidate = layer.key
-        validateLayer(layer, path: currentPath, errors: &errors, insideLayer: insideLayer)
+        validateLayer(
+          layer,
+          path: currentPath,
+          errors: &errors,
+          insideLayer: insideLayer,
+          allowsLayers: allowsLayers
+        )
       }
 
       // Check for duplicates using keyToValidate
@@ -136,9 +152,20 @@ class ConfigValidator {
     _ layer: Layer,
     path: [Int],
     errors: inout [ValidationError],
-    insideLayer: Bool
+    insideLayer: Bool,
+    allowsLayers: Bool
   ) {
     validateKey(layer.key, at: path, errors: &errors)
+
+    if !allowsLayers {
+      errors.append(
+        ValidationError(
+          path: path,
+          message: "Layers are only supported in normal-mode configs",
+          type: .invalidLayerScope,
+          suggestion: "Move this layer to a normal fallback or normal app config"
+        ))
+    }
 
     if insideLayer {
       errors.append(
@@ -160,16 +187,18 @@ class ConfigValidator {
         ))
     }
 
-    if let tapAction = layer.tapAction,
-      tapAction.type == .group || tapAction.type == .layer
-    {
-      errors.append(
-        ValidationError(
-          path: path,
-          message: "Layer tapAction must be a terminal action",
-          type: .invalidLayerTapAction,
-          suggestion: "Use a shortcut, command, macro, or normal-mode control action"
-        ))
+    if let tapAction = layer.tapAction {
+      if tapAction.type == .group || tapAction.type == .layer {
+        errors.append(
+          ValidationError(
+            path: path,
+            message: "Layer tapAction must be a terminal action",
+            type: .invalidLayerTapAction,
+            suggestion: "Use a shortcut, command, macro, or normal-mode control action"
+          ))
+      } else {
+        validateActionValue(tapAction, at: path, errors: &errors, label: "Layer tapAction")
+      }
     }
 
     let layerGroup = Group(
@@ -179,7 +208,135 @@ class ConfigValidator {
       stickyMode: nil,
       actions: layer.actions
     )
-    validateGroup(layerGroup, path: path, errors: &errors, insideLayer: true, validateSelfKey: false)
+    validateGroup(
+      layerGroup,
+      path: path,
+      errors: &errors,
+      insideLayer: true,
+      allowsLayers: allowsLayers,
+      validateSelfKey: false
+    )
+  }
+
+  private static func validateActionValue(
+    _ action: Action,
+    at path: [Int],
+    errors: inout [ValidationError],
+    label: String = "Action"
+  ) {
+    if action.type == .group || action.type == .layer {
+      appendInvalidActionValue(
+        at: path,
+        errors: &errors,
+        message: "\(label) must be a terminal action",
+        suggestion: "Use a shortcut, command, macro, or mode-control action"
+      )
+      return
+    }
+
+    if action.type.isModeControlAction {
+      return
+    }
+
+    switch action.type {
+    case .macro:
+      validateMacroSteps(action.macroSteps, at: path, errors: &errors, label: label)
+    case .menu:
+      let parts = action.value.components(separatedBy: " > ")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      if parts.first?.isEmpty ?? true {
+        appendInvalidActionValue(
+          at: path,
+          errors: &errors,
+          message: "\(label) menu action needs a target app",
+          suggestion: "Choose an app for the menu action"
+        )
+      } else if parts.dropFirst()
+        .joined(separator: " > ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .isEmpty
+      {
+        appendInvalidActionValue(
+          at: path,
+          errors: &errors,
+          message: "\(label) menu action needs a menu path",
+          suggestion: "Choose a menu item path"
+        )
+      }
+    case .intellij:
+      let pieces = action.value.components(separatedBy: "|")
+      let actionIds = (pieces.first ?? "")
+        .components(separatedBy: ",")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+      if actionIds.isEmpty {
+        appendInvalidActionValue(
+          at: path,
+          errors: &errors,
+          message: "\(label) needs at least one IntelliJ action ID",
+          suggestion: "Enter an IntelliJ action ID"
+        )
+      }
+      if pieces.count > 1 {
+        let delay = pieces[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !delay.isEmpty && Int(delay) == nil {
+          appendInvalidActionValue(
+            at: path,
+            errors: &errors,
+            message: "\(label) IntelliJ delay must be a whole number of milliseconds",
+            suggestion: "Use a whole-number delay or remove the delay"
+          )
+        }
+      }
+    default:
+      if action.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        appendInvalidActionValue(
+          at: path,
+          errors: &errors,
+          message: "\(label) value is required",
+          suggestion: "Enter a value for this action"
+        )
+      }
+    }
+  }
+
+  private static func validateMacroSteps(
+    _ macroSteps: [MacroStep]?,
+    at path: [Int],
+    errors: inout [ValidationError],
+    label: String
+  ) {
+    for (index, step) in (macroSteps ?? []).enumerated() {
+      if !step.delay.isFinite || step.delay < 0 {
+        appendInvalidActionValue(
+          at: path,
+          errors: &errors,
+          message: "\(label) macro step \(index + 1) delay must be non-negative",
+          suggestion: "Use a non-negative delay for each macro step"
+        )
+      }
+      validateActionValue(
+        step.action,
+        at: path,
+        errors: &errors,
+        label: "\(label) macro step \(index + 1)"
+      )
+    }
+  }
+
+  private static func appendInvalidActionValue(
+    at path: [Int],
+    errors: inout [ValidationError],
+    message: String,
+    suggestion: String
+  ) {
+    errors.append(
+      ValidationError(
+        path: path,
+        message: message,
+        type: .invalidActionValue,
+        suggestion: suggestion
+      ))
   }
 
   private static func validateKey(_ key: String?, at path: [Int], errors: inout [ValidationError]) {

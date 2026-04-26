@@ -5,7 +5,10 @@ extension UserConfig {
 
   func validateWithoutAlerts() {
     // Validate the currently editing group for real-time feedback
-    validationErrors = ConfigValidator.validate(group: currentlyEditingGroup)
+    validationErrors = ConfigValidator.validate(
+      group: currentlyEditingGroup,
+      allowsLayers: configFileKind(forDisplayKey: selectedConfigKeyForEditing).allowsLayers
+    )
   }
 
   func finishEditingKey() {
