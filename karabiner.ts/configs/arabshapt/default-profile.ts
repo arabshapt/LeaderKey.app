@@ -3,7 +3,7 @@ import type { ComplexModifications } from '../../src/karabiner/karabiner-config.
 import rawDefaultComplexModifications from './default-complex-modifications.json'
 
 export const defaultProfileName = "Default"
-export const defaultComplexModificationsSha256 = "90bb48ea0526cc6172a8fc1f3f1b56b7b521cb2a465f0d6511ef9fa3eb0be542"
+export const defaultComplexModificationsSha256 = "52b50820e89be06cf55a0808b01611d33aa00643fb6a097239a90a702e2c2d4e"
 
 export type KarabinerConfigLike = {
   profiles: Array<{

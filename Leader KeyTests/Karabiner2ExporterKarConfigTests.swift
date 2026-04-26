@@ -300,6 +300,74 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertFalse(hasSendUserCommand(manipulator: toggleMapping, prefix: "deactivate"))
   }
 
+  func testNormalModeControlActionsExportNormalActiveVariable() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .action(
+        Action(
+          key: "n",
+          type: .normalModeEnable,
+          label: "Normal Enable",
+          value: "",
+          iconPath: nil,
+          activates: nil,
+          stickyMode: nil,
+          macroSteps: nil
+        )
+      ),
+      .action(
+        Action(
+          key: "i",
+          type: .normalModeInput,
+          label: "Normal Input",
+          value: "",
+          iconPath: nil,
+          activates: nil,
+          stickyMode: nil,
+          macroSteps: nil
+        )
+      ),
+      .action(
+        Action(
+          key: "d",
+          type: .normalModeDisable,
+          label: "Normal Disable",
+          value: "",
+          iconPath: nil,
+          activates: nil,
+          stickyMode: nil,
+          macroSteps: nil
+        )
+      ),
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let globalRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/GlobalMode" })
+    )
+    let globalManipulators = flattenManipulators(from: [globalRule])
+
+    let enableMapping = try XCTUnwrap(globalManipulators.first(where: { fromKeyCode(in: $0) == "n" }))
+    XCTAssertTrue(hasSetVariable(manipulator: enableMapping, name: "leaderkey_normal_enabled", value: 1))
+    XCTAssertTrue(hasSetVariable(manipulator: enableMapping, name: "leaderkey_normal_active", value: 1))
+    XCTAssertTrue(hasSetVariable(manipulator: enableMapping, name: "leaderkey_normal_input", value: 0))
+    XCTAssertTrue(hasSendUserCommand(manipulator: enableMapping, prefix: "normal_on"))
+    XCTAssertFalse(hasSendUserCommand(manipulator: enableMapping, prefix: "stateid "))
+
+    let inputMapping = try XCTUnwrap(globalManipulators.first(where: { fromKeyCode(in: $0) == "i" }))
+    XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_active", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_input", value: 1))
+    XCTAssertTrue(hasSendUserCommand(manipulator: inputMapping, prefix: "normal_input"))
+    XCTAssertFalse(hasSendUserCommand(manipulator: inputMapping, prefix: "stateid "))
+
+    let disableMapping = try XCTUnwrap(globalManipulators.first(where: { fromKeyCode(in: $0) == "d" }))
+    XCTAssertTrue(hasSetVariable(manipulator: disableMapping, name: "leaderkey_normal_enabled", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: disableMapping, name: "leaderkey_normal_active", value: 0))
+    XCTAssertTrue(hasSetVariable(manipulator: disableMapping, name: "leaderkey_normal_input", value: 0))
+    XCTAssertTrue(hasSendUserCommand(manipulator: disableMapping, prefix: "normal_off"))
+    XCTAssertFalse(hasSendUserCommand(manipulator: disableMapping, prefix: "stateid "))
+  }
+
   func testRuntimeStickyModeKeepsNonStickyTerminalActionsActive() throws {
     let config = UserConfig()
     config.root.actions = [
@@ -556,6 +624,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       iconPath: nil,
       stickyMode: nil,
       actions: [
+        .action(makeCommandAction(key: "n", label: "After Normal", value: "echo normal", normalModeAfter: .normal)),
         .action(makeCommandAction(key: "i", label: "After Input", value: "echo input", normalModeAfter: .input)),
         .action(makeCommandAction(key: "d", label: "After Disabled", value: "echo disabled", normalModeAfter: .disabled)),
         .action(makeCommandAction(key: "escape", label: "Reserved Escape", value: "echo should-not-export")),
@@ -569,13 +638,21 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       let inputMapping = try XCTUnwrap(allManipulators.first(where: {
         fromKeyCode(in: $0) == "i" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
       }))
+      XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_active", value: 0))
       XCTAssertTrue(hasSetVariable(manipulator: inputMapping, name: "leaderkey_normal_input", value: 1))
       XCTAssertTrue(hasSendUserCommand(manipulator: inputMapping, prefix: "normal_input"))
+
+      let normalMapping = try XCTUnwrap(allManipulators.first(where: {
+        fromKeyCode(in: $0) == "n" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      XCTAssertTrue(hasSetVariable(manipulator: normalMapping, name: "leaderkey_normal_active", value: 1))
+      XCTAssertTrue(hasSetVariable(manipulator: normalMapping, name: "leaderkey_normal_input", value: 0))
 
       let disabledMapping = try XCTUnwrap(allManipulators.first(where: {
         fromKeyCode(in: $0) == "d" && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
       }))
       XCTAssertTrue(hasSetVariable(manipulator: disabledMapping, name: "leaderkey_normal_enabled", value: 0))
+      XCTAssertTrue(hasSetVariable(manipulator: disabledMapping, name: "leaderkey_normal_active", value: 0))
       XCTAssertTrue(hasSendUserCommand(manipulator: disabledMapping, prefix: "normal_off"))
 
       let escapeStateIdMappings = allManipulators.filter {
@@ -588,6 +665,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
           && hasVariableCondition($0, name: "leaderkey_normal_state", value: 0, type: "variable_unless")
       }))
       XCTAssertTrue(hasSetVariable(manipulator: escapeResetMapping, name: "leaderkey_normal_state", value: 0))
+      XCTAssertFalse(hasSetVariable(manipulator: escapeResetMapping, name: "leaderkey_normal_active", value: 0))
       XCTAssertFalse(hasSetVariable(manipulator: escapeResetMapping, name: "leaderkey_normal_enabled", value: 0))
 
       let escapeDisableMapping = try XCTUnwrap(allManipulators.first(where: {
@@ -596,6 +674,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
           && hasSendUserCommand(manipulator: $0, prefix: "normal_off")
       }))
       XCTAssertTrue(hasSetVariable(manipulator: escapeDisableMapping, name: "leaderkey_normal_enabled", value: 0))
+      XCTAssertTrue(hasSetVariable(manipulator: escapeDisableMapping, name: "leaderkey_normal_active", value: 0))
       XCTAssertTrue(hasVariableCondition(escapeDisableMapping, name: "leaderkey_normal_input", value: 1, type: "variable_unless"))
     }
   }
@@ -685,6 +764,11 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       )
       XCTAssertTrue(
         toIfAloneEvents(in: trigger).contains(where: {
+          eventHasSetVariable($0, name: "leaderkey_normal_active", value: 1)
+        })
+      )
+      XCTAssertTrue(
+        toIfAloneEvents(in: trigger).contains(where: {
           eventHasKeyCode($0, keyCode: "f")
         })
       )
@@ -703,7 +787,12 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       }))
       let childActionEvents = toEvents(in: childAction)
       XCTAssertFalse(hasSendUserCommand(manipulator: childAction, prefix: "stateid "))
+      XCTAssertTrue(hasSetVariable(manipulator: childAction, name: "leaderkey_normal_active", value: 1))
       XCTAssertTrue(hasSetVariable(manipulator: childAction, name: "leaderkey_normal_layer_sequence_state", value: 0))
+      XCTAssertLessThan(
+        try XCTUnwrap(indexOfSetVariableEvent(childActionEvents, name: "leaderkey_normal_active", value: 1)),
+        try XCTUnwrap(indexOfKeyCodeEvent(childActionEvents, keyCode: "b"))
+      )
       XCTAssertLessThan(
         try XCTUnwrap(indexOfSetVariableEvent(childActionEvents, name: "leaderkey_normal_layer_sequence_state", value: 0)),
         try XCTUnwrap(indexOfKeyCodeEvent(childActionEvents, keyCode: "b"))

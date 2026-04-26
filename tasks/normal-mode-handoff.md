@@ -25,8 +25,11 @@ Normal mode is a persistent shortcut mode:
   - `normal-app.<bundleId>.json`
 - Normal mode has isolated Karabiner variables:
   - `leaderkey_normal_enabled`
+  - `leaderkey_normal_active`
   - `leaderkey_normal_input`
   - `leaderkey_normal_state`
+- `leaderkey_normal_active == 1` is the external integration flag for "normal mode capture is active
+  right now". It is `0` in input mode and when the feature is disabled.
 - Normal rules are active only when:
   - `leaderkey_normal_enabled == 1`
   - `leaderkey_normal_input != 1`
@@ -191,8 +194,12 @@ Main changes:
 - Added `StateMapping.Scope.normalShared`, `.normalOverride`, and `.normalSuppress`.
 - Added normal variable names:
   - `leaderkey_normal_enabled`
+  - `leaderkey_normal_active`
   - `leaderkey_normal_input`
   - `leaderkey_normal_state`
+  - External Goku/manual Karabiner integrations should key off `leaderkey_normal_active`, not
+    `leaderkey_normal_state` or `leaderkey_normal_input`, when they need to know whether Leader Key
+    normal mode is currently active.
 - Export entrypoints now accept `normalAppConfigs`.
 - App aliases are built from both regular app configs and normal app configs, without duplicate aliases.
 - State ID namespace includes normal scopes to avoid collisions.
@@ -565,6 +572,6 @@ rg "NormalAppMode|NormalFallbackMode|NormalControls|NormalCatchAll|leaderkey_nor
 ```text
 We are continuing the Leader Key normal-mode implementation.
 Read tasks/normal-mode-handoff.md first.
-The feature adds Vim-like persistent normal mode using normal-fallback-config.json and normal-app.<bundleId>.json, Karabiner variables leaderkey_normal_enabled/input/state, state-mapped terminal actions, Karabiner-only group transitions, Escape/Caps Lock cascade, and overlay suppression for normal scopes.
+The feature adds Vim-like persistent normal mode using normal-fallback-config.json and normal-app.<bundleId>.json, Karabiner variables leaderkey_normal_enabled/active/input/state, state-mapped terminal actions, Karabiner-only group transitions, Escape/Caps Lock cascade, and overlay suppression for normal scopes.
 Please inspect the current worktree, do not revert pre-existing dirty kar or karabiner.ts/configs/leaderkey/leaderkey-generated.json changes, run tests with CODE_SIGNING_ALLOWED=NO, then continue with the next requested task.
 ```

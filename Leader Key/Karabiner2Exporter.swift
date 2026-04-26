@@ -216,6 +216,7 @@ final class Karabiner2Exporter {
   private static let inactiveStateId: Int32 = 0
   private static let normalModeBaseStateId: Int32 = 0
   private static let normalModeEnabledVariable = "leaderkey_normal_enabled"
+  private static let normalModeActiveVariable = "leaderkey_normal_active"
   private static let normalModeInputVariable = "leaderkey_normal_input"
   private static let normalModeStateVariable = "leaderkey_normal_state"
   private static let normalModeLayerStateVariable = "leaderkey_normal_layer_state"
@@ -2303,6 +2304,7 @@ final class Karabiner2Exporter {
     case .normalModeEnable:
       return [
         karSetVariable(name: normalModeEnabledVariable, value: 1),
+        karSetVariable(name: normalModeActiveVariable, value: 1),
         karSetVariable(name: normalModeInputVariable, value: 0),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
         karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
@@ -2311,6 +2313,7 @@ final class Karabiner2Exporter {
       ]
     case .normalModeInput:
       return [
+        karSetVariable(name: normalModeActiveVariable, value: 0),
         karSetVariable(name: normalModeInputVariable, value: 1),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
         karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
@@ -2320,6 +2323,7 @@ final class Karabiner2Exporter {
     case .normalModeDisable:
       return [
         karSetVariable(name: normalModeEnabledVariable, value: 0),
+        karSetVariable(name: normalModeActiveVariable, value: 0),
         karSetVariable(name: normalModeInputVariable, value: 0),
         karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
         karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
@@ -2349,12 +2353,15 @@ final class Karabiner2Exporter {
 
     switch action.normalModeAfter ?? .normal {
     case .normal:
+      stateEvents.append(karSetVariable(name: normalModeActiveVariable, value: 1))
       stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 0))
     case .input:
+      stateEvents.append(karSetVariable(name: normalModeActiveVariable, value: 0))
       stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 1))
       stateEvents.append(karSendUserCommand("normal_input"))
     case .disabled:
       stateEvents.append(karSetVariable(name: normalModeEnabledVariable, value: 0))
+      stateEvents.append(karSetVariable(name: normalModeActiveVariable, value: 0))
       stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 0))
       stateEvents.append(karSendUserCommand("normal_off"))
     }
@@ -2595,6 +2602,7 @@ final class Karabiner2Exporter {
           "from": keyCode,
           "to": [
             karSetVariable(name: normalModeEnabledVariable, value: 0),
+            karSetVariable(name: normalModeActiveVariable, value: 0),
             karSetVariable(name: normalModeInputVariable, value: 0),
             karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
             karSetVariable(name: normalModeLayerStateVariable, value: normalModeBaseStateId),
