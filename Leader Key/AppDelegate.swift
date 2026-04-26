@@ -3158,35 +3158,54 @@ extension AppDelegate {
     activationContext: KarabinerActivationContext
   ) -> Action? {
     let rootGroup = rootGroupForMapping(mapping, activationContext: activationContext)
-    
-    var currentGroup = rootGroup
-    
-    // Navigate through path to find the group containing the action
-    for key in mapping.path.dropLast() {
-      var found = false
-      for item in currentGroup.actions {
-        if case .group(let group) = item, group.key == key {
-          currentGroup = group
-          found = true
-          break
-        }
-      }
-      if !found { 
-        debugLog("[AppDelegate] Could not find group with key '\(key)' in path for state ID \(mapping.stateId)")
-        return nil 
-      }
+
+    if let action = Self.resolveAction(in: rootGroup, path: mapping.path) {
+      return action
     }
-    
-    // Find the action with the last key
-    if let lastKey = mapping.path.last {
-      for item in currentGroup.actions {
-        if case .action(let action) = item, action.key == lastKey {
+
+    let pathDescription = mapping.path.joined(separator: " ")
+    debugLog(
+      "[AppDelegate] Could not find action for state ID \(mapping.stateId) " +
+        "at path: \(pathDescription)"
+    )
+    return nil
+  }
+
+  static func resolveAction(in rootGroup: Group, path: [String]) -> Action? {
+    resolveAction(in: rootGroup.actions, path: ArraySlice(path))
+  }
+
+  private static func resolveAction(in items: [ActionOrGroup], path: ArraySlice<String>) -> Action? {
+    guard let key = path.first else {
+      return nil
+    }
+
+    if path.count == 1 {
+      for item in items {
+        switch item {
+        case .action(let action) where action.key == key:
           return action
+        case .layer(let layer) where layer.key == key:
+          return layer.tapAction
+        default:
+          continue
         }
       }
-      debugLog("[AppDelegate] Could not find action with key '\(lastKey)' for state ID \(mapping.stateId)")
+      return nil
     }
-    
+
+    let remainingPath = path.dropFirst()
+    for item in items {
+      switch item {
+      case .group(let group) where group.key == key:
+        return resolveAction(in: group.actions, path: remainingPath)
+      case .layer(let layer) where layer.key == key:
+        return resolveAction(in: layer.actions, path: remainingPath)
+      default:
+        continue
+      }
+    }
+
     return nil
   }
 

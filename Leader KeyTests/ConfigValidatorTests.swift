@@ -469,3 +469,48 @@ final class ConfigValidatorTests: XCTestCase {
     }
   }
 }
+
+final class AppDelegateStateMappingResolutionTests: XCTestCase {
+  func testResolveActionDescendsThroughLayersAndGroups() {
+    let root = Group(
+      key: nil,
+      label: "Normal",
+      stickyMode: nil,
+      actions: [
+        .layer(
+          Layer(
+            key: "f",
+            label: "Find",
+            iconPath: nil,
+            tapAction: Action(key: nil, type: .shortcut, label: "Tap Find", value: "Cf"),
+            actions: [
+              .action(Action(key: "j", type: .shortcut, label: "Jump", value: "Cj")),
+              .group(
+                Group(
+                  key: "g",
+                  label: "Nested",
+                  stickyMode: nil,
+                  actions: [
+                    .action(
+                      Action(
+                        key: "x",
+                        type: .command,
+                        label: "Nested Command",
+                        value: "echo nested"
+                      )
+                    )
+                  ]
+                )
+              ),
+            ]
+          )
+        )
+      ]
+    )
+
+    XCTAssertEqual(AppDelegate.resolveAction(in: root, path: ["f"])?.value, "Cf")
+    XCTAssertEqual(AppDelegate.resolveAction(in: root, path: ["f", "j"])?.value, "Cj")
+    XCTAssertEqual(AppDelegate.resolveAction(in: root, path: ["f", "g", "x"])?.value, "echo nested")
+    XCTAssertNil(AppDelegate.resolveAction(in: root, path: ["f", "missing"]))
+  }
+}

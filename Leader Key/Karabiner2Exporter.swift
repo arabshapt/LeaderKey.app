@@ -2340,27 +2340,41 @@ final class Karabiner2Exporter {
       return controlEvents
     }
 
-    var events: [Any] = [
-      karSendUserCommand("stateid \(stateId)"),
+    var stateEvents: [Any] = [
       karSetVariable(name: normalModeStateVariable, value: normalModeBaseStateId),
     ]
     if resetLayerSequence {
-      events.append(karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId))
+      stateEvents.append(karSetVariable(name: normalModeLayerSequenceStateVariable, value: normalModeBaseStateId))
     }
 
     switch action.normalModeAfter ?? .normal {
     case .normal:
-      events.append(karSetVariable(name: normalModeInputVariable, value: 0))
+      stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 0))
     case .input:
-      events.append(karSetVariable(name: normalModeInputVariable, value: 1))
-      events.append(karSendUserCommand("normal_input"))
+      stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 1))
+      stateEvents.append(karSendUserCommand("normal_input"))
     case .disabled:
-      events.append(karSetVariable(name: normalModeEnabledVariable, value: 0))
-      events.append(karSetVariable(name: normalModeInputVariable, value: 0))
-      events.append(karSendUserCommand("normal_off"))
+      stateEvents.append(karSetVariable(name: normalModeEnabledVariable, value: 0))
+      stateEvents.append(karSetVariable(name: normalModeInputVariable, value: 0))
+      stateEvents.append(karSendUserCommand("normal_off"))
     }
 
-    return events
+    if action.type == .shortcut, let shortcutEvents = karShortcutEvents(for: action.value) {
+      return stateEvents + shortcutEvents
+    }
+
+    if action.type == .keystroke {
+      let keystrokeValue = KeystrokeActionValue.parse(action.value)
+      return stateEvents + [
+        karKeystroke(
+          app: keystrokeValue.app,
+          spec: keystrokeValue.spec,
+          focusApp: keystrokeValue.focusTargetApp
+        )
+      ]
+    }
+
+    return [karSendUserCommand("stateid \(stateId)")] + stateEvents
   }
 
   private static func isReservedNormalModeControlKey(_ key: String) -> Bool {

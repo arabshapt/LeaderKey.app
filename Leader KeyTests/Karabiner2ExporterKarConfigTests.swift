@@ -626,6 +626,18 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
             tapAction: tapAction,
             actions: [
               .action(makeShortcutAction(key: "b", label: "Back", value: "Cb")),
+              .action(
+                Action(
+                  key: "k",
+                  type: .keystroke,
+                  label: "Chrome Tab",
+                  value: "Google Chrome > Ct",
+                  iconPath: nil,
+                  activates: nil,
+                  stickyMode: nil,
+                  macroSteps: nil
+                )
+              ),
               .group(
                 Group(
                   key: "g",
@@ -673,6 +685,11 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       )
       XCTAssertTrue(
         toIfAloneEvents(in: trigger).contains(where: {
+          eventHasKeyCode($0, keyCode: "f")
+        })
+      )
+      XCTAssertFalse(
+        toIfAloneEvents(in: trigger).contains(where: {
           eventHasSendUserCommand($0, prefix: "stateid ")
         })
       )
@@ -684,8 +701,25 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
         fromKeyCode(in: $0) == "b"
           && hasCondition($0, name: "leaderkey_normal_layer_state", type: "variable_if")
       }))
-      XCTAssertTrue(hasSendUserCommand(manipulator: childAction, prefix: "stateid "))
+      let childActionEvents = toEvents(in: childAction)
+      XCTAssertFalse(hasSendUserCommand(manipulator: childAction, prefix: "stateid "))
       XCTAssertTrue(hasSetVariable(manipulator: childAction, name: "leaderkey_normal_layer_sequence_state", value: 0))
+      XCTAssertLessThan(
+        try XCTUnwrap(indexOfSetVariableEvent(childActionEvents, name: "leaderkey_normal_layer_sequence_state", value: 0)),
+        try XCTUnwrap(indexOfKeyCodeEvent(childActionEvents, keyCode: "b"))
+      )
+      XCTAssertEqual(lastKeyCodeEvent(in: childAction)?["key_code"] as? String, "b")
+      XCTAssertEqual(lastKeyCodeEvent(in: childAction)?["modifiers"] as? [String], ["command"])
+
+      let childKeystroke = try XCTUnwrap(normalFallbackManipulators.first(where: {
+        fromKeyCode(in: $0) == "k"
+          && hasCondition($0, name: "leaderkey_normal_layer_state", type: "variable_if")
+      }))
+      let keystrokePayload = try XCTUnwrap(structuredPayloads(manipulator: childKeystroke).first)
+      XCTAssertFalse(hasSendUserCommand(manipulator: childKeystroke, prefix: "stateid "))
+      XCTAssertEqual(keystrokePayload["type"] as? String, "keystroke")
+      XCTAssertEqual(keystrokePayload["app"] as? String, "Google Chrome")
+      XCTAssertEqual(keystrokePayload["spec"] as? String, "Ct")
 
       let childGroup = try XCTUnwrap(normalFallbackManipulators.first(where: {
         fromKeyCode(in: $0) == "g"
@@ -697,6 +731,9 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
 
       XCTAssertTrue(result.stateMappings.contains(where: {
         $0.scope == .normalShared && $0.path == ["f", "b"]
+      }))
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalShared && $0.path == ["f", "k"]
       }))
       XCTAssertTrue(result.stateMappings.contains(where: {
         $0.scope == .normalShared && $0.path == ["f", "g", "x"]

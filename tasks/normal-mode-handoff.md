@@ -197,6 +197,13 @@ Main changes:
 - App aliases are built from both regular app configs and normal app configs, without duplicate aliases.
 - State ID namespace includes normal scopes to avoid collisions.
 - Normal terminal actions are written to `leaderkey-state-mappings.json`.
+- Simple normal-mode `.shortcut` terminal actions are also emitted directly as Karabiner key events
+  instead of going through `stateid`. This applies to base normal actions, layer tap actions, and layer
+  child actions. Keep normal-mode reset/status variable events before the shortcut key events so the
+  final `to` event remains the shortcut key event for Karabiner repeat. Complex shortcut sequences stay
+  on the `stateid` path.
+- Normal-mode `.keystroke` actions are emitted directly as v1 Karabiner `keystroke` payloads instead
+  of going through `stateid`, including layer child keystrokes.
 - Normal group transitions stay entirely in Karabiner and are not added to state mappings.
 - Normal app rules emit before normal fallback rules.
 - Added normal-mode built-in control rules for Escape and Caps Lock.
@@ -212,7 +219,8 @@ Main changes:
   - Layer trigger `to` sets layer state and resets layer sequence state.
   - Layer trigger `to_if_alone` runs `tapAction` or passes the original key through.
   - Layer trigger `to_after_key_up` resets both layer variables.
-  - Layer children dispatch through normal-mode state mappings, so overlay suppression is reused.
+- Layer children dispatch through normal-mode state mappings unless they are simple `.shortcut`
+  actions that can be emitted directly for key repeat; overlay suppression is reused for the state-id path.
   - Layer child groups use `leaderkey_normal_layer_sequence_state`, not `leaderkey_normal_state`.
   - Invalid keys while a layer group is pending consume/reset only layer sequence state.
   - Escape/Caps while a layer group is pending reset only layer sequence state; base held layer Escape/Caps pass through.
@@ -253,6 +261,8 @@ Main changes:
   - `.normalModeInput`
   - `.normalModeDisable`
 - `executeActionByStateId` detects normal mapping scopes and runs normal terminal actions silently, without showing or focusing the overlay.
+- Normal-mode state-id action resolution descends through both groups and layers. Layer child mappings
+  use paths like `["f", "j"]`, and layer tap-action mappings resolve through the layer key itself.
 - Normal shared mappings resolve against the frontmost app normal config when possible.
 - Normal override mappings resolve against the mapped bundle ID.
 - Normal group state IDs are ignored in Swift because group transitions are Karabiner-only.
@@ -341,7 +351,8 @@ Coverage added:
 - Layer config validation for nested layers, modifier triggers, invalid tap actions, and sibling key
   collisions.
 - Karabiner export of layer hold variables, `to_if_alone`, original-key tap passthrough, child actions,
-  child groups, state mappings, and layer Escape reset.
+  direct simple shortcut events, child groups, state mappings, and layer Escape reset.
+- Runtime resolution of normal-mode layer child state IDs and layer tap-action state IDs.
 - Config-core indexing, path navigation, and mutation behavior for layers.
 - Raycast layer form/detail handling.
 
