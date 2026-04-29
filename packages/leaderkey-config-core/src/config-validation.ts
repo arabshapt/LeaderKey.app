@@ -27,6 +27,123 @@ const DISALLOWED_LAYER_TRIGGER_KEYS = new Set([
   "shift",
 ]);
 
+const KEY_ALIASES = new Map<string, string>([
+  ["left", "←"],
+  ["left arrow", "←"],
+  ["left_arrow", "←"],
+  ["leftarrow", "←"],
+  ["right", "→"],
+  ["right arrow", "→"],
+  ["right_arrow", "→"],
+  ["rightarrow", "→"],
+  ["up", "↑"],
+  ["up arrow", "↑"],
+  ["up_arrow", "↑"],
+  ["uparrow", "↑"],
+  ["down", "↓"],
+  ["down arrow", "↓"],
+  ["down_arrow", "↓"],
+  ["downarrow", "↓"],
+  ["space", " "],
+  ["space bar", " "],
+  ["space_bar", " "],
+  ["spacebar", " "],
+  ["return", "return_or_enter"],
+  ["enter", "return_or_enter"],
+  ["delete", "delete_or_backspace"],
+  ["backspace", "delete_or_backspace"],
+  ["esc", "escape"],
+]);
+
+const NAMED_KEY_CODES = new Set([
+  "caps_lock",
+  "left_control",
+  "left_shift",
+  "left_option",
+  "left_command",
+  "right_control",
+  "right_shift",
+  "right_option",
+  "right_command",
+  "fn",
+  "return_or_enter",
+  "tab",
+  "spacebar",
+  "delete_or_backspace",
+  "delete_forward",
+  "escape",
+  "home",
+  "end",
+  "page_up",
+  "page_down",
+  "help",
+  "insert",
+  "left_arrow",
+  "right_arrow",
+  "down_arrow",
+  "up_arrow",
+  "f1",
+  "f2",
+  "f3",
+  "f4",
+  "f5",
+  "f6",
+  "f7",
+  "f8",
+  "f9",
+  "f10",
+  "f11",
+  "f12",
+  "f13",
+  "f14",
+  "f15",
+  "f16",
+  "f17",
+  "f18",
+  "f19",
+  "f20",
+  "keypad_0",
+  "keypad_1",
+  "keypad_2",
+  "keypad_3",
+  "keypad_4",
+  "keypad_5",
+  "keypad_6",
+  "keypad_7",
+  "keypad_8",
+  "keypad_9",
+  "keypad_period",
+  "keypad_enter",
+  "keypad_plus",
+  "keypad_minus",
+  "keypad_multiply",
+  "keypad_divide",
+  "keypad_equal_sign",
+  "keypad_clear",
+  "keypad_num_lock",
+  "grave_accent_and_tilde",
+  "hyphen",
+  "equal_sign",
+  "open_bracket",
+  "close_bracket",
+  "backslash",
+  "semicolon",
+  "quote",
+  "comma",
+  "period",
+  "slash",
+  "volume_increment",
+  "volume_decrement",
+  "mute",
+  "print_screen",
+  "scroll_lock",
+  "pause",
+  "lang1",
+  "lang2",
+  "japanese_eisuu",
+  "japanese_kana",
+]);
+
 export interface ConfigItemValidationOptions {
   parentInsideLayer?: boolean;
   scope?: ScopeType;
@@ -58,6 +175,34 @@ export function isNormalScope(scope: ScopeType | undefined): boolean {
 export function isNormalConfigPath(filePath: string): boolean {
   const fileName = path.basename(filePath);
   return fileName === NORMAL_FALLBACK_CONFIG_FILE_NAME || fileName.startsWith(NORMAL_APP_CONFIG_PREFIX);
+}
+
+export function normalizeConfigKeyReference(value: string): string {
+  if (value === " ") {
+    return " ";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const lowercased = trimmed.toLowerCase();
+  const aliased = KEY_ALIASES.get(lowercased);
+  if (aliased) {
+    return aliased;
+  }
+
+  return NAMED_KEY_CODES.has(lowercased) ? lowercased : trimmed;
+}
+
+export function isConfigKeyReference(value: string): boolean {
+  if (Array.from(value).length === 1) {
+    return true;
+  }
+
+  const normalized = normalizeConfigKeyReference(value);
+  return Array.from(normalized).length === 1 || NAMED_KEY_CODES.has(normalized);
 }
 
 export function scopeForConfigPath(filePath: string): ScopeType | undefined {
@@ -148,7 +293,7 @@ export function validateConfigItem(item: ConfigItem, options: ConfigItemValidati
   if (item.type === "layer" && DISALLOWED_LAYER_TRIGGER_KEYS.has(item.key.toLowerCase())) {
     return "Modifier keys cannot be used as normal-mode layer triggers.";
   }
-  if (item.key.length !== 1) {
+  if (!isConfigKeyReference(item.key)) {
     return "Key must resolve to exactly one key.";
   }
 

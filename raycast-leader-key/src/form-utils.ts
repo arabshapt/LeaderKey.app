@@ -2,35 +2,14 @@ import {
   parseMenuActionValue,
   resolveActionAiDescription,
   resolveActionDescription,
+  isConfigKeyReference,
+  normalizeConfigKeyReference,
   type ConfigItem,
   type FlatIndexRecord,
   type MacroStep,
   type NormalModeAfter,
   type ActionNode,
 } from "@leaderkey/config-core";
-
-const KEY_ALIASES = new Map<string, string>([
-  ["left", "←"],
-  ["left arrow", "←"],
-  ["left_arrow", "←"],
-  ["leftarrow", "←"],
-  ["right", "→"],
-  ["right arrow", "→"],
-  ["right_arrow", "→"],
-  ["rightarrow", "→"],
-  ["up", "↑"],
-  ["up arrow", "↑"],
-  ["up_arrow", "↑"],
-  ["uparrow", "↑"],
-  ["down", "↓"],
-  ["down arrow", "↓"],
-  ["down_arrow", "↓"],
-  ["downarrow", "↓"],
-  ["space", " "],
-  ["space bar", " "],
-  ["space_bar", " "],
-  ["spacebar", " "],
-]);
 
 const DISPLAY_KEY_NAMES = new Map<string, string>([
   ["←", "left"],
@@ -81,12 +60,7 @@ export interface ItemFormState {
 }
 
 export function normalizeConfigKey(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  return KEY_ALIASES.get(trimmed.toLowerCase()) ?? trimmed;
+  return normalizeConfigKeyReference(value);
 }
 
 export function emptyFormState(type: ConfigItem["type"] = "shortcut"): ItemFormState {
@@ -143,7 +117,7 @@ export function parseTokenizedFullPath(value: string): ParsedTokenizedPath {
   const keyPath: string[] = [];
   for (const segment of segments) {
     const normalized = normalizeConfigKey(segment);
-    if (Array.from(normalized).length !== 1) {
+    if (!isConfigKeyReference(normalized)) {
       return {
         error: `Path segment "${segment}" must resolve to exactly one key.`,
         keyPath: [],

@@ -537,6 +537,24 @@ test("normal app overrides materialize inherited fallback layers as layers", asy
 test("config item validation rejects layer scope and recursive action value errors", () => {
   assert.equal(
     validateConfigItem({
+      key: "right_command",
+      type: "shortcut",
+      value: "Ct",
+    }),
+    undefined,
+  );
+
+  assert.equal(
+    validateConfigItem({
+      key: "not_a_key",
+      type: "shortcut",
+      value: "Ct",
+    }),
+    "Key must resolve to exactly one key.",
+  );
+
+  assert.equal(
+    validateConfigItem({
       actions: [],
       key: "f",
       type: "layer",

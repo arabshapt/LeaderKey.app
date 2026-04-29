@@ -113,6 +113,8 @@ test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
   assert.equal(normalizeConfigKey("space"), " ");
   assert.equal(normalizeConfigKey("space bar"), " ");
   assert.equal(normalizeConfigKey("spacebar"), " ");
+  assert.equal(normalizeConfigKey("Right_Command"), "right_command");
+  assert.equal(normalizeConfigKey("enter"), "return_or_enter");
   assert.equal(normalizeConfigKey("→"), "→");
   assert.equal(normalizeConfigKey("g"), "g");
 });
@@ -120,6 +122,7 @@ test("normalizeConfigKey maps arrow aliases to their canonical glyphs", () => {
 test("parseTokenizedFullPath normalizes aliases per segment", () => {
   assert.deepEqual(parseTokenizedFullPath("a -> left -> space").keyPath, ["a", "←", " "]);
   assert.deepEqual(parseTokenizedFullPath("up → .").keyPath, ["↑", "."]);
+  assert.deepEqual(parseTokenizedFullPath("space -> right_command").keyPath, [" ", "right_command"]);
 });
 
 test("parseTokenizedFullPath rejects multi-character literal segments", () => {

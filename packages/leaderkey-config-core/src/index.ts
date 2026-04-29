@@ -31,7 +31,9 @@ export { analyzePathInConfig, parsePathInput } from "./path-navigation.js";
 export { validateRecordPath } from "./path-validation.js";
 export {
   isNormalConfigPath,
+  isConfigKeyReference,
   isNormalScope,
+  normalizeConfigKeyReference,
   parentPathIsInsideLayer,
   scopeForConfigPath,
   validateActionValue,

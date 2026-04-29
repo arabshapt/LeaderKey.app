@@ -362,13 +362,13 @@ class ConfigValidator {
       return
     }
 
-    if key.count != 1 {
+    if key.count != 1 && CompactShortcut.keyCode(for: key) == nil {
       errors.append(
         ValidationError(
           path: path,
-          message: "Key must be a single character",
+          message: "Key must resolve to exactly one key",
           type: .nonSingleCharacterKey,
-          suggestion: "Use only one character (a-z, 0-9, or symbols)"
+          suggestion: "Use one character or a Karabiner key name like right_command"
         ))
     }
   }

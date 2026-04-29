@@ -64,6 +64,36 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errors.isEmpty, "A single literal space is a valid spacebar key")
   }
 
+  func testNamedKarabinerKeyIsValid() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "right_command", type: .shortcut, value: "Ct"))
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.isEmpty, "Named Karabiner key codes are valid config keys")
+  }
+
+  func testUnknownMultiCharacterKeyIsInvalid() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "not_a_key", type: .shortcut, value: "Ct"))
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .nonSingleCharacterKey }))
+  }
+
   func testValidLayerConfiguration() {
     let group = Group(
       key: nil,
