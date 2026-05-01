@@ -30,6 +30,8 @@ enum VoiceTranscriptionError: LocalizedError {
 }
 
 final class GroqSpeechToTextClient {
+  private static let maxPromptCharacters = 840
+
   private struct GroqTranscriptionResponse: Decodable {
     struct RequestMetadata: Decodable {
       let id: String?
@@ -50,7 +52,8 @@ final class GroqSpeechToTextClient {
   func transcribe(
     audioURL: URL,
     model: VoiceSTTModel,
-    apiKey: String
+    apiKey: String,
+    prompt: String?
   ) async throws -> VoiceTranscriptionResult {
     let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedKey.isEmpty else {
@@ -73,7 +76,8 @@ final class GroqSpeechToTextClient {
     request.httpBody = try multipartBody(
       audioURL: audioURL,
       model: model.rawValue,
-      boundary: boundary
+      boundary: boundary,
+      prompt: prompt
     )
 
     let (data, response) = try await URLSession.shared.data(for: request)
@@ -99,14 +103,23 @@ final class GroqSpeechToTextClient {
     )
   }
 
-  private func multipartBody(audioURL: URL, model: String, boundary: String) throws -> Data {
+  private func multipartBody(
+    audioURL: URL,
+    model: String,
+    boundary: String,
+    prompt: String?
+  ) throws -> Data {
     var body = Data()
     let fileData = try Data(contentsOf: audioURL)
     let filename = audioURL.lastPathComponent
 
     body.appendMultipartField(name: "model", value: model, boundary: boundary)
     body.appendMultipartField(name: "response_format", value: "json", boundary: boundary)
+    body.appendMultipartField(name: "language", value: "en", boundary: boundary)
     body.appendMultipartField(name: "temperature", value: "0", boundary: boundary)
+    if let prompt = limitedPrompt(prompt) {
+      body.appendMultipartField(name: "prompt", value: prompt, boundary: boundary)
+    }
     body.append("--\(boundary)\r\n")
     body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
     body.append("Content-Type: audio/wav\r\n\r\n")
@@ -115,6 +128,27 @@ final class GroqSpeechToTextClient {
     body.append("--\(boundary)--\r\n")
 
     return body
+  }
+
+  private func limitedPrompt(_ prompt: String?) -> String? {
+    guard let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty
+    else {
+      return nil
+    }
+
+    guard prompt.utf8.count > Self.maxPromptCharacters else {
+      return prompt
+    }
+
+    var result = ""
+    for character in prompt {
+      let next = result + String(character)
+      if next.utf8.count > Self.maxPromptCharacters {
+        break
+      }
+      result = next
+    }
+    return result.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }
 

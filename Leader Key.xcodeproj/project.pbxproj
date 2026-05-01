@@ -51,6 +51,7 @@
 		AA1000042EB0000100000004 /* VoicePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000032EB0000100000003 /* VoicePane.swift */; };
 		AA1000062EB0000100000006 /* VoiceAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000052EB0000100000005 /* VoiceAudioCapture.swift */; };
 		AA1000082EB0000100000008 /* VoiceTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000072EB0000100000007 /* VoiceTranscriber.swift */; };
+		AA10000A2EB000010000000A /* VoicePromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000092EB0000100000009 /* VoicePromptBuilder.swift */; };
 		42454DDB2D71CB39004E1374 /* ConfigValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDA2D71CB39004E1374 /* ConfigValidator.swift */; };
 		42454DDC2E71CB39004E1376 /* ConfigCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDB2E71CB39004E1375 /* ConfigCache.swift */; };
 		42454DDD2D71CBAB004E1374 /* ConfigValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */; };
@@ -158,6 +159,7 @@
 		AA1000032EB0000100000003 /* VoicePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePane.swift; sourceTree = "<group>"; };
 		AA1000052EB0000100000005 /* VoiceAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioCapture.swift; sourceTree = "<group>"; };
 		AA1000072EB0000100000007 /* VoiceTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTranscriber.swift; sourceTree = "<group>"; };
+		AA1000092EB0000100000009 /* VoicePromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePromptBuilder.swift; sourceTree = "<group>"; };
 		42454DDA2D71CB39004E1374 /* ConfigValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidator.swift; sourceTree = "<group>"; };
 		42454DDB2E71CB39004E1375 /* ConfigCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigCache.swift; sourceTree = "<group>"; };
 		42454DDC2D71CBAB004E1374 /* ConfigValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigValidatorTests.swift; sourceTree = "<group>"; };
@@ -294,6 +296,7 @@
 				AA00000D2EA0000100000013 /* SignpostLog.swift */,
 				AA1000052EB0000100000005 /* VoiceAudioCapture.swift */,
 				AA1000012EB0000100000001 /* VoiceCoordinator.swift */,
+				AA1000092EB0000100000009 /* VoicePromptBuilder.swift */,
 				AA1000072EB0000100000007 /* VoiceTranscriber.swift */,
 				42454DDA2D71CB39004E1374 /* ConfigValidator.swift */,
 				42454DDB2E71CB39004E1375 /* ConfigCache.swift */,
@@ -583,6 +586,7 @@
 				AA00000E2EA0000100000014 /* SignpostLog.swift in Sources */,
 				AA1000062EB0000100000006 /* VoiceAudioCapture.swift in Sources */,
 				AA1000022EB0000100000002 /* VoiceCoordinator.swift in Sources */,
+				AA10000A2EB000010000000A /* VoicePromptBuilder.swift in Sources */,
 				AA1000082EB0000100000008 /* VoiceTranscriber.swift in Sources */,
 				AA1000042EB0000100000004 /* VoicePane.swift in Sources */,
 				42454DDB2D71CB39004E1374 /* ConfigValidator.swift in Sources */,

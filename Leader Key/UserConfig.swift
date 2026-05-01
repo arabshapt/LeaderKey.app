@@ -1206,7 +1206,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case key, type, value, actions, label, description, aiDescription, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter, tapAction
+    case key, type, value, actions, label, description, aiDescription, voiceId, voiceSafety, voiceAliases, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter, tapAction
   }
 
   init(from decoder: Decoder) throws {
@@ -1216,6 +1216,9 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
     let label = try container.decodeIfPresent(String.self, forKey: .label)
     let description = try container.decodeIfPresent(String.self, forKey: .description)
     let aiDescription = try container.decodeIfPresent(String.self, forKey: .aiDescription)
+    let voiceId = try container.decodeIfPresent(String.self, forKey: .voiceId)
+    let voiceSafety = try container.decodeIfPresent(VoiceSafety.self, forKey: .voiceSafety)
+    let voiceAliases = try container.decodeIfPresent([String].self, forKey: .voiceAliases)
     let iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
     let activates = try container.decodeIfPresent(Bool.self, forKey: .activates)
     let menuFallbackPaths = try container.decodeIfPresent([String].self, forKey: .menuFallbackPaths)
@@ -1238,6 +1241,7 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       self = .action(
         Action(
           key: key, type: type, label: label, description: description, aiDescription: aiDescription,
+          voiceId: voiceId, voiceSafety: voiceSafety, voiceAliases: voiceAliases,
           value: value, iconPath: iconPath,
           activates: activates, menuFallbackPaths: menuFallbackPaths, stickyMode: stickyMode, macroSteps: macroSteps,
           normalModeAfter: normalModeAfter))
@@ -1259,6 +1263,15 @@ enum ActionOrGroup: Codable, Equatable, Identifiable {
       }
       if action.aiDescription != nil && !action.aiDescription!.isEmpty {
         try container.encodeIfPresent(action.aiDescription, forKey: .aiDescription)
+      }
+      if action.voiceId != nil && !action.voiceId!.isEmpty {
+        try container.encodeIfPresent(action.voiceId, forKey: .voiceId)
+      }
+      if action.voiceSafety != nil {
+        try container.encodeIfPresent(action.voiceSafety, forKey: .voiceSafety)
+      }
+      if action.voiceAliases != nil && !action.voiceAliases!.isEmpty {
+        try container.encodeIfPresent(action.voiceAliases, forKey: .voiceAliases)
       }
       try container.encodeIfPresent(action.iconPath, forKey: .iconPath)
       try container.encodeIfPresent(action.activates, forKey: .activates)

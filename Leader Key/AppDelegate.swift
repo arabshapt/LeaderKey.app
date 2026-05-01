@@ -424,7 +424,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   }
 
   private func setupVoiceCoordinator() {
-    let coordinator = VoiceCoordinator(statusItem: statusItem)
+    let coordinator = VoiceCoordinator(statusItem: statusItem, config: config)
     coordinator.start()
     voiceCoordinator = coordinator
   }

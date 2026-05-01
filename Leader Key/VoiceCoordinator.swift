@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Defaults
 import Foundation
 import KeyboardShortcuts
@@ -53,6 +54,7 @@ final class VoiceCoordinator {
   }
 
   private let statusItem: StatusItem
+  private let config: UserConfig
   private let audioCapture = VoiceAudioCapture()
   private let transcriber = GroqSpeechToTextClient()
   private var settingsObserver: NSObjectProtocol?
@@ -63,8 +65,9 @@ final class VoiceCoordinator {
     }
   }
 
-  init(statusItem: StatusItem) {
+  init(statusItem: StatusItem, config: UserConfig) {
     self.statusItem = statusItem
+    self.config = config
   }
 
   func start() {
@@ -180,11 +183,13 @@ final class VoiceCoordinator {
       "[VoiceCoordinator] \(trigger) recording captured \(String(format: "%.2f", result.duration))s, preRollFrames=\(result.preRollFrameCount), url=\(result.url.path)"
     )
 
+    let prompt = transcriptionPrompt()
+
     Task { [weak self] in
       guard let self else { return }
 
       do {
-        let transcript = try await self.transcribe(result: result)
+        let transcript = try await self.transcribe(result: result, prompt: prompt)
 
         await MainActor.run {
           self.state = .ready(Self.readyMessage(for: transcript.text))
@@ -213,7 +218,10 @@ final class VoiceCoordinator {
     }
   }
 
-  private func transcribe(result: VoiceAudioCapture.CaptureResult) async throws -> VoiceTranscriptionResult {
+  private func transcribe(
+    result: VoiceAudioCapture.CaptureResult,
+    prompt: String?
+  ) async throws -> VoiceTranscriptionResult {
     guard let apiKey = KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) else {
       throw VoiceTranscriptionError.missingAPIKey
     }
@@ -221,7 +229,8 @@ final class VoiceCoordinator {
     return try await transcriber.transcribe(
       audioURL: result.url,
       model: Defaults[.voiceSTTModel],
-      apiKey: apiKey
+      apiKey: apiKey,
+      prompt: prompt
     )
   }
 
@@ -244,6 +253,17 @@ final class VoiceCoordinator {
 
   private var voiceEnabled: Bool {
     Defaults[.voiceDispatcherEnabled]
+  }
+
+  private func transcriptionPrompt() -> String? {
+    let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    let prompt = VoicePromptBuilder.build(config: config, bundleId: bundleId)
+    if let prompt {
+      debugLog("[VoiceCoordinator] Groq prompt primed with \(prompt.utf8.count) chars")
+    } else {
+      debugLog("[VoiceCoordinator] Groq prompt disabled")
+    }
+    return prompt
   }
 
   private func updateAudioWarmState() {
