@@ -26,7 +26,17 @@ function hasAllWords(value: string, words: string[]): boolean {
 
 const ALIASES: AliasSpec[] = [
   {
-    aliases: ["new tab", "tab new", "open new tab", "open another tab", "another tab", "make a new browser tab"],
+    aliases: [
+      "new tab",
+      "tab new",
+      "open new tab",
+      "open a new tab",
+      "open your tab",
+      "open in your tab",
+      "open another tab",
+      "another tab",
+      "make a new browser tab",
+    ],
     predicate: (entry) => entry.type === "shortcut" && (shortcutValue(entry) === "ct" || hasAllWords(entry.searchText, ["new", "tab"])),
     reason: "alias:new_tab",
   },

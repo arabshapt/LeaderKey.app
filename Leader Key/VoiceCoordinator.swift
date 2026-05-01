@@ -56,6 +56,7 @@ final class VoiceCoordinator {
   private let statusItem: StatusItem
   private let config: UserConfig
   private let audioCapture = VoiceAudioCapture()
+  private let dispatchBridge = VoiceDispatchBridge()
   private let transcriber = GroqSpeechToTextClient()
   private var settingsObserver: NSObjectProtocol?
   private var state: State = .idle {
@@ -184,6 +185,8 @@ final class VoiceCoordinator {
     )
 
     let prompt = transcriptionPrompt()
+    let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    let dispatchOptions = voiceDispatchOptions()
 
     Task { [weak self] in
       guard let self else { return }
@@ -192,12 +195,29 @@ final class VoiceCoordinator {
         let transcript = try await self.transcribe(result: result, prompt: prompt)
 
         await MainActor.run {
-          self.state = .ready(Self.readyMessage(for: transcript.text))
-          self.returnToIdleAfterReady()
           debugLog(
             "[VoiceCoordinator] Groq transcript model=\(transcript.model) requestID=\(transcript.requestID ?? "n/a") text=\"\(transcript.text)\""
           )
-          debugLog("[VoiceCoordinator] Transcript-to-dispatch bridge is the next slice.")
+          self.state = .planning
+        }
+
+        do {
+          let dispatch = try await self.dispatchBridge.dispatch(
+            transcript: transcript.text,
+            bundleId: targetBundleId,
+            options: dispatchOptions
+          )
+
+          await MainActor.run {
+            self.state = .ready(dispatch.displayMessage)
+            self.returnToIdleAfterReady()
+            debugLog("[VoiceCoordinator] Dispatch \(dispatch.debugSummary)")
+          }
+        } catch {
+          await MainActor.run {
+            self.state = .error("Dispatch failed")
+            debugLog("[VoiceCoordinator] Dispatch failed: \(error)")
+          }
         }
       } catch VoiceTranscriptionError.emptyTranscript {
         await MainActor.run {
@@ -231,6 +251,16 @@ final class VoiceCoordinator {
       model: Defaults[.voiceSTTModel],
       apiKey: apiKey,
       prompt: prompt
+    )
+  }
+
+  private func voiceDispatchOptions() -> VoiceDispatchOptions {
+    VoiceDispatchOptions(
+      configDirectory: Defaults[.configDir],
+      execute: Defaults[.voiceDispatchMode] == .execute,
+      plannerMode: Defaults[.voicePlannerMode],
+      llamaURL: Defaults[.voiceLlamaServerURL],
+      model: Defaults[.voiceTier2Model]
     )
   }
 

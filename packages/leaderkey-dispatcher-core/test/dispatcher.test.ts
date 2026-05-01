@@ -72,6 +72,14 @@ test("fast matcher returns ordered chained plans", async () => {
   assert.ok(result.plan.overall_confidence >= 0.85);
 });
 
+test("fast matcher tolerates common STT drift for new tab", async () => {
+  const catalog = await buildActionCatalog({ catalogPath: fixturePath });
+
+  assert.equal(fastMatch(catalog, "I want you to open new tab").plan.chain[0]?.action_id, "tab_new");
+  assert.equal(fastMatch(catalog, "open your tab").plan.chain[0]?.action_id, "tab_new");
+  assert.equal(fastMatch(catalog, "open in your tab").plan.chain[0]?.action_id, "tab_new");
+});
+
 test("fast matcher refuses impossible commands", async () => {
   const catalog = await buildActionCatalog({ catalogPath: fixturePath });
   const result = fastMatch(catalog, "turn off wifi");
