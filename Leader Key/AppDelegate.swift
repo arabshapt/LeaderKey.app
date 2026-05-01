@@ -1462,8 +1462,8 @@ extension AppDelegate {
       ])
     }
 
+    executeVoiceDispatchActionsSequentially(resolved.map { $0.action })
     for item in resolved {
-      controller.runAction(item.action)
       reports[item.index]["executed"] = true
     }
 
@@ -1492,6 +1492,38 @@ extension AppDelegate {
     default:
       return nil
     }
+  }
+
+  private func executeVoiceDispatchActionsSequentially(_ actions: [Action]) {
+    guard !actions.isEmpty else { return }
+
+    var delay: TimeInterval = 0
+    for index in actions.indices {
+      let action = actions[index]
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        self?.controller.runAction(action)
+      }
+
+      let nextAction = index + 1 < actions.count ? actions[index + 1] : nil
+      delay += Self.voiceDispatchDelay(after: action, before: nextAction)
+    }
+  }
+
+  private static func voiceDispatchDelay(after action: Action, before nextAction: Action?) -> TimeInterval {
+    if action.type == .application, nextAction != nil {
+      return 0.45
+    }
+    if isVoiceWindowManagementAction(action) {
+      return 0.15
+    }
+    return 0.12
+  }
+
+  private static func isVoiceWindowManagementAction(_ action: Action?) -> Bool {
+    guard let action, action.type == .url else { return false }
+    let value = action.value.lowercased()
+    return value.contains("raycast://extensions/raycast/window-management/")
+      || value.contains("raycast://window-management/")
   }
 
   private func dispatchActionContainsCommand(_ action: Action) -> Bool {

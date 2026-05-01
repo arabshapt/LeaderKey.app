@@ -8,12 +8,13 @@ import type {
 } from "@leaderkey/config-core";
 
 export type DispatchScope = "frontmost" | "global" | "all";
-export type PlannerKind = "none" | "llama" | "ollama" | "groq";
+export type PlannerKind = "none" | "llama" | "ollama" | "groq" | "gemini";
 
 export interface DispatchRequest {
   transcript: string;
   scope?: DispatchScope;
   bundleId?: string;
+  context?: DispatchContext;
   configDirectory?: string;
   catalogPath?: string;
   includeGlobal?: boolean;
@@ -25,7 +26,26 @@ export interface DispatchRequest {
   llamaUrl?: string;
   ollamaUrl?: string;
   groqApiKey?: string;
+  geminiApiKey?: string;
   alwaysPlan?: boolean;
+}
+
+export interface CurrentAppContext {
+  bundleId?: string;
+  localizedName?: string;
+}
+
+export interface RecentVoiceCommandContext {
+  transcript: string;
+  action_ids: string[];
+  labels: string[];
+  types?: ActionType[];
+  plan_reason?: string;
+}
+
+export interface DispatchContext {
+  currentApp?: CurrentAppContext;
+  recentCommands?: RecentVoiceCommandContext[];
 }
 
 export interface DispatchReference {

@@ -34,10 +34,14 @@ Flags:
   --scope frontmost|global|all
   --bundle-id id
   --include-global
-  --planner none|llama|ollama
+  --planner none|llama|ollama|groq|gemini
   --model name
   --llama-url url
   --ollama-url url
+  --groq-api-key key
+  --gemini-api-key key
+  --always-plan
+  --context-json json
   --pretty
 `;
 }
@@ -77,6 +81,7 @@ async function requestFromArgs(args: string[], transcript: string): Promise<Disp
   const scope = (readFlag(args, "--scope") ?? "frontmost") as DispatchScope;
   let bundleId = readFlag(args, "--bundle-id");
   const catalogPath = readFlag(args, "--catalog");
+  const contextJson = readFlag(args, "--context-json");
   if (!bundleId && !catalogPath && scope === "frontmost") {
     bundleId = await readFrontmostBundleId().catch(() => undefined);
   }
@@ -85,9 +90,11 @@ async function requestFromArgs(args: string[], transcript: string): Promise<Disp
     bundleId,
     catalogPath,
     configDirectory: readFlag(args, "--config-dir") ?? defaultConfigDirectory(),
+    context: contextJson ? JSON.parse(contextJson) as DispatchRequest["context"] : undefined,
     execute: hasFlag(args, "--execute") && !hasFlag(args, "--dry-run"),
     allowDestructive: hasFlag(args, "--allow-destructive"),
     alwaysPlan: hasFlag(args, "--always-plan"),
+    geminiApiKey: readFlag(args, "--gemini-api-key"),
     groqApiKey: readFlag(args, "--groq-api-key"),
     includeGlobal: hasFlag(args, "--include-global"),
     llamaUrl: readFlag(args, "--llama-url"),

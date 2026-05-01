@@ -85,6 +85,20 @@ const ALIASES: AliasSpec[] = [
     reason: "alias:confetti",
   },
   {
+    aliases: ["left half", "move left", "move window left", "tile left", "tile window left", "snap left", "snap window left"],
+    predicate: (entry) =>
+      entry.type === "url" &&
+      (entry.value.includes("window-management/left-half") || hasAllWords(entry.searchText, ["left", "half"])),
+    reason: "alias:window_left_half",
+  },
+  {
+    aliases: ["right half", "move right", "move window right", "tile right", "tile window right", "snap right", "snap window right"],
+    predicate: (entry) =>
+      entry.type === "url" &&
+      (entry.value.includes("window-management/right-half") || hasAllWords(entry.searchText, ["right", "half"])),
+    reason: "alias:window_right_half",
+  },
+  {
     aliases: ["remove everything", "run rm rf documents", "delete all documents", "sudo cleanup", "dangerous remove command"],
     predicate: (entry) => entry.type === "command" || entry.safety !== "safe",
     reason: "alias:unsafe",

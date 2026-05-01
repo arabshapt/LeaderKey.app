@@ -1,11 +1,12 @@
 import { buildActionCatalog } from "./catalog.js";
+import { expandAppScopedIntent, looksLikeAppScopedTranscript } from "./app-scoped.js";
+import { expandLayoutIntent } from "./layout.js";
 import { fastMatch } from "./matcher.js";
 import { createPlanner } from "./planner.js";
 import { retrieveActions } from "./retriever.js";
 import { sendLeaderKeySocketRequest } from "./socket.js";
 import { validateDispatchPlan } from "./validator.js";
 import type {
-  ActionCandidate,
   ActionCatalog,
   DispatchPlan,
   DispatchRequest,
@@ -28,7 +29,25 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
     scope: request.scope ?? "frontmost",
   });
   const fast = fastMatch(catalog, request.transcript);
-  let plan = fast.plan;
+  const layout = expandLayoutIntent(catalog, request.transcript, request.context);
+  let validationCatalog = catalog;
+  let appScoped;
+  if (!layout && looksLikeAppScopedTranscript(request.transcript)) {
+    const allCatalog = request.catalogPath
+      ? catalog
+      : await buildActionCatalog({
+          bundleId: request.bundleId,
+          configDirectory: request.configDirectory,
+          includeGlobal: request.includeGlobal,
+          scope: "all",
+        });
+    appScoped = expandAppScopedIntent(catalog, allCatalog, request.transcript);
+    if (appScoped) {
+      validationCatalog = allCatalog;
+    }
+  }
+  let plan = layout?.plan ?? appScoped?.plan ?? fast.plan;
+  let plannerCandidatesByClause = layout?.candidatesByClause ?? appScoped?.candidatesByClause ?? fast.candidatesByClause;
 
   const shouldCallPlanner = request.planner && request.planner !== "none" && (
     request.alwaysPlan || plan.chain.length === 0 || (plan.unresolved?.length ?? 0) > 0
@@ -37,6 +56,7 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
   if (shouldCallPlanner) {
     try {
       const planner = createPlanner({
+        geminiApiKey: request.geminiApiKey,
         groqApiKey: request.groqApiKey,
         llamaUrl: request.llamaUrl,
         model: request.model,
@@ -44,23 +64,10 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
         planner: request.planner,
       });
       if (planner) {
-        let candidatesByClause: ActionCandidate[][];
-        if (request.alwaysPlan) {
-          // In always-plan mode, send the full catalog so the LLM can compose
-          // multi-step plans from any available action (e.g. window tiling + app switching)
-          const allCandidates: ActionCandidate[] = catalog.entries.map((entry) => ({
-            action: entry,
-            confidence: 1,
-            reason: "catalog",
-            score: 0,
-          }));
-          candidatesByClause = [allCandidates];
-        } else {
-          candidatesByClause = fast.candidatesByClause.length > 0
-            ? fast.candidatesByClause
-            : [retrieveActions(catalog, request.transcript, 12)];
+        if (plannerCandidatesByClause.length === 0 || plannerCandidatesByClause.every((candidates) => candidates.length === 0)) {
+          plannerCandidatesByClause = [retrieveActions(catalog, request.transcript, 12)];
         }
-        plan = await planner.plan(request.transcript, candidatesByClause);
+        plan = await planner.plan(request.transcript, plannerCandidatesByClause, request.context);
       }
     } catch (error) {
       plan = {
@@ -71,12 +78,10 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
     }
   }
 
-  const validation = validateDispatchPlan(catalog, plan, {
-    allowGlobalLookup: request.alwaysPlan,
-    candidatesByClause: fast.candidatesByClause,
-    confidenceFloor: plan.mode === "llm_planner" ? 0.5 : undefined,
+  const validation = validateDispatchPlan(validationCatalog, plan, {
+    candidatesByClause: plannerCandidatesByClause,
   });
-  return { catalog, plan, validation };
+  return { catalog: validationCatalog, plan, validation };
 }
 
 function dryRunReport(validation: ValidationReport, dryRun: boolean): ExecutionReport {

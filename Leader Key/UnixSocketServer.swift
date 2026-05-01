@@ -116,18 +116,45 @@ final class UnixSocketServer {
   }
 
   private func handleClient(socket: Int32) {
-    let bufferSize = 1024
-    let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: bufferSize)
-    defer { buffer.deallocate() }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
 
-    let bytesRead = recv(socket, buffer, bufferSize - 1, 0)
-    guard bytesRead > 0 else {
+    while true {
+      let bufferCount = buffer.count
+      let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
+        guard let baseAddress = rawBuffer.baseAddress else {
+          return -1
+        }
+        return recv(socket, baseAddress, bufferCount, 0)
+      }
+      if bytesRead > 0 {
+        buffer.withUnsafeBufferPointer { rawBuffer in
+          if let baseAddress = rawBuffer.baseAddress {
+            data.append(baseAddress, count: bytesRead)
+          }
+        }
+        continue
+      }
+
+      if bytesRead == 0 {
+        break
+      }
+
+      if errno == EINTR {
+        continue
+      }
+
+      debugLog("[UnixSocketServer] Failed to read command: \(String(cString: strerror(errno)))")
       close(socket)
       return
     }
 
-    buffer[bytesRead] = 0
-    let command = String(cString: buffer).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !data.isEmpty else {
+      close(socket)
+      return
+    }
+
+    let command = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
 
     totalCommands += 1
 

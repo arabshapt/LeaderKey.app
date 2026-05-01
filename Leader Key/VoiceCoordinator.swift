@@ -6,9 +6,28 @@ import KeyboardShortcuts
 
 enum VoiceKeychain {
   static let groqAPIKeyAccount = "voice.groq"
+  static let geminiAPIKeyAccount = "voice.gemini"
 }
 
 final class VoiceCoordinator {
+  private struct VoiceDispatchCurrentAppContext: Encodable {
+    let bundleId: String?
+    let localizedName: String?
+  }
+
+  private struct VoiceDispatchRecentCommandContext: Encodable {
+    let transcript: String
+    let action_ids: [String]
+    let labels: [String]
+    let types: [String]
+    let plan_reason: String
+  }
+
+  private struct VoiceDispatchContext: Encodable {
+    let currentApp: VoiceDispatchCurrentAppContext?
+    let recentCommands: [VoiceDispatchRecentCommandContext]
+  }
+
   enum State: Equatable {
     case idle
     case recordingToggle
@@ -59,6 +78,7 @@ final class VoiceCoordinator {
   private let dispatchBridge = VoiceDispatchBridge()
   private let transcriber = GroqSpeechToTextClient()
   private var settingsObserver: NSObjectProtocol?
+  private var recentSuccessfulCommands: [VoiceDispatchRecentCommandContext] = []
   private var state: State = .idle {
     didSet {
       statusItem.voiceStatus = state.statusItemStatus
@@ -189,13 +209,13 @@ final class VoiceCoordinator {
 
     let prompt = transcriptionPrompt()
     let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    let dispatchOptions = voiceDispatchOptions()
+    let dispatchOptions = voiceDispatchOptions(bundleId: targetBundleId)
 
     Task { [weak self] in
       guard let self else { return }
 
       do {
-        let transcript = try await self.transcribe(result: result, prompt: prompt)
+        var transcript = try await self.transcribe(result: result, prompt: prompt)
 
         await MainActor.run {
           debugLog(
@@ -205,7 +225,7 @@ final class VoiceCoordinator {
         }
 
         do {
-          let dispatch = try await self.dispatchBridge.dispatch(
+          var dispatch = try await self.dispatchBridge.dispatch(
             transcript: transcript.text,
             bundleId: targetBundleId,
             options: dispatchOptions
@@ -213,6 +233,43 @@ final class VoiceCoordinator {
 
           await MainActor.run {
             debugLog("[VoiceCoordinator] Dispatch \(dispatch.debugSummary)")
+          }
+
+          if self.shouldRetryTranscription(transcript: transcript, dispatch: dispatch) {
+            do {
+              await MainActor.run {
+                debugLog("[VoiceCoordinator] Retrying Groq STT with \(VoiceSTTModel.whisperLargeV3.rawValue)")
+              }
+              let retriedTranscript = try await self.transcribe(
+                result: result,
+                prompt: prompt,
+                modelOverride: .whisperLargeV3
+              )
+              let retriedDispatch = try await self.dispatchBridge.dispatch(
+                transcript: retriedTranscript.text,
+                bundleId: targetBundleId,
+                options: dispatchOptions
+              )
+
+              await MainActor.run {
+                debugLog(
+                  "[VoiceCoordinator] Groq retry transcript model=\(retriedTranscript.model) requestID=\(retriedTranscript.requestID ?? "n/a") text=\"\(retriedTranscript.text)\""
+                )
+                debugLog("[VoiceCoordinator] Retry dispatch \(retriedDispatch.debugSummary)")
+              }
+
+              if retriedDispatch.isBetterForVoiceThan(dispatch) {
+                transcript = retriedTranscript
+                dispatch = retriedDispatch
+                await MainActor.run {
+                  debugLog("[VoiceCoordinator] Using retry transcript for dispatch")
+                }
+              }
+            } catch {
+              await MainActor.run {
+                debugLog("[VoiceCoordinator] Groq accuracy retry failed: \(error)")
+              }
+            }
           }
 
           let shouldOfferConfirmation =
@@ -232,6 +289,7 @@ final class VoiceCoordinator {
                   options: dispatchOptions.withAllowDestructive(true)
                 )
                 await MainActor.run {
+                  self.rememberSuccessfulCommand(transcript: transcript.text, dispatch: confirmedDispatch)
                   self.state = .ready(confirmedDispatch.displayMessage)
                   self.returnToIdleAfterReady(multiStep: confirmedDispatch.isMultiStep)
                   debugLog(
@@ -258,6 +316,7 @@ final class VoiceCoordinator {
                 debugLog(
                   "[VoiceCoordinator] Planner fallback: \(plannerError)")
               }
+              self.rememberSuccessfulCommand(transcript: transcript.text, dispatch: dispatch)
               self.state = .ready(dispatch.displayMessage)
               self.returnToIdleAfterReady(multiStep: dispatch.isMultiStep)
             }
@@ -289,7 +348,8 @@ final class VoiceCoordinator {
 
   private func transcribe(
     result: VoiceAudioCapture.CaptureResult,
-    prompt: String?
+    prompt: String?,
+    modelOverride: VoiceSTTModel? = nil
   ) async throws -> VoiceTranscriptionResult {
     guard let apiKey = KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) else {
       throw VoiceTranscriptionError.missingAPIKey
@@ -297,18 +357,33 @@ final class VoiceCoordinator {
 
     return try await transcriber.transcribe(
       audioURL: result.url,
-      model: Defaults[.voiceSTTModel],
+      model: modelOverride ?? Defaults[.voiceSTTModel],
       apiKey: apiKey,
       prompt: prompt
     )
   }
 
-  private func voiceDispatchOptions() -> VoiceDispatchOptions {
+  private func shouldRetryTranscription(
+    transcript: VoiceTranscriptionResult,
+    dispatch: VoiceDispatchResult
+  ) -> Bool {
+    guard transcript.model == VoiceSTTModel.whisperLargeV3Turbo.rawValue else {
+      return false
+    }
+    return transcript.suggestsAccuracyRetry || dispatch.needsTranscriptionRetry
+  }
+
+  private func voiceDispatchOptions(bundleId: String?) -> VoiceDispatchOptions {
     let plannerMode = Defaults[.voicePlannerMode]
-    let model =
-      (plannerMode == .tieredGroq || plannerMode == .groqOnly)
-      ? Defaults[.voiceGroqPlannerModel]
-      : Defaults[.voiceTier2Model]
+    let model: String
+    switch plannerMode {
+    case .tieredGroq, .groqOnly:
+      model = Defaults[.voiceGroqPlannerModel]
+    case .tieredGemini, .geminiOnly:
+      model = Defaults[.voiceGeminiPlannerModel]
+    case .fastOnly, .tiered, .tieredOllama:
+      model = Defaults[.voiceTier2Model]
+    }
     return VoiceDispatchOptions(
       configDirectory: Defaults[.configDir],
       execute: Defaults[.voiceDispatchMode] == .execute,
@@ -316,8 +391,52 @@ final class VoiceCoordinator {
       plannerMode: plannerMode,
       llamaURL: Defaults[.voiceLlamaServerURL],
       model: model,
-      groqApiKey: KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) ?? ""
+      groqApiKey: KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) ?? "",
+      geminiApiKey: KeychainHelper.load(account: VoiceKeychain.geminiAPIKeyAccount) ?? "",
+      contextJSON: voiceDispatchContextJSON(bundleId: bundleId)
     )
+  }
+
+  private func voiceDispatchContextJSON(bundleId: String?) -> String? {
+    let currentApp = NSWorkspace.shared.frontmostApplication
+    let context = VoiceDispatchContext(
+      currentApp: VoiceDispatchCurrentAppContext(
+        bundleId: bundleId,
+        localizedName: currentApp?.localizedName
+      ),
+      recentCommands: recentSuccessfulCommands
+    )
+
+    guard let data = try? JSONEncoder().encode(context) else {
+      return nil
+    }
+    return String(data: data, encoding: .utf8)
+  }
+
+  private func rememberSuccessfulCommand(
+    transcript: String,
+    dispatch: VoiceDispatchResult
+  ) {
+    guard dispatch.validation.valid,
+      !dispatch.execution.blocked,
+      !dispatch.execution.steps.isEmpty
+    else {
+      return
+    }
+
+    recentSuccessfulCommands.append(
+      VoiceDispatchRecentCommandContext(
+        transcript: transcript,
+        action_ids: dispatch.execution.steps.map(\.actionID),
+        labels: dispatch.execution.steps.map(\.label),
+        types: dispatch.execution.steps.map(\.type),
+        plan_reason: dispatch.plan.reason
+      )
+    )
+
+    if recentSuccessfulCommands.count > 6 {
+      recentSuccessfulCommands.removeFirst(recentSuccessfulCommands.count - 6)
+    }
   }
 
   @MainActor

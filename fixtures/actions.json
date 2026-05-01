@@ -132,6 +132,54 @@
       ]
     },
     {
+      "key": "o",
+      "type": "group",
+      "label": "Open",
+      "actions": [
+        {
+          "key": "a",
+          "type": "application",
+          "label": "Activity Monitor",
+          "description": "Open Activity Monitor",
+          "voiceId": "app_activity_monitor",
+          "value": "/System/Applications/Utilities/Activity Monitor.app"
+        },
+        {
+          "key": "c",
+          "type": "application",
+          "label": "Google Chrome",
+          "description": "Open Chrome",
+          "voiceId": "app_google_chrome",
+          "value": "/Applications/Google Chrome.app"
+        }
+      ]
+    },
+    {
+      "key": "w",
+      "type": "group",
+      "label": "Window",
+      "actions": [
+        {
+          "key": "h",
+          "type": "url",
+          "label": "Raycast: Left Half",
+          "description": "Move active window to the left half",
+          "voiceId": "window_left_half",
+          "voiceAliases": ["left half", "move left", "tile left", "snap left"],
+          "value": "raycast://extensions/raycast/window-management/left-half"
+        },
+        {
+          "key": "l",
+          "type": "url",
+          "label": "Raycast: Right Half",
+          "description": "Move active window to the right half",
+          "voiceId": "window_right_half",
+          "voiceAliases": ["right half", "move right", "tile right", "snap right"],
+          "value": "raycast://extensions/raycast/window-management/right-half"
+        }
+      ]
+    },
+    {
       "key": "u",
       "type": "group",
       "label": "Unsafe",

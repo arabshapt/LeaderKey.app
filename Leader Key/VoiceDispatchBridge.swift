@@ -9,6 +9,8 @@ struct VoiceDispatchOptions: Sendable {
   let llamaURL: String
   let model: String
   let groqApiKey: String
+  let geminiApiKey: String
+  let contextJSON: String?
 
   func withAllowDestructive(_ allow: Bool) -> VoiceDispatchOptions {
     VoiceDispatchOptions(
@@ -18,7 +20,9 @@ struct VoiceDispatchOptions: Sendable {
       plannerMode: plannerMode,
       llamaURL: llamaURL,
       model: model,
-      groqApiKey: groqApiKey
+      groqApiKey: groqApiKey,
+      geminiApiKey: geminiApiKey,
+      contextJSON: contextJSON
     )
   }
 }
@@ -80,6 +84,31 @@ struct VoiceDispatchResult: Decodable, Sendable {
 
   var isMultiStep: Bool {
     execution.steps.count > 1
+  }
+
+  var needsTranscriptionRetry: Bool {
+    execution.blocked
+      || !validation.valid
+      || plan.chain.isEmpty
+      || plan.overallConfidence < 0.75
+  }
+
+  func isBetterForVoiceThan(_ other: VoiceDispatchResult) -> Bool {
+    voiceQualityScore > other.voiceQualityScore + 0.05
+  }
+
+  private var voiceQualityScore: Double {
+    var score = plan.overallConfidence
+    if validation.valid && !execution.blocked {
+      score += 1
+    }
+    if !plan.chain.isEmpty {
+      score += 0.5
+    }
+    if execution.needsConfirmation {
+      score -= 0.15
+    }
+    return score
   }
 }
 
@@ -144,6 +173,7 @@ struct VoiceDispatchExecution: Decodable, Sendable {
 struct VoiceDispatchExecutionStep: Decodable, Sendable {
   let actionID: String
   let label: String
+  let type: String
   let executed: Bool
   let blocked: Bool
   let requiresConfirmation: Bool
@@ -152,6 +182,7 @@ struct VoiceDispatchExecutionStep: Decodable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case actionID = "action_id"
     case label
+    case type
     case executed
     case blocked
     case requiresConfirmation = "requires_confirmation"
@@ -312,6 +343,8 @@ final class VoiceDispatchBridge {
       plannerFlag = "ollama"
     case .tieredGroq, .groqOnly:
       plannerFlag = "groq"
+    case .tieredGemini, .geminiOnly:
+      plannerFlag = "gemini"
     case .fastOnly:
       plannerFlag = "none"
     }
@@ -342,10 +375,21 @@ final class VoiceDispatchBridge {
       if options.plannerMode == .groqOnly {
         arguments.append("--always-plan")
       }
+    } else if options.plannerMode == .tieredGemini || options.plannerMode == .geminiOnly {
+      arguments += [
+        "--gemini-api-key", options.geminiApiKey,
+        "--model", options.model,
+      ]
+      if options.plannerMode == .geminiOnly {
+        arguments.append("--always-plan")
+      }
     }
 
     if let bundleId, !bundleId.isEmpty {
       arguments += ["--bundle-id", bundleId]
+    }
+    if let contextJSON = options.contextJSON, !contextJSON.isEmpty {
+      arguments += ["--context-json", contextJSON]
     }
 
     arguments.append(options.execute ? "--execute" : "--dry-run")

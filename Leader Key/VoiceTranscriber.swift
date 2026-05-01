@@ -4,6 +4,45 @@ struct VoiceTranscriptionResult {
   let text: String
   let model: String
   let requestID: String?
+  let quality: VoiceTranscriptionQuality
+
+  var suggestsAccuracyRetry: Bool {
+    quality.suggestsAccuracyRetry || Self.looksRepetitive(text)
+  }
+
+  private static func looksRepetitive(_ text: String) -> Bool {
+    let words = text
+      .lowercased()
+      .split { !$0.isLetter && !$0.isNumber }
+      .map(String.init)
+    guard words.count >= 4 else { return false }
+    return Set(words).count <= 2
+  }
+}
+
+struct VoiceTranscriptionQuality {
+  let averageLogProbability: Double?
+  let maximumNoSpeechProbability: Double?
+  let maximumCompressionRatio: Double?
+
+  var suggestsAccuracyRetry: Bool {
+    if let averageLogProbability, averageLogProbability < -0.8 {
+      return true
+    }
+    if let maximumNoSpeechProbability, maximumNoSpeechProbability > 0.65 {
+      return true
+    }
+    if let maximumCompressionRatio, maximumCompressionRatio > 2.6 {
+      return true
+    }
+    return false
+  }
+
+  static let unavailable = VoiceTranscriptionQuality(
+    averageLogProbability: nil,
+    maximumNoSpeechProbability: nil,
+    maximumCompressionRatio: nil
+  )
 }
 
 enum VoiceTranscriptionError: LocalizedError {
@@ -37,12 +76,26 @@ final class GroqSpeechToTextClient {
       let id: String?
     }
 
+    struct Segment: Decodable {
+      let avgLogprob: Double?
+      let compressionRatio: Double?
+      let noSpeechProb: Double?
+
+      enum CodingKeys: String, CodingKey {
+        case avgLogprob = "avg_logprob"
+        case compressionRatio = "compression_ratio"
+        case noSpeechProb = "no_speech_prob"
+      }
+    }
+
     let text: String
     let xGroq: RequestMetadata?
+    let segments: [Segment]?
 
     enum CodingKeys: String, CodingKey {
       case text
       case xGroq = "x_groq"
+      case segments
     }
   }
 
@@ -99,7 +152,8 @@ final class GroqSpeechToTextClient {
     return VoiceTranscriptionResult(
       text: transcript,
       model: model.rawValue,
-      requestID: decoded.xGroq?.id
+      requestID: decoded.xGroq?.id,
+      quality: Self.quality(from: decoded.segments)
     )
   }
 
@@ -114,7 +168,7 @@ final class GroqSpeechToTextClient {
     let filename = audioURL.lastPathComponent
 
     body.appendMultipartField(name: "model", value: model, boundary: boundary)
-    body.appendMultipartField(name: "response_format", value: "json", boundary: boundary)
+    body.appendMultipartField(name: "response_format", value: "verbose_json", boundary: boundary)
     body.appendMultipartField(name: "language", value: "en", boundary: boundary)
     body.appendMultipartField(name: "temperature", value: "0", boundary: boundary)
     if let prompt = limitedPrompt(prompt) {
@@ -128,6 +182,29 @@ final class GroqSpeechToTextClient {
     body.append("--\(boundary)--\r\n")
 
     return body
+  }
+
+  private static func quality(
+    from segments: [GroqTranscriptionResponse.Segment]?
+  ) -> VoiceTranscriptionQuality {
+    guard let segments, !segments.isEmpty else {
+      return .unavailable
+    }
+
+    let logProbabilities = segments.compactMap(\.avgLogprob)
+    let noSpeechProbabilities = segments.compactMap(\.noSpeechProb)
+    let compressionRatios = segments.compactMap(\.compressionRatio)
+
+    let averageLogProbability =
+      logProbabilities.isEmpty
+      ? nil
+      : logProbabilities.reduce(0, +) / Double(logProbabilities.count)
+
+    return VoiceTranscriptionQuality(
+      averageLogProbability: averageLogProbability,
+      maximumNoSpeechProbability: noSpeechProbabilities.max(),
+      maximumCompressionRatio: compressionRatios.max()
+    )
   }
 
   private func limitedPrompt(_ prompt: String?) -> String? {

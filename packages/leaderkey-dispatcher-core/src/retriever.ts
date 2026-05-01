@@ -14,7 +14,7 @@ const STOP_WORDS = new Set([
 ]);
 
 function queryTokens(value: string): string[] {
-  return uniqueTokens(value).filter((token) => !STOP_WORDS.has(token));
+  return uniqueTokens(expandQuery(value)).filter((token) => !STOP_WORDS.has(token));
 }
 
 function entryTokens(entry: ActionEntry): string[] {
@@ -29,6 +29,27 @@ function documentFrequency(entries: ActionEntry[]): Map<string, number> {
     }
   }
   return df;
+}
+
+function expandQuery(value: string): string {
+  const normalized = normalizeText(value).replace(/side-by-side/g, "side by side");
+  const additions: string[] = [];
+  if (/\bleft\b/.test(normalized) && /\b(?:half|move|snap|tile|window|side)\b/.test(normalized)) {
+    additions.push("left half raycast window management");
+  }
+  if (/\bright\b/.test(normalized) && /\b(?:half|move|snap|tile|window|side)\b/.test(normalized)) {
+    additions.push("right half raycast window management");
+  }
+  if (/\b(?:side by side|split screen|next to each other)\b/.test(normalized)) {
+    additions.push("left half right half raycast window management");
+  }
+  if (/\b(?:settings|preferences|prefs)\b/.test(normalized)) {
+    additions.push("settings preferences prefs showsettings show settings");
+  }
+  if (/\bterminal\b/.test(normalized)) {
+    additions.push("terminal tool window activateterminaltoolwindow");
+  }
+  return [value, ...additions].join(" ");
 }
 
 function bm25Score(query: string, entry: ActionEntry, df: Map<string, number>, docCount: number): number {
@@ -60,18 +81,19 @@ function bm25Score(query: string, entry: ActionEntry, df: Map<string, number>, d
 }
 
 function lexicalBoost(query: string, entry: ActionEntry): number {
-  const normalized = normalizeText(query);
+  const rawNormalized = normalizeText(query);
+  const normalized = normalizeText(expandQuery(query));
   const search = normalizeText(entry.searchText);
   const label = normalizeText(entry.label);
   const value = normalizeText(entry.value);
 
-  if (!normalized) {
+  if (!rawNormalized) {
     return 0;
   }
-  if (label === normalized || value === normalized) {
+  if (label === rawNormalized || value === rawNormalized) {
     return 8;
   }
-  if (label.includes(normalized) || search.includes(normalized)) {
+  if (label.includes(rawNormalized) || search.includes(rawNormalized)) {
     return 5;
   }
 
@@ -79,7 +101,7 @@ function lexicalBoost(query: string, entry: ActionEntry): number {
   const tokenSet = new Set(tokenize(search));
   const hits = tokens.filter((token) => tokenSet.has(token)).length;
   const recall = tokens.length > 0 ? hits / tokens.length : 0;
-  const fuzzy = Math.max(bigramSimilarity(normalized, label), bigramSimilarity(normalized, search.slice(0, 160)));
+  const fuzzy = Math.max(bigramSimilarity(rawNormalized, label), bigramSimilarity(rawNormalized, search.slice(0, 160)));
   return recall * 3 + fuzzy * 1.5;
 }
 

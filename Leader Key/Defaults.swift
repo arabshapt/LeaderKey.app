@@ -157,6 +157,9 @@ extension Defaults.Keys {
   /// Groq Cloud model for the planner tier.
   static let voiceGroqPlannerModel = Key<String>(
     "voiceGroqPlannerModel", default: "llama-3.3-70b-versatile", suite: defaultsSuite)
+  /// Gemini model for the planner tier.
+  static let voiceGeminiPlannerModel = Key<String>(
+    "voiceGeminiPlannerModel", default: "gemini-2.5-flash", suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -332,6 +335,8 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
   case tieredOllama
   case tieredGroq
   case groqOnly
+  case tieredGemini
+  case geminiOnly
 
   var id: Self { self }
 
@@ -347,6 +352,10 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Tiered (Groq Cloud)"
     case .groqOnly:
       return "Groq Only"
+    case .tieredGemini:
+      return "Tiered (Gemini)"
+    case .geminiOnly:
+      return "Gemini Only"
     }
   }
 
@@ -362,11 +371,16 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Fast matcher first, then Groq Cloud API for harder commands. Uses your Groq API key."
     case .groqOnly:
       return "Always use Groq Cloud API. Handles repetition, multi-step, and complex commands."
+    case .tieredGemini:
+      return "Fast matcher first, then Gemini API for harder commands. Uses your Gemini API key."
+    case .geminiOnly:
+      return "Always use Gemini API with retrieved candidates only. Handles complex voice commands."
     }
   }
 
   var isTiered: Bool {
     self == .tiered || self == .tieredOllama || self == .tieredGroq || self == .groqOnly
+      || self == .tieredGemini || self == .geminiOnly
   }
 }
 
