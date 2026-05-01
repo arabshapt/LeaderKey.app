@@ -207,6 +207,7 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveShake()
   func unixSocketServerRequestState() -> [String: Any]
   func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String)
+  func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String
 }
 
 enum HintOverlayCommand {

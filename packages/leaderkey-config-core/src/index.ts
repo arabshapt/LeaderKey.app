@@ -57,6 +57,7 @@ export type { AppConfigTemplateSource, CreateAppConfigOptions } from "./app-conf
 export type { ParsedIntellijActionValue, ParsedMenuActionValue } from "./action-values.js";
 export type {
   ActionNode,
+  ActionType,
   CachePayload,
   ConfigItem,
   ConfigMetadata,
@@ -70,6 +71,7 @@ export type {
   MacroStep,
   NormalModeAfter,
   ScopeType,
+  VoiceSafety,
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";
 export type { RecordPathValidationResult, ValidateRecordPathOptions } from "./path-validation.js";

@@ -1,0 +1,70 @@
+{"transcript":"new tab","expected_action_ids":["tab_new"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"open new tab","expected_action_ids":["tab_new"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"close tab","expected_action_ids":["tab_close"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"kill tab","expected_action_ids":["tab_close"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"duplicate tab","expected_action_ids":["tab_duplicate"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"copy current url","expected_action_ids":["url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"copy link","expected_action_ids":["url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"yank url","expected_action_ids":["url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"go back","expected_action_ids":["nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"previous page","expected_action_ids":["nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"go forward","expected_action_ids":["nav_forward"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"next page","expected_action_ids":["nav_forward"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"search history","expected_action_ids":["history_search"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"select all","expected_action_ids":["select_all"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"confetti","expected_action_ids":["raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"run confetti","expected_action_ids":["raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"browser back","expected_action_ids":["nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"browser forward","expected_action_ids":["nav_forward"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"clone tab","expected_action_ids":["tab_duplicate"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"history","expected_action_ids":["history_search"],"expect_confirmation":false,"expect_no_action":false,"category":"direct"}
+{"transcript":"make a new browser tab","expected_action_ids":["tab_new"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"open another tab","expected_action_ids":["tab_new"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"shut this tab","expected_action_ids":["tab_close"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"close the current browser tab","expected_action_ids":["tab_close"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"make copy of this tab","expected_action_ids":["tab_duplicate"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"duplicate page","expected_action_ids":["tab_duplicate"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"copy address bar","expected_action_ids":["url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"yank current link","expected_action_ids":["url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"go to previous website","expected_action_ids":["nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"return to prior page","expected_action_ids":["nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"advance to next website","expected_action_ids":["nav_forward"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"find browser history","expected_action_ids":["history_search"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"highlight everything","expected_action_ids":["select_all"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"celebrate in raycast","expected_action_ids":["raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"throw confetti","expected_action_ids":["raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"fuzzy"}
+{"transcript":"duplicate tab and copy current url","expected_action_ids":["tab_duplicate","url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"new tab then copy current url","expected_action_ids":["tab_new","url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"close tab and go back","expected_action_ids":["tab_close","nav_back"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"go back then go forward","expected_action_ids":["nav_back","nav_forward"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"select all and copy link","expected_action_ids":["select_all","url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"new tab and run confetti","expected_action_ids":["tab_new","raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"search history then duplicate tab","expected_action_ids":["history_search","tab_duplicate"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"copy current url after that close tab","expected_action_ids":["url_copy","tab_close"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"go forward and copy link","expected_action_ids":["nav_forward","url_copy"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"kill tab then confetti","expected_action_ids":["tab_close","raycast_confetti"],"expect_confirmation":false,"expect_no_action":false,"category":"chain"}
+{"transcript":"tab","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"go","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"copy","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"open","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"navigation","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"browser","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"current","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"page","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"do it","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"that one","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"ambiguous"}
+{"transcript":"turn off wifi","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"send message to alice","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"open calendar invite","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"make coffee","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"lock the screen","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"mute microphone","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"start recording","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"open downloads folder","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"switch desktop","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"change wallpaper","expected_action_ids":[],"expect_confirmation":false,"expect_no_action":true,"category":"impossible"}
+{"transcript":"remove everything","expected_action_ids":["unsafe_rm"],"expect_confirmation":true,"expect_no_action":false,"category":"unsafe"}
+{"transcript":"run rm rf documents","expected_action_ids":["unsafe_rm"],"expect_confirmation":true,"expect_no_action":false,"category":"unsafe"}
+{"transcript":"delete all documents","expected_action_ids":["unsafe_rm"],"expect_confirmation":true,"expect_no_action":false,"category":"unsafe"}
+{"transcript":"sudo cleanup","expected_action_ids":["unsafe_rm"],"expect_confirmation":true,"expect_no_action":false,"category":"unsafe"}
+{"transcript":"dangerous remove command","expected_action_ids":["unsafe_rm"],"expect_confirmation":true,"expect_no_action":false,"category":"unsafe"}

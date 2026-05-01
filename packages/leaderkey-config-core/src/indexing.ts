@@ -22,6 +22,7 @@ import type {
 } from "./types.js";
 
 interface InternalSource {
+  bundleId?: string;
   configDisplayName: string;
   configPath: string;
   nodePath: number[];
@@ -230,6 +231,7 @@ function buildFlatRecord(
       displayLabel,
       effectiveConfigDisplayName: effectiveDescriptor.displayName,
       effectiveConfigPath: effectiveDescriptor.filePath,
+      effectiveBundleId: effectiveDescriptor.bundleId,
       effectiveKeyPath: node.effectiveKeyPath,
       effectiveScope: effectiveDescriptor.scope,
       id: stableHash([
@@ -261,6 +263,7 @@ function buildFlatRecord(
         .toLowerCase(),
       sourceConfigDisplayName: node.source.configDisplayName,
       sourceConfigPath: node.source.configPath,
+      sourceBundleId: node.source.bundleId,
       sourceNodePath: node.source.nodePath,
       sourceScope: node.source.scope,
       sourceStatus,
@@ -301,6 +304,7 @@ function buildFlatRecord(
     displayLabel,
     effectiveConfigDisplayName: effectiveDescriptor.displayName,
     effectiveConfigPath: effectiveDescriptor.filePath,
+    effectiveBundleId: effectiveDescriptor.bundleId,
     effectiveKeyPath: node.effectiveKeyPath,
     effectiveScope: effectiveDescriptor.scope,
     id: stableHash([
@@ -328,6 +332,7 @@ function buildFlatRecord(
       description,
       aiDescription,
       node.item.label,
+      node.item.voiceAliases?.join(" "),
       node.item.type,
       node.item.value,
       node.item.menuFallbackPaths?.join(" "),
@@ -339,10 +344,15 @@ function buildFlatRecord(
       .toLowerCase(),
     sourceConfigDisplayName: node.source.configDisplayName,
     sourceConfigPath: node.source.configPath,
+    sourceBundleId: node.source.bundleId,
+    sourceNode: node.item,
     sourceNodePath: node.source.nodePath,
     sourceScope: node.source.scope,
     sourceStatus,
     stickyMode: node.item.stickyMode,
+    voiceAliases: node.item.voiceAliases,
+    voiceId: node.item.voiceId,
+    voiceSafety: node.item.voiceSafety,
     valuePreview,
   };
 }
@@ -379,6 +389,7 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
   for (const descriptor of configs) {
     const sourceGroup = await loadGroupFromFile(descriptor.filePath);
     const localSource: InternalSource = {
+      bundleId: descriptor.bundleId,
       configDisplayName: descriptor.displayName,
       configPath: descriptor.filePath,
       nodePath: [],
@@ -399,6 +410,7 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
 
     if ((descriptor.scope === "app" || descriptor.scope === "normalApp") && inheritedGroup && inheritedDescriptor) {
       const fallbackSource: InternalSource = {
+        bundleId: inheritedDescriptor.bundleId,
         configDisplayName: inheritedDescriptor.displayName,
         configPath: inheritedDescriptor.filePath,
         nodePath: [],

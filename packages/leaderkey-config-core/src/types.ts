@@ -18,6 +18,7 @@ export type ActionType =
   | "url";
 
 export type NormalModeAfter = "disabled" | "input" | "normal";
+export type VoiceSafety = "safe" | "confirm" | "block";
 
 export type ScopeType = "app" | "fallback" | "global" | "normalApp" | "normalFallback";
 
@@ -33,6 +34,9 @@ export interface ActionNode {
   label?: string;
   description?: string;
   aiDescription?: string;
+  voiceId?: string;
+  voiceSafety?: VoiceSafety;
+  voiceAliases?: string[];
   value: string;
   iconPath?: string;
   activates?: boolean;
@@ -107,9 +111,11 @@ export interface FlatIndexRecord {
   menuFallbackPaths?: string[];
   effectiveConfigDisplayName: string;
   effectiveConfigPath: string;
+  effectiveBundleId?: string;
   effectiveScope: ScopeType;
   sourceConfigDisplayName: string;
   sourceConfigPath: string;
+  sourceBundleId?: string;
   sourceScope: ScopeType;
   sourceNodePath: number[];
   inherited: boolean;
@@ -117,9 +123,13 @@ export interface FlatIndexRecord {
   stickyMode?: boolean;
   normalModeAfter?: NormalModeAfter;
   activates?: boolean;
+  voiceId?: string;
+  voiceSafety?: VoiceSafety;
+  voiceAliases?: string[];
   childCount?: number;
   tapAction?: ActionNode;
   macroStepSummary?: string[];
+  sourceNode?: ConfigItem;
   appName?: string;
   searchText: string;
 }

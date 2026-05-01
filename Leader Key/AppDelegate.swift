@@ -1339,6 +1339,165 @@ extension AppDelegate {
     }
   }
 
+  func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String {
+    if Thread.isMainThread {
+      return handleDispatchExecutePayload(payload)
+    }
+
+    var response = "{\"executed\":false,\"dry_run\":true,\"blocked\":true,\"needs_confirmation\":false,\"reason\":\"dispatch unavailable\",\"steps\":[]}"
+    DispatchQueue.main.sync { [weak self] in
+      response = self?.handleDispatchExecutePayload(payload)
+        ?? "{\"executed\":false,\"dry_run\":true,\"blocked\":true,\"needs_confirmation\":false,\"reason\":\"Leader Key app delegate unavailable\",\"steps\":[]}"
+    }
+    return response
+  }
+
+  private func handleDispatchExecutePayload(_ payload: [String: Any]) -> String {
+    ensureControllerReady()
+
+    let dryRun = payload["dryRun"] as? Bool ?? true
+    guard let steps = payload["steps"] as? [[String: Any]] else {
+      return dispatchJSON([
+        "blocked": true,
+        "dry_run": dryRun,
+        "executed": false,
+        "needs_confirmation": false,
+        "reason": "dispatch execute requires steps",
+        "steps": [],
+      ])
+    }
+
+    var reports: [[String: Any]] = []
+    var resolved: [(index: Int, action: Action)] = []
+
+    for step in steps {
+      let actionId = step["actionId"] as? String ?? ""
+      let label = step["label"] as? String ?? actionId
+      let actionType = step["actionType"] as? String ?? ""
+      let safety = step["safety"] as? String ?? "safe"
+      let requiresConfirmation = step["requiresConfirmation"] as? Bool ?? false
+      var report: [String: Any] = [
+        "action_id": actionId,
+        "blocked": false,
+        "dry_run": dryRun,
+        "executed": false,
+        "label": label,
+        "requires_confirmation": requiresConfirmation || safety == "confirm",
+        "type": actionType,
+      ]
+
+      guard safety != "block" else {
+        report["blocked"] = true
+        report["reason"] = "action marked blocked"
+        reports.append(report)
+        continue
+      }
+
+      guard !(requiresConfirmation || safety == "confirm") else {
+        report["reason"] = "confirmation required"
+        reports.append(report)
+        continue
+      }
+
+      guard let scope = step["effectiveScope"] as? String,
+            let keyPath = step["effectiveKeyPath"] as? [String],
+            let root = dispatchRoot(forScope: scope, bundleId: step["bundleId"] as? String) else {
+        report["blocked"] = true
+        report["reason"] = "unsupported dispatch scope or path"
+        reports.append(report)
+        continue
+      }
+
+      guard let action = Self.resolveAction(in: root, path: keyPath) else {
+        report["blocked"] = true
+        report["reason"] = "action path not found"
+        reports.append(report)
+        continue
+      }
+
+      guard action.type.rawValue == actionType else {
+        report["blocked"] = true
+        report["reason"] = "action type mismatch"
+        reports.append(report)
+        continue
+      }
+
+      guard action.type != .command, !dispatchActionContainsCommand(action) else {
+        report["blocked"] = true
+        report["reason"] = "voice dispatch blocks command actions"
+        reports.append(report)
+        continue
+      }
+
+      reports.append(report)
+      resolved.append((index: reports.count - 1, action: action))
+    }
+
+    let blocked = reports.contains { ($0["blocked"] as? Bool) == true }
+    let needsConfirmation = reports.contains { ($0["requires_confirmation"] as? Bool) == true }
+    guard !blocked && !needsConfirmation && !dryRun else {
+      return dispatchJSON([
+        "blocked": blocked,
+        "dry_run": dryRun,
+        "executed": false,
+        "needs_confirmation": needsConfirmation,
+        "reason": blocked ? "blocked" : needsConfirmation ? "confirmation required" : "dry run",
+        "steps": reports,
+      ])
+    }
+
+    for item in resolved {
+      controller.runAction(item.action)
+      reports[item.index]["executed"] = true
+    }
+
+    return dispatchJSON([
+      "blocked": false,
+      "dry_run": false,
+      "executed": !resolved.isEmpty,
+      "needs_confirmation": false,
+      "reason": "executed",
+      "steps": reports,
+    ])
+  }
+
+  private func dispatchRoot(forScope scope: String, bundleId: String?) -> Group? {
+    switch scope {
+    case "global":
+      return config.root
+    case "fallback":
+      return config.getFallbackConfig()
+    case "app":
+      return config.getConfig(for: bundleId)
+    case "normalFallback":
+      return config.getNormalFallbackConfig()
+    case "normalApp":
+      return config.getNormalConfig(for: bundleId)
+    default:
+      return nil
+    }
+  }
+
+  private func dispatchActionContainsCommand(_ action: Action) -> Bool {
+    guard action.type == .macro else {
+      return false
+    }
+
+    return action.macroSteps?.contains { step in
+      guard step.enabled else { return false }
+      return step.action.type == .command || dispatchActionContainsCommand(step.action)
+    } ?? false
+  }
+
+  private func dispatchJSON(_ object: [String: Any]) -> String {
+    guard JSONSerialization.isValidJSONObject(object),
+          let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+          let json = String(data: data, encoding: .utf8) else {
+      return "{\"executed\":false,\"dry_run\":true,\"blocked\":true,\"needs_confirmation\":false,\"reason\":\"failed to encode dispatch response\",\"steps\":[]}"
+    }
+    return json
+  }
+
   func setNormalModeStatus(active: Bool) {
     setNormalModeStatus(active ? .normal : .inactive)
   }

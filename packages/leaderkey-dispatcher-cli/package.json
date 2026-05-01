@@ -1,0 +1,19 @@
+{
+  "name": "@leaderkey/dispatcher-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "leaderkey-dispatcher": "dist/index.js"
+  },
+  "scripts": {
+    "build": "npm run build -w @leaderkey/dispatcher-core && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @leaderkey/dispatcher-core && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@leaderkey/config-core": "0.1.0",
+    "@leaderkey/dispatcher-core": "0.1.0"
+  }
+}

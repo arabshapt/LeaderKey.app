@@ -42,6 +42,18 @@ enum KarabinerCommandRouter {
       }
     }
 
+    if trimmedCommand.lowercased().hasPrefix("dispatch execute") {
+      let payloadStart = trimmedCommand.index(trimmedCommand.startIndex, offsetBy: "dispatch execute".count)
+      let payloadText = trimmedCommand[payloadStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let payloadData = payloadText.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] else {
+        return "ERROR: dispatch execute requires a JSON payload"
+      }
+
+      return delegate?.unixSocketServerDidReceiveDispatchExecute(payload)
+        ?? "ERROR: Leader Key app delegate is not available"
+    }
+
     let parts = trimmedCommand.split(separator: " ")
 
     guard !parts.isEmpty else {

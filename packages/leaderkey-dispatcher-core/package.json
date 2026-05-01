@@ -1,0 +1,19 @@
+{
+  "name": "@leaderkey/dispatcher-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "npm run build -w @leaderkey/config-core && tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "npm run build -w @leaderkey/config-core && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@leaderkey/config-core": "0.1.0"
+  }
+}

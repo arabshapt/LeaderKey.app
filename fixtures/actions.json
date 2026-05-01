@@ -1,0 +1,151 @@
+{
+  "type": "group",
+  "actions": [
+    {
+      "key": "t",
+      "type": "group",
+      "label": "Tabs",
+      "actions": [
+        {
+          "key": "n",
+          "type": "shortcut",
+          "label": "New Tab",
+          "description": "Open a new browser tab",
+          "voiceId": "tab_new",
+          "voiceAliases": ["new tab", "open new tab"],
+          "value": "Ct"
+        },
+        {
+          "key": "w",
+          "type": "shortcut",
+          "label": "Close Tab",
+          "description": "Close the current browser tab",
+          "voiceId": "tab_close",
+          "voiceAliases": ["close tab", "kill tab"],
+          "value": "Cw"
+        },
+        {
+          "key": "d",
+          "type": "menu",
+          "label": "Duplicate Tab",
+          "description": "Duplicate the current browser tab",
+          "voiceId": "tab_duplicate",
+          "menuFallbackPaths": ["Tab > Clone Tab", "Window > Duplicate Tab"],
+          "value": "Google Chrome > Tab > Duplicate Tab"
+        }
+      ]
+    },
+    {
+      "key": "y",
+      "type": "group",
+      "label": "Yank",
+      "actions": [
+        {
+          "key": "u",
+          "type": "macro",
+          "label": "Copy Current URL",
+          "description": "Yank or copy the current browser URL to the clipboard",
+          "voiceId": "url_copy",
+          "voiceAliases": ["copy current url", "copy link", "yank url"],
+          "value": "",
+          "macroSteps": [
+            {
+              "delay": 0,
+              "enabled": true,
+              "action": {
+                "type": "shortcut",
+                "value": "Cl"
+              }
+            },
+            {
+              "delay": 0.05,
+              "enabled": true,
+              "action": {
+                "type": "shortcut",
+                "value": "Cc"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "g",
+      "type": "group",
+      "label": "Navigation",
+      "actions": [
+        {
+          "key": "b",
+          "type": "shortcut",
+          "label": "Back",
+          "description": "Go back to the previous page",
+          "voiceId": "nav_back",
+          "value": "Copen_bracket"
+        },
+        {
+          "key": "f",
+          "type": "shortcut",
+          "label": "Forward",
+          "description": "Go forward to the next page",
+          "voiceId": "nav_forward",
+          "value": "Cclose_bracket"
+        },
+        {
+          "key": "h",
+          "type": "shortcut",
+          "label": "Search History",
+          "description": "Search browser history",
+          "voiceId": "history_search",
+          "value": "Cy"
+        }
+      ]
+    },
+    {
+      "key": "e",
+      "type": "group",
+      "label": "Edit",
+      "actions": [
+        {
+          "key": "a",
+          "type": "shortcut",
+          "label": "Select All",
+          "description": "Select all text or items",
+          "voiceId": "select_all",
+          "value": "Ca"
+        }
+      ]
+    },
+    {
+      "key": "r",
+      "type": "group",
+      "label": "Raycast",
+      "actions": [
+        {
+          "key": "c",
+          "type": "url",
+          "label": "Raycast Confetti",
+          "description": "Run Raycast confetti",
+          "voiceId": "raycast_confetti",
+          "voiceAliases": ["confetti", "run confetti"],
+          "value": "raycast://extensions/raycast/raycast/confetti"
+        }
+      ]
+    },
+    {
+      "key": "u",
+      "type": "group",
+      "label": "Unsafe",
+      "actions": [
+        {
+          "key": "r",
+          "type": "command",
+          "label": "Remove Everything",
+          "description": "Dangerous test action",
+          "voiceId": "unsafe_rm",
+          "voiceSafety": "block",
+          "value": "rm -rf ~/Documents"
+        }
+      ]
+    }
+  ]
+}

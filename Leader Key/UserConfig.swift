@@ -1004,6 +1004,12 @@ enum NormalModeAfter: String, Codable, CaseIterable {
   case disabled
 }
 
+enum VoiceSafety: String, Codable, CaseIterable {
+  case safe
+  case confirm
+  case block
+}
+
 struct MacroStep: Codable, Equatable, Identifiable {
   let id = UUID()
   var action: Action
@@ -1030,6 +1036,9 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var label: String?
   var description: String? = nil
   var aiDescription: String? = nil
+  var voiceId: String? = nil
+  var voiceSafety: VoiceSafety? = nil
+  var voiceAliases: [String]? = nil
   var value: String
   var iconPath: String?
   var activates: Bool?
@@ -1043,7 +1052,7 @@ struct Action: Item, Codable, Equatable, Identifiable {
   var fallbackSource: String?
 
   enum CodingKeys: String, CodingKey {
-    case key, type, label, description, aiDescription, value, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter
+    case key, type, label, description, aiDescription, voiceId, voiceSafety, voiceAliases, value, iconPath, activates, menuFallbackPaths, stickyMode, macroSteps, normalModeAfter
     // Exclude isFromFallback and fallbackSource from JSON persistence
   }
 
@@ -1056,6 +1065,8 @@ struct Action: Item, Codable, Equatable, Identifiable {
   static func == (lhs: Action, rhs: Action) -> Bool {
     return lhs.key == rhs.key && lhs.type == rhs.type && lhs.label == rhs.label
       && lhs.description == rhs.description && lhs.aiDescription == rhs.aiDescription
+      && lhs.voiceId == rhs.voiceId && lhs.voiceSafety == rhs.voiceSafety
+      && lhs.voiceAliases == rhs.voiceAliases
       && lhs.value == rhs.value && lhs.iconPath == rhs.iconPath && lhs.activates == rhs.activates
       && lhs.menuFallbackPaths == rhs.menuFallbackPaths && lhs.stickyMode == rhs.stickyMode
       && lhs.macroSteps == rhs.macroSteps && lhs.normalModeAfter == rhs.normalModeAfter
