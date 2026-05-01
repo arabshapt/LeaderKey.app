@@ -232,6 +232,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
 
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
+  private var voiceCoordinator: VoiceCoordinator?
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -260,6 +261,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
         toolbarIcon: NSImage(
           systemSymbolName: "magnifyingglass", accessibilityDescription: "Search Sequences")!,
         contentView: { SearchPane().environmentObject(self.config) }
+      ),
+      Settings.Pane(
+        identifier: .voice,
+        title: "Voice",
+        toolbarIcon: NSImage(
+          systemSymbolName: "waveform", accessibilityDescription: "Voice Dispatcher")!,
+        contentView: { VoicePane() }
       ),
       Settings.Pane(
         identifier: .advanced, title: "Advanced",
@@ -337,6 +345,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     // Setup background services and UI elements
     setupFileMonitor()  // Defined in private extension
     setupStatusItem()  // Defined in private extension
+    setupVoiceCoordinator()
     setupUpdaterController()  // Configure auto-update behavior
     setupStateRecoveryTimer()  // Setup periodic state recovery checks
 
@@ -405,12 +414,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     stateRecoveryTimer?.invalidate()  // Stop state recovery timer
     inputMethodHealthTimer?.invalidate()  // Stop input method health timer
     permissionPollingTimer?.invalidate()  // Stop permission polling timer
+    voiceCoordinator?.stop()
     configDirObserverTask?.cancel()
     menuBarIconObserverTask?.cancel()
     autoUpdateObserverTask?.cancel()
     inputMethodPrefObserverTask?.cancel()
     timeoutSettingsObserverTask?.cancel()
     print("[AppDelegate] applicationWillTerminate completed.")
+  }
+
+  private func setupVoiceCoordinator() {
+    let coordinator = VoiceCoordinator(statusItem: statusItem)
+    coordinator.start()
+    voiceCoordinator = coordinator
   }
 
   // MARK: - State Recovery

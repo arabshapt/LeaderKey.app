@@ -117,6 +117,40 @@ extension Defaults.Keys {
   /// Karabiner 2.0 export backend.
   static let karabiner2Backend = Key<Karabiner2Backend>(
     "karabiner2Backend", default: .karabinerTS, suite: defaultsSuite)
+
+  /// Voice dispatcher feature gate.
+  static let voiceDispatcherEnabled = Key<Bool>(
+    "voiceDispatcherEnabled", default: false, suite: defaultsSuite)
+  /// Keep the audio engine warm while voice is enabled so the first word is not clipped.
+  static let voicePrewarmMicrophone = Key<Bool>(
+    "voicePrewarmMicrophone", default: true, suite: defaultsSuite)
+  /// Voice dispatch is dry-run unless the user explicitly enables execution.
+  static let voiceDispatchMode = Key<VoiceDispatchMode>(
+    "voiceDispatchMode", default: .dryRun, suite: defaultsSuite)
+  /// Planner routing preference for voice dispatch.
+  static let voicePlannerMode = Key<VoicePlannerMode>(
+    "voicePlannerMode", default: .fastOnly, suite: defaultsSuite)
+  /// Groq speech-to-text model.
+  static let voiceSTTModel = Key<VoiceSTTModel>(
+    "voiceSTTModel", default: .whisperLargeV3Turbo, suite: defaultsSuite)
+  /// OpenAI-compatible llama.cpp server URL for local planner tiers.
+  static let voiceLlamaServerURL = Key<String>(
+    "voiceLlamaServerURL", default: "http://localhost:8080", suite: defaultsSuite)
+  /// Tier 2 model identity used by the local planner daemon.
+  static let voiceTier2Model = Key<String>(
+    "voiceTier2Model", default: "Qwen/Qwen3.5-2B", suite: defaultsSuite)
+  /// Tier 2 GGUF file path, if the user manages llama-server from Leader Key later.
+  static let voiceTier2ModelPath = Key<String>(
+    "voiceTier2ModelPath", default: "", suite: defaultsSuite)
+  /// Tier 2 fallback when current llama.cpp support for Qwen3.5 is unstable.
+  static let voiceTier2FallbackModel = Key<String>(
+    "voiceTier2FallbackModel", default: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", suite: defaultsSuite)
+  /// Tier 3 model identity for vague/agentic catalog commands.
+  static let voiceTier3Model = Key<String>(
+    "voiceTier3Model", default: "google/gemma-4-E4B-it", suite: defaultsSuite)
+  /// Tier 3 quantized model path.
+  static let voiceTier3ModelPath = Key<String>(
+    "voiceTier3ModelPath", default: "", suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -261,6 +295,81 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
   }
 }
 
+enum VoiceDispatchMode: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case dryRun
+  case execute
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .dryRun:
+      return "Dry run"
+    case .execute:
+      return "Execute safe actions"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .dryRun:
+      return "Plans commands and reports intended actions without running them."
+    case .execute:
+      return "Runs only validated safe actions. Confirmation and blocked actions still do not run."
+    }
+  }
+}
+
+enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case fastOnly
+  case tiered
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .fastOnly:
+      return "Fast only"
+    case .tiered:
+      return "Tiered"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .fastOnly:
+      return "Use alias, BM25, and fuzzy matching only."
+    case .tiered:
+      return "Use the fast matcher first, then llama-server planner tiers for harder commands."
+    }
+  }
+}
+
+enum VoiceSTTModel: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case whisperLargeV3Turbo = "whisper-large-v3-turbo"
+  case whisperLargeV3 = "whisper-large-v3"
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .whisperLargeV3Turbo:
+      return "Whisper Large v3 Turbo"
+    case .whisperLargeV3:
+      return "Whisper Large v3"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .whisperLargeV3Turbo:
+      return "Groq fast/default transcription model."
+    case .whisperLargeV3:
+      return "Groq higher-accuracy transcription model."
+    }
+  }
+}
+
 enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identifiable {
   case karabiner2 = "karabiner2"
 
@@ -348,6 +457,14 @@ extension KeyboardShortcuts.Name {
   static let fallbackEscape = KeyboardShortcuts.Name(
     "fallbackEscape",
     default: nil  // No default - user can set if needed
+  )
+  static let voiceToggleRecord = KeyboardShortcuts.Name(
+    "voiceToggleRecord",
+    default: nil
+  )
+  static let voiceHoldToTalk = KeyboardShortcuts.Name(
+    "voiceHoldToTalk",
+    default: nil
   )
 
   // Helper for group-specific shortcuts

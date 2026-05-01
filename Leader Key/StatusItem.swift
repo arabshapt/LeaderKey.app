@@ -15,12 +15,24 @@ class StatusItem {
     case input
   }
 
+  enum VoiceStatus: Equatable {
+    case idle
+    case recording
+    case processing
+    case ready(String)
+    case error(String)
+  }
+
   enum ResolvedAppearance: Equatable {
     case normal
     case leaderMode
     case stickyMode
     case normalMode
     case normalInputMode
+    case voiceRecording
+    case voiceProcessing
+    case voiceReady
+    case voiceError
     case reloadSuccess
   }
 
@@ -47,6 +59,11 @@ class StatusItem {
     get { normalModeStatus != .inactive }
     set { normalModeStatus = newValue ? .normal : .inactive }
   }
+  var voiceStatus: VoiceStatus = .idle {
+    didSet {
+      updateStatusItemAppearance()
+    }
+  }
   var stickyModeActive = false {
     didSet {
       updateStatusItemAppearance()
@@ -56,6 +73,7 @@ class StatusItem {
   private var cancellables = Set<AnyCancellable>()
   private var reloadSuccessResetWorkItem: DispatchWorkItem?
   private var modeStatusMenuItem: NSMenuItem?
+  private var voiceStatusMenuItem: NSMenuItem?
 
   var handlePreferences: (() -> Void)?
   var handleReloadConfig: (() -> Void)?
@@ -87,6 +105,13 @@ class StatusItem {
     modeStatusItem.isEnabled = false
     modeStatusMenuItem = modeStatusItem
     menu.addItem(modeStatusItem)
+
+    let voiceStatusItem = NSMenuItem(
+      title: "Voice: Idle", action: nil, keyEquivalent: ""
+    )
+    voiceStatusItem.isEnabled = false
+    voiceStatusMenuItem = voiceStatusItem
+    menu.addItem(voiceStatusItem)
     menu.addItem(NSMenuItem.separator())
 
     let preferencesItem = NSMenuItem(
@@ -168,6 +193,7 @@ class StatusItem {
     NSStatusBar.system.removeStatusItem(item)
     statusItem = nil
     modeStatusMenuItem = nil
+    voiceStatusMenuItem = nil
   }
 
   func indicateReloadSuccess() {
@@ -248,6 +274,7 @@ class StatusItem {
     renderedAppearance = resolvedAppearance
 
     modeStatusMenuItem?.title = menuTitle(for: resolvedAppearance)
+    voiceStatusMenuItem?.title = voiceMenuTitle()
 
     guard let button = feedbackButton() else { return }
 
@@ -259,6 +286,19 @@ class StatusItem {
   private func currentResolvedAppearance() -> ResolvedAppearance {
     if isShowingReloadSuccessFeedback {
       return .reloadSuccess
+    }
+
+    switch voiceStatus {
+    case .idle:
+      break
+    case .recording:
+      return .voiceRecording
+    case .processing:
+      return .voiceProcessing
+    case .ready:
+      return .voiceReady
+    case .error:
+      return .voiceError
     }
 
     if stickyModeActive {
@@ -352,6 +392,14 @@ class StatusItem {
       return (label: "N", fillColor: NSColor.systemBlue, strokeColor: nil, textColor: NSColor.white)
     case .normalInputMode:
       return (label: "I", fillColor: NSColor.systemTeal, strokeColor: nil, textColor: NSColor.white)
+    case .voiceRecording:
+      return (label: "V", fillColor: NSColor.systemRed, strokeColor: nil, textColor: NSColor.white)
+    case .voiceProcessing:
+      return (label: "V", fillColor: NSColor.systemIndigo, strokeColor: nil, textColor: NSColor.white)
+    case .voiceReady:
+      return (label: "V", fillColor: NSColor.systemGreen, strokeColor: nil, textColor: NSColor.white)
+    case .voiceError:
+      return (label: "V", fillColor: NSColor.systemOrange, strokeColor: nil, textColor: NSColor.white)
     case .reloadSuccess:
       return (
         label: "R",
@@ -364,6 +412,21 @@ class StatusItem {
 
   private func menuTitle(for appearance: ResolvedAppearance) -> String {
     "Mode: \(modeName(for: appearance))"
+  }
+
+  private func voiceMenuTitle() -> String {
+    switch voiceStatus {
+    case .idle:
+      return "Voice: Idle"
+    case .recording:
+      return "Voice: Recording"
+    case .processing:
+      return "Voice: Processing"
+    case .ready(let message):
+      return "Voice: \(message)"
+    case .error(let message):
+      return "Voice: \(message)"
+    }
   }
 
   private func tooltip(for appearance: ResolvedAppearance) -> String {
@@ -382,6 +445,14 @@ class StatusItem {
       return "Normal"
     case .normalInputMode:
       return "Input"
+    case .voiceRecording:
+      return "Voice Recording"
+    case .voiceProcessing:
+      return "Voice Processing"
+    case .voiceReady:
+      return "Voice Ready"
+    case .voiceError:
+      return "Voice Error"
     case .reloadSuccess:
       return "Config Reloaded"
     }
