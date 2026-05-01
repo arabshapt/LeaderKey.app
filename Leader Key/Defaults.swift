@@ -133,24 +133,30 @@ extension Defaults.Keys {
   /// Groq speech-to-text model.
   static let voiceSTTModel = Key<VoiceSTTModel>(
     "voiceSTTModel", default: .whisperLargeV3Turbo, suite: defaultsSuite)
-  /// OpenAI-compatible llama.cpp server URL for local planner tiers.
+  /// Local inference server URL for planner tiers (llama-server or Ollama).
   static let voiceLlamaServerURL = Key<String>(
-    "voiceLlamaServerURL", default: "http://localhost:8080", suite: defaultsSuite)
+    "voiceLlamaServerURL", default: "http://localhost:11434", suite: defaultsSuite)
   /// Tier 2 model identity used by the local planner daemon.
   static let voiceTier2Model = Key<String>(
-    "voiceTier2Model", default: "Qwen/Qwen3.5-2B", suite: defaultsSuite)
+    "voiceTier2Model", default: "qwen3.5:2b", suite: defaultsSuite)
   /// Tier 2 GGUF file path, if the user manages llama-server from Leader Key later.
   static let voiceTier2ModelPath = Key<String>(
     "voiceTier2ModelPath", default: "", suite: defaultsSuite)
   /// Tier 2 fallback when current llama.cpp support for Qwen3.5 is unstable.
   static let voiceTier2FallbackModel = Key<String>(
-    "voiceTier2FallbackModel", default: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", suite: defaultsSuite)
+    "voiceTier2FallbackModel", default: "qwen2.5:1.5b-instruct", suite: defaultsSuite)
   /// Tier 3 model identity for vague/agentic catalog commands.
   static let voiceTier3Model = Key<String>(
-    "voiceTier3Model", default: "google/gemma-4-E4B-it", suite: defaultsSuite)
+    "voiceTier3Model", default: "gemma4:e4b", suite: defaultsSuite)
   /// Tier 3 quantized model path.
   static let voiceTier3ModelPath = Key<String>(
     "voiceTier3ModelPath", default: "", suite: defaultsSuite)
+  /// Show status notice when llama-server is unreachable and tier falls back to fast-only.
+  static let voiceNotifyTierUnavailable = Key<Bool>(
+    "voiceNotifyTierUnavailable", default: true, suite: defaultsSuite)
+  /// Groq Cloud model for the planner tier.
+  static let voiceGroqPlannerModel = Key<String>(
+    "voiceGroqPlannerModel", default: "llama-3.3-70b-versatile", suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -323,6 +329,9 @@ enum VoiceDispatchMode: String, Defaults.Serializable, CaseIterable, Identifiabl
 enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable {
   case fastOnly
   case tiered
+  case tieredOllama
+  case tieredGroq
+  case groqOnly
 
   var id: Self { self }
 
@@ -331,7 +340,13 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
     case .fastOnly:
       return "Fast only"
     case .tiered:
-      return "Tiered"
+      return "Tiered (llama-server)"
+    case .tieredOllama:
+      return "Tiered (Ollama)"
+    case .tieredGroq:
+      return "Tiered (Groq Cloud)"
+    case .groqOnly:
+      return "Groq Only"
     }
   }
 
@@ -340,8 +355,18 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
     case .fastOnly:
       return "Use alias, BM25, and fuzzy matching only."
     case .tiered:
-      return "Use the fast matcher first, then llama-server planner tiers for harder commands."
+      return "Fast matcher first, then llama-server (/v1/chat/completions) for harder commands."
+    case .tieredOllama:
+      return "Fast matcher first, then Ollama (/api/chat) for harder commands."
+    case .tieredGroq:
+      return "Fast matcher first, then Groq Cloud API for harder commands. Uses your Groq API key."
+    case .groqOnly:
+      return "Always use Groq Cloud API. Handles repetition, multi-step, and complex commands."
     }
+  }
+
+  var isTiered: Bool {
+    self == .tiered || self == .tieredOllama || self == .tieredGroq || self == .groqOnly
   }
 }
 

@@ -6,10 +6,13 @@ import test from "node:test";
 
 import {
   buildActionCatalog,
+  executeValidation,
   fastMatch,
+  planDispatch,
   retrieveActions,
   validateDispatchPlan,
   type DispatchPlan,
+  type ValidationReport,
 } from "../src/index.js";
 
 const fixturePath = path.resolve("../..", "fixtures/actions.json");
@@ -114,4 +117,57 @@ test("validator rejects invented IDs, low confidence, and command actions", asyn
   const validation = validateDispatchPlan(catalog, commandPlan);
   assert.equal(validation.blocked, true);
   assert.match(validation.reason, /command|blocked|voiceSafety|rm -rf/);
+});
+
+test("executeValidation gates needs_confirmation unless allowDestructive", async () => {
+  const validation: ValidationReport = {
+    blocked: false,
+    needs_confirmation: true,
+    reason: "confirmation required",
+    steps: [],
+    valid: true,
+  };
+
+  const dryReport = await executeValidation(validation, true, false);
+  assert.equal(dryReport.executed, false);
+  assert.equal(dryReport.dry_run, false);
+  assert.equal(dryReport.needs_confirmation, true);
+
+  const noExecuteReport = await executeValidation(validation, false, true);
+  assert.equal(noExecuteReport.executed, false);
+  assert.equal(noExecuteReport.dry_run, true);
+
+  const blockedValidation: ValidationReport = {
+    ...validation,
+    blocked: true,
+    reason: "blocked",
+  };
+  const blockedReport = await executeValidation(blockedValidation, true, true);
+  assert.equal(blockedReport.executed, false);
+  assert.equal(blockedReport.blocked, true);
+});
+
+test("planDispatch preserves planner_error when planner fails", async () => {
+  const result = await planDispatch({
+    catalogPath: fixturePath,
+    transcript: "turn off wifi",
+    planner: "llama",
+    llamaUrl: "http://127.0.0.1:1",
+  });
+
+  assert.ok(result.plan.planner_error, "planner_error should be set when planner is unreachable");
+  assert.equal(result.plan.chain.length, 0, "chain should remain empty from fast match");
+  assert.ok(result.plan.unresolved?.length, "unresolved clauses should still be present");
+});
+
+test("fast matcher produces unresolved array for multi-clause with one bad clause", async () => {
+  const catalog = await buildActionCatalog({ catalogPath: fixturePath });
+  const result = fastMatch(catalog, "open new tab and turn off wifi");
+
+  assert.ok(result.plan.unresolved?.length, "should have unresolved clauses");
+  assert.ok(
+    result.plan.unresolved?.some((clause) => clause.includes("wifi")),
+    "unresolved should contain the wifi clause",
+  );
+  assert.equal(result.plan.chain.length, 0, "chain should be empty when any clause is unresolved");
 });

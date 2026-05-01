@@ -8,7 +8,7 @@ import type {
 } from "@leaderkey/config-core";
 
 export type DispatchScope = "frontmost" | "global" | "all";
-export type PlannerKind = "none" | "llama" | "ollama";
+export type PlannerKind = "none" | "llama" | "ollama" | "groq";
 
 export interface DispatchRequest {
   transcript: string;
@@ -19,10 +19,13 @@ export interface DispatchRequest {
   includeGlobal?: boolean;
   dryRun?: boolean;
   execute?: boolean;
+  allowDestructive?: boolean;
   planner?: PlannerKind;
   model?: string;
   llamaUrl?: string;
   ollamaUrl?: string;
+  groqApiKey?: string;
+  alwaysPlan?: boolean;
 }
 
 export interface DispatchReference {
@@ -90,6 +93,7 @@ export interface DispatchPlan {
   reason: string;
   unresolved?: string[];
   planner_called?: boolean;
+  planner_error?: string;
 }
 
 export interface ValidatedStep {

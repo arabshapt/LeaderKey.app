@@ -25,7 +25,7 @@ Usage:
   leaderkey-dispatcher match [flags] "close this tab"
   leaderkey-dispatcher retrieve [flags] "kill tab"
   leaderkey-dispatcher plan [flags] "duplicate tab and copy current url"
-  leaderkey-dispatcher execute [flags] "run confetti" [--dry-run|--execute]
+  leaderkey-dispatcher execute [flags] "run confetti" [--dry-run|--execute] [--allow-destructive]
   leaderkey-dispatcher bench [flags] --dataset fixtures/bench.jsonl
 
 Flags:
@@ -59,7 +59,7 @@ function positional(args: string[]): string[] {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index]!;
     if (value.startsWith("--")) {
-      if (!["--include-global", "--pretty", "--dry-run", "--execute"].includes(value)) {
+      if (!["--include-global", "--pretty", "--dry-run", "--execute", "--allow-destructive", "--always-plan"].includes(value)) {
         index += 1;
       }
       continue;
@@ -86,6 +86,9 @@ async function requestFromArgs(args: string[], transcript: string): Promise<Disp
     catalogPath,
     configDirectory: readFlag(args, "--config-dir") ?? defaultConfigDirectory(),
     execute: hasFlag(args, "--execute") && !hasFlag(args, "--dry-run"),
+    allowDestructive: hasFlag(args, "--allow-destructive"),
+    alwaysPlan: hasFlag(args, "--always-plan"),
+    groqApiKey: readFlag(args, "--groq-api-key"),
     includeGlobal: hasFlag(args, "--include-global"),
     llamaUrl: readFlag(args, "--llama-url"),
     model: readFlag(args, "--model"),

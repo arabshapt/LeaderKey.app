@@ -106,6 +106,7 @@ final class VoiceCoordinator {
       self.settingsObserver = nil
     }
     audioCapture.stopCompletely()
+    audioCapture.cleanupTempFiles()
     state = .idle
   }
 
@@ -184,6 +185,8 @@ final class VoiceCoordinator {
       "[VoiceCoordinator] \(trigger) recording captured \(String(format: "%.2f", result.duration))s, preRollFrames=\(result.preRollFrameCount), url=\(result.url.path)"
     )
 
+    VoiceAudioCapture.trimTrailingSilence(url: result.url)
+
     let prompt = transcriptionPrompt()
     let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let dispatchOptions = voiceDispatchOptions()
@@ -209,9 +212,55 @@ final class VoiceCoordinator {
           )
 
           await MainActor.run {
-            self.state = .ready(dispatch.displayMessage)
-            self.returnToIdleAfterReady()
             debugLog("[VoiceCoordinator] Dispatch \(dispatch.debugSummary)")
+          }
+
+          let shouldOfferConfirmation =
+            dispatchOptions.execute
+            && dispatch.execution.needsConfirmation
+            && !dispatch.execution.blocked
+
+          if shouldOfferConfirmation {
+            let confirmed = await MainActor.run {
+              self.confirmDestructiveDispatch(dispatch)
+            }
+            if confirmed {
+              do {
+                let confirmedDispatch = try await self.dispatchBridge.dispatch(
+                  transcript: transcript.text,
+                  bundleId: targetBundleId,
+                  options: dispatchOptions.withAllowDestructive(true)
+                )
+                await MainActor.run {
+                  self.state = .ready(confirmedDispatch.displayMessage)
+                  self.returnToIdleAfterReady(multiStep: confirmedDispatch.isMultiStep)
+                  debugLog(
+                    "[VoiceCoordinator] Dispatch confirmed \(confirmedDispatch.debugSummary)")
+                }
+              } catch {
+                await MainActor.run {
+                  self.state = .error("Dispatch failed")
+                  debugLog("[VoiceCoordinator] Confirmed dispatch failed: \(error)")
+                }
+              }
+            } else {
+              await MainActor.run {
+                self.state = .ready("Voice cancelled")
+                self.returnToIdleAfterReady()
+                debugLog("[VoiceCoordinator] Confirmation cancelled")
+              }
+            }
+          } else {
+            await MainActor.run {
+              if let plannerError = dispatch.plan.plannerError,
+                Defaults[.voiceNotifyTierUnavailable]
+              {
+                debugLog(
+                  "[VoiceCoordinator] Planner fallback: \(plannerError)")
+              }
+              self.state = .ready(dispatch.displayMessage)
+              self.returnToIdleAfterReady(multiStep: dispatch.isMultiStep)
+            }
           }
         } catch {
           await MainActor.run {
@@ -255,13 +304,72 @@ final class VoiceCoordinator {
   }
 
   private func voiceDispatchOptions() -> VoiceDispatchOptions {
-    VoiceDispatchOptions(
+    let plannerMode = Defaults[.voicePlannerMode]
+    let model =
+      (plannerMode == .tieredGroq || plannerMode == .groqOnly)
+      ? Defaults[.voiceGroqPlannerModel]
+      : Defaults[.voiceTier2Model]
+    return VoiceDispatchOptions(
       configDirectory: Defaults[.configDir],
       execute: Defaults[.voiceDispatchMode] == .execute,
-      plannerMode: Defaults[.voicePlannerMode],
+      allowDestructive: false,
+      plannerMode: plannerMode,
       llamaURL: Defaults[.voiceLlamaServerURL],
-      model: Defaults[.voiceTier2Model]
+      model: model,
+      groqApiKey: KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) ?? ""
     )
+  }
+
+  @MainActor
+  private func confirmDestructiveDispatch(_ dispatch: VoiceDispatchResult) -> Bool {
+    let previousApp = NSWorkspace.shared.frontmostApplication
+
+    NSApp.activate(ignoringOtherApps: true)
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Run voice command?"
+    alert.informativeText = Self.confirmationBody(for: dispatch)
+    alert.addButton(withTitle: "Run")
+    alert.addButton(withTitle: "Cancel")
+    if let cancelButton = alert.buttons.last {
+      cancelButton.keyEquivalent = "\u{1b}"
+    }
+
+    let timeoutSeconds: TimeInterval = 10
+    var timedOut = false
+    let timer = DispatchSource.makeTimerSource(queue: .main)
+    timer.schedule(deadline: .now() + timeoutSeconds)
+    timer.setEventHandler {
+      timedOut = true
+      NSApp.abortModal()
+    }
+    timer.resume()
+
+    let response = alert.runModal()
+    timer.cancel()
+
+    if let previousApp, previousApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+      previousApp.activate()
+    }
+
+    return !timedOut && response == .alertFirstButtonReturn
+  }
+
+  private static func confirmationBody(for dispatch: VoiceDispatchResult) -> String {
+    let labels = dispatch.execution.steps.map { step -> String in
+      if step.label.isEmpty {
+        return step.actionID
+      }
+      if let reason = step.reason, !reason.isEmpty {
+        return "\(step.label) (\(reason))"
+      }
+      return step.label
+    }
+    let chain =
+      labels.isEmpty
+      ? "(no actions)"
+      : labels.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+    return "\(dispatch.validation.reason)\n\n\(chain)"
   }
 
   private func ensureMicrophoneAccess(_ completion: @escaping (Bool) -> Void) {
@@ -310,8 +418,9 @@ final class VoiceCoordinator {
     }
   }
 
-  private func returnToIdleAfterReady() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+  private func returnToIdleAfterReady(multiStep: Bool = false) {
+    let delay: TimeInterval = multiStep ? 3.0 : 1.5
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self, case .ready = self.state else { return }
       self.state = .idle
     }

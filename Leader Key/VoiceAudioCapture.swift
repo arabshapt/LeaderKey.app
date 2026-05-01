@@ -113,13 +113,31 @@ final class VoiceAudioCapture {
 
   func stopCompletely() {
     queue.sync {
+      if let url = activeURL {
+        try? FileManager.default.removeItem(at: url)
+      }
+      if let url = lastCaptureURL {
+        try? FileManager.default.removeItem(at: url)
+      }
       activeFile = nil
       activeURL = nil
       activeFrameCount = 0
       activePreRollFrameCount = 0
       preRollBuffers.removeAll()
       preRollFrameCount = 0
+      lastCaptureURL = nil
       stopEngineLocked()
+    }
+  }
+
+  func cleanupTempFiles() {
+    let fm = FileManager.default
+    let tmpDir = fm.temporaryDirectory
+    guard let contents = try? fm.contentsOfDirectory(
+      at: tmpDir, includingPropertiesForKeys: nil)
+    else { return }
+    for url in contents where url.lastPathComponent.hasPrefix("leaderkey-voice-") {
+      try? fm.removeItem(at: url)
     }
   }
 
@@ -227,5 +245,87 @@ final class VoiceAudioCapture {
     FileManager.default.temporaryDirectory
       .appendingPathComponent("leaderkey-voice-\(UUID().uuidString)")
       .appendingPathExtension("wav")
+  }
+
+  /// Trim trailing silence from a WAV file in-place.
+  /// Detects silence as RMS below the threshold in the final `tailDuration` seconds.
+  static func trimTrailingSilence(
+    url: URL,
+    tailDuration: TimeInterval = 0.5,
+    silenceThresholdDB: Float = -40
+  ) {
+    guard let file = try? AVAudioFile(forReading: url) else { return }
+    let format = file.processingFormat
+    let totalFrames = AVAudioFrameCount(file.length)
+    let tailFrames = AVAudioFrameCount(format.sampleRate * tailDuration)
+    guard totalFrames > tailFrames else { return }
+
+    let checkStart = totalFrames - tailFrames
+    file.framePosition = AVAudioFramePosition(checkStart)
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: tailFrames) else {
+      return
+    }
+    do {
+      try file.read(into: buffer)
+    } catch {
+      return
+    }
+
+    let rms = rmsLevel(buffer: buffer)
+    let rmsDB = rms > 0 ? 20 * log10(rms) : -Float.infinity
+    guard rmsDB < silenceThresholdDB else { return }
+
+    // Find where silence begins by scanning backwards in chunks
+    let chunkFrames = AVAudioFrameCount(format.sampleRate * 0.05)
+    var trimPoint = totalFrames
+    var scanPosition = totalFrames
+    while scanPosition > chunkFrames {
+      scanPosition -= chunkFrames
+      file.framePosition = AVAudioFramePosition(scanPosition)
+      guard let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames) else {
+        break
+      }
+      do {
+        try file.read(into: chunk)
+      } catch {
+        break
+      }
+      let chunkRMS = rmsLevel(buffer: chunk)
+      let chunkDB = chunkRMS > 0 ? 20 * log10(chunkRMS) : -Float.infinity
+      if chunkDB >= silenceThresholdDB {
+        trimPoint = scanPosition + chunkFrames
+        break
+      }
+      trimPoint = scanPosition
+    }
+
+    guard trimPoint < totalFrames else { return }
+
+    // Rewrite the file with trimmed content
+    file.framePosition = 0
+    guard let readBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: trimPoint) else {
+      return
+    }
+    do {
+      try file.read(into: readBuffer)
+      let trimmedFile = try AVAudioFile(
+        forWriting: url, settings: format.settings)
+      try trimmedFile.write(from: readBuffer)
+      debugLog(
+        "[VoiceAudioCapture] Trimmed \(totalFrames - trimPoint) silent frames from recording")
+    } catch {
+      debugLog("[VoiceAudioCapture] Failed to trim silence: \(error)")
+    }
+  }
+
+  private static func rmsLevel(buffer: AVAudioPCMBuffer) -> Float {
+    guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return 0 }
+    let frames = Int(buffer.frameLength)
+    var sum: Float = 0
+    for i in 0..<frames {
+      let sample = data[0][i]
+      sum += sample * sample
+    }
+    return sqrt(sum / Float(frames))
   }
 }

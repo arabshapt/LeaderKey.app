@@ -18,6 +18,7 @@ struct VoicePane: View {
   @Default(.voiceTier2FallbackModel) private var voiceTier2FallbackModel
   @Default(.voiceTier3Model) private var voiceTier3Model
   @Default(.voiceTier3ModelPath) private var voiceTier3ModelPath
+  @Default(.voiceGroqPlannerModel) private var voiceGroqPlannerModel
 
   @State private var groqAPIKeyInput = ""
   @State private var hasStoredGroqAPIKey = false
@@ -64,7 +65,7 @@ struct VoicePane: View {
             )
 
             Text(
-              "Hold-to-talk transcribes when the key is released. Dispatch is still dry-run only until the transcript bridge lands."
+              "Hold-to-talk transcribes when the key is released. Voice dispatch mode (dry-run or execute) is controlled in the Dispatch section below."
             )
               .font(.callout)
               .foregroundColor(.secondary)
@@ -188,7 +189,7 @@ struct VoicePane: View {
 
             DisclosureGroup("Local planner settings") {
               VStack(alignment: .leading, spacing: 10) {
-                labeledTextField("llama-server URL", text: $voiceLlamaServerURL)
+                labeledTextField("Server URL", text: $voiceLlamaServerURL)
                 labeledTextField("Tier 2 model", text: $voiceTier2Model)
                 labeledTextField("Tier 2 GGUF path", text: $voiceTier2ModelPath)
                 labeledTextField("Tier 2 fallback", text: $voiceTier2FallbackModel)
@@ -197,6 +198,21 @@ struct VoicePane: View {
               }
               .padding(.top, 8)
             }
+
+            DisclosureGroup("Groq Cloud planner settings") {
+              VStack(alignment: .leading, spacing: 10) {
+                labeledTextField("Groq planner model", text: $voiceGroqPlannerModel)
+                Text("Uses your Groq API key from the STT section above.")
+                  .font(.callout)
+                  .foregroundColor(.secondary)
+              }
+              .padding(.top, 8)
+            }
+
+            Defaults.Toggle(
+              "Notify when llama-server is unreachable",
+              key: .voiceNotifyTierUnavailable
+            )
           }
           .disabled(!voiceDispatcherEnabled)
         }

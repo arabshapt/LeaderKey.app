@@ -36,6 +36,8 @@ const ALIASES: AliasSpec[] = [
       "open another tab",
       "another tab",
       "make a new browser tab",
+      "open new tabs",
+      "open two new tabs",
     ],
     predicate: (entry) => entry.type === "shortcut" && (shortcutValue(entry) === "ct" || hasAllWords(entry.searchText, ["new", "tab"])),
     reason: "alias:new_tab",
@@ -100,10 +102,21 @@ const GENERIC_SINGLE_TOKEN_QUERIES = new Set([
   "tab",
 ]);
 
+function stem(word: string): string {
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) {
+    return word.slice(0, -1);
+  }
+  return word;
+}
+
 function aliasMatches(clause: string, alias: string): boolean {
-  const clauseTokens = new Set(tokenize(clause).filter((token) => token !== "this" && token !== "current"));
+  const clauseTokens = new Set(
+    tokenize(clause)
+      .filter((token) => token !== "this" && token !== "current")
+      .flatMap((token) => [token, stem(token)]),
+  );
   const aliasTokens = tokenize(alias).filter((token) => token !== "this" && token !== "current");
-  return aliasTokens.length > 0 && aliasTokens.every((token) => clauseTokens.has(token));
+  return aliasTokens.length > 0 && aliasTokens.every((token) => clauseTokens.has(token) || clauseTokens.has(stem(token)));
 }
 
 function aliasScore(entry: ActionEntry, spec: AliasSpec): number {
@@ -150,7 +163,9 @@ function matchClause(catalog: ActionCatalog, clause: string): { candidate?: Acti
     : retrieved;
   const best = candidates[0];
   const second = candidates[1];
+  const bestIsAlias = aliasCandidate && best === aliasCandidate;
   const ambiguous = Boolean(
+    !bestIsAlias &&
     best &&
     second &&
     best.confidence >= 0.75 &&

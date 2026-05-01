@@ -4,9 +4,23 @@ import Foundation
 struct VoiceDispatchOptions: Sendable {
   let configDirectory: String
   let execute: Bool
+  let allowDestructive: Bool
   let plannerMode: VoicePlannerMode
   let llamaURL: String
   let model: String
+  let groqApiKey: String
+
+  func withAllowDestructive(_ allow: Bool) -> VoiceDispatchOptions {
+    VoiceDispatchOptions(
+      configDirectory: configDirectory,
+      execute: execute,
+      allowDestructive: allow,
+      plannerMode: plannerMode,
+      llamaURL: llamaURL,
+      model: model,
+      groqApiKey: groqApiKey
+    )
+  }
 }
 
 struct VoiceDispatchResult: Decodable, Sendable {
@@ -22,15 +36,18 @@ struct VoiceDispatchResult: Decodable, Sendable {
       return "Voice needs confirmation"
     }
     if execution.executed {
-      return "Voice executed: \(stepSummary)"
+      return "Voice executed: \(stepSummaryWithPath)"
     }
     if execution.dryRun {
-      return "Voice dry run: \(stepSummary)"
+      return "Voice dry run: \(stepSummaryWithPath)"
     }
     if plan.chain.isEmpty {
+      if let plannerError = plan.plannerError {
+        return "Voice planner error: \(plannerError.prefix(60))"
+      }
       return "Voice unresolved"
     }
-    return "Voice planned: \(stepSummary)"
+    return "Voice planned: \(stepSummaryWithPath)"
   }
 
   var debugSummary: String {
@@ -52,6 +69,18 @@ struct VoiceDispatchResult: Decodable, Sendable {
     let joined = labels.prefix(2).joined(separator: ", ")
     return labels.count > 2 ? "\(joined), ..." : joined
   }
+
+  private var stepSummaryWithPath: String {
+    guard execution.steps.count == 1, let step = execution.steps.first else {
+      return stepSummary
+    }
+    guard !step.label.isEmpty else { return "no action" }
+    return step.label
+  }
+
+  var isMultiStep: Bool {
+    execution.steps.count > 1
+  }
 }
 
 struct VoiceDispatchPlan: Decodable, Sendable {
@@ -59,12 +88,14 @@ struct VoiceDispatchPlan: Decodable, Sendable {
   let chain: [VoiceDispatchPlanStep]
   let overallConfidence: Double
   let reason: String
+  let plannerError: String?
 
   private enum CodingKeys: String, CodingKey {
     case mode
     case chain
     case overallConfidence = "overall_confidence"
     case reason
+    case plannerError = "planner_error"
   }
 }
 
@@ -159,14 +190,15 @@ final class VoiceDispatchBridge {
     case executable(URL)
   }
 
-  private let timeout: TimeInterval = 6
+  private static let fastTimeout: TimeInterval = 6
+  private static let tieredTimeout: TimeInterval = 12
 
   func dispatch(
     transcript: String,
     bundleId: String?,
     options: VoiceDispatchOptions
   ) async throws -> VoiceDispatchResult {
-    let timeout = timeout
+    let timeout = options.plannerMode.isTiered ? Self.tieredTimeout : Self.fastTimeout
     return try await Task.detached(priority: .userInitiated) {
       try Self.runDispatcher(
         transcript: transcript,
@@ -202,14 +234,37 @@ final class VoiceDispatchBridge {
         nodeURL.lastPathComponent == "env"
         ? ["node", scriptURL.path] + dispatchArguments
         : [scriptURL.path] + dispatchArguments
+      debugLog(
+        "[VoiceDispatchBridge] node=\(nodeURL.path) script=\(scriptURL.path)"
+      )
     case .executable(let executableURL):
       process.executableURL = executableURL
       process.arguments = dispatchArguments
+      debugLog("[VoiceDispatchBridge] executable=\(executableURL.path)")
     }
 
     process.environment = processEnvironment()
     process.standardOutput = stdout
     process.standardError = stderr
+
+    // Read pipe data on background threads to avoid pipe-buffer deadlock.
+    // If the child writes more than the ~64KB pipe buffer before we read,
+    // the write blocks and the process never terminates → timeout.
+    var outputData = Data()
+    var errorData = Data()
+    let readGroup = DispatchGroup()
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+      outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+      readGroup.leave()
+    }
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+      errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+      readGroup.leave()
+    }
 
     let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in
@@ -222,8 +277,8 @@ final class VoiceDispatchBridge {
       throw VoiceDispatchBridgeError.timedOut
     }
 
-    let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-    let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+    readGroup.wait()
+
     let output = String(data: outputData, encoding: .utf8) ?? ""
     let error = String(data: errorData, encoding: .utf8) ?? ""
 
@@ -249,11 +304,23 @@ final class VoiceDispatchBridge {
     bundleId: String?,
     options: VoiceDispatchOptions
   ) -> [String] {
+    let plannerFlag: String
+    switch options.plannerMode {
+    case .tiered:
+      plannerFlag = "llama"
+    case .tieredOllama:
+      plannerFlag = "ollama"
+    case .tieredGroq, .groqOnly:
+      plannerFlag = "groq"
+    case .fastOnly:
+      plannerFlag = "none"
+    }
+
     var arguments = [
       "execute",
       "--config-dir", options.configDirectory,
       "--scope", "frontmost",
-      "--planner", options.plannerMode == .tiered ? "llama" : "none",
+      "--planner", plannerFlag,
       "--pretty",
     ]
 
@@ -262,6 +329,19 @@ final class VoiceDispatchBridge {
         "--llama-url", options.llamaURL,
         "--model", options.model,
       ]
+    } else if options.plannerMode == .tieredOllama {
+      arguments += [
+        "--ollama-url", options.llamaURL,
+        "--model", options.model,
+      ]
+    } else if options.plannerMode == .tieredGroq || options.plannerMode == .groqOnly {
+      arguments += [
+        "--groq-api-key", options.groqApiKey,
+        "--model", options.model,
+      ]
+      if options.plannerMode == .groqOnly {
+        arguments.append("--always-plan")
+      }
     }
 
     if let bundleId, !bundleId.isEmpty {
@@ -269,6 +349,9 @@ final class VoiceDispatchBridge {
     }
 
     arguments.append(options.execute ? "--execute" : "--dry-run")
+    if options.allowDestructive {
+      arguments.append("--allow-destructive")
+    }
     arguments.append(transcript)
     return arguments
   }

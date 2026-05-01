@@ -2,7 +2,7 @@ export { buildActionCatalog } from "./catalog.js";
 export { runBench, readBenchRows } from "./bench.js";
 export { executeDispatch, executeValidation, planDispatch } from "./dispatch.js";
 export { fastMatch } from "./matcher.js";
-export { LlamaServerPlanner, MockPlanner, OllamaPlanner, createPlanner } from "./planner.js";
+export { LlamaServerPlanner, MockPlanner, OllamaPlanner, GroqPlanner, createPlanner } from "./planner.js";
 export { retrieveActions } from "./retriever.js";
 export { readFrontmostBundleId, sendLeaderKeySocketRequest } from "./socket.js";
 export { validateDispatchPlan } from "./validator.js";

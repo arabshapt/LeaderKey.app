@@ -5,6 +5,7 @@ export interface PlannerOptions {
   model?: string;
   llamaUrl?: string;
   ollamaUrl?: string;
+  groqApiKey?: string;
 }
 
 export interface LlmPlanner {
@@ -28,15 +29,20 @@ ws ::= [ \t\n\r]*
 function plannerPrompt(transcript: string, candidatesByClause: ActionCandidate[][]): string {
   const candidates = candidatesByClause.map((clauseCandidates, clauseIndex) => ({
     clause_index: clauseIndex,
-    candidates: clauseCandidates.map((candidate) => ({
-      description: candidate.action.description,
-      id: candidate.action.id,
-      label: candidate.action.label,
-      path: candidate.action.path,
-      requiresConfirmation: candidate.action.requiresConfirmation,
-      type: candidate.action.type,
-      value: candidate.action.valuePreview || candidate.action.value,
-    })),
+    candidates: clauseCandidates.map((candidate) => {
+      const entry: Record<string, unknown> = {
+        id: candidate.action.id,
+        label: candidate.action.label,
+        type: candidate.action.type,
+      };
+      if (candidate.action.description) {
+        entry.description = candidate.action.description;
+      }
+      if (candidate.action.valuePreview || candidate.action.value) {
+        entry.value = candidate.action.valuePreview || candidate.action.value;
+      }
+      return entry;
+    }),
   }));
 
   return [
@@ -46,7 +52,9 @@ function plannerPrompt(transcript: string, candidatesByClause: ActionCandidate[]
     "Never invent action IDs.",
     "If command cannot be satisfied, return empty chain and confidence 0.",
     "If command has multiple steps, output ordered chain.",
+    "If the user says to repeat an action N times, output that action N times in the chain.",
     "If action mutates/deletes/overwrites/closes many things, needs_confirmation true.",
+    "Confidence means how well the transcript matches the action. Use 0.9+ for clear matches.",
     "",
     `Transcript: ${JSON.stringify(transcript)}`,
     `Candidates by clause: ${JSON.stringify(candidates)}`,
@@ -89,6 +97,7 @@ export class LlamaServerPlanner implements LlmPlanner {
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
       throw new Error(`llama-server planner failed: ${response.status} ${await response.text()}`);
@@ -117,6 +126,7 @@ export class OllamaPlanner implements LlmPlanner {
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
       throw new Error(`ollama planner failed: ${response.status} ${await response.text()}`);
@@ -134,12 +144,49 @@ export class MockPlanner implements LlmPlanner {
   }
 }
 
+export class GroqPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(transcript: string, candidatesByClause: ActionCandidate[][]): Promise<DispatchPlan> {
+    if (!this.options.apiKey) {
+      throw new Error("Groq API key is required for planner");
+    }
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: "Return valid JSON only. No markdown, no explanation." },
+          { role: "user", content: plannerPrompt(transcript, candidatesByClause) },
+        ],
+        model: this.options.model ?? "llama-3.3-70b-versatile",
+        response_format: { type: "json_object" },
+        stream: false,
+        temperature: 0,
+      }),
+      headers: {
+        "authorization": `Bearer ${this.options.apiKey}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+      throw new Error(`groq planner failed: ${response.status} ${await response.text()}`);
+    }
+    const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return parsePlannerJson(json.choices?.[0]?.message?.content ?? "{}");
+  }
+}
+
 export function createPlanner(options: PlannerOptions): LlmPlanner | undefined {
   switch (options.planner ?? "none") {
     case "llama":
       return new LlamaServerPlanner({ model: options.model, url: options.llamaUrl });
     case "ollama":
       return new OllamaPlanner({ model: options.model, url: options.ollamaUrl });
+    case "groq":
+      return new GroqPlanner({ apiKey: options.groqApiKey ?? "", model: options.model });
     case "none":
       return undefined;
   }

@@ -4,7 +4,7 @@ Last updated: 2026-05-01
 
 ## Status
 
-Where we are: native voice entrypoint / done: STT, settings, hotkeys, dry-run dispatcher bridge / current: transcript-to-dispatch bridge is wired through the existing TypeScript dispatcher CLI / next: app-side confirmation UI, production packaging for dispatcher runtime, and tiered local planner polish.
+Where we are: voice dispatch end-to-end pipeline complete / done: STT, settings, hotkeys, dispatch bridge, confirmation UI, planner fallback, audio polish / next: production packaging (bundle JS runtime or go native), advanced floating-panel confirmation, live voice transcript benchmarks.
 
 ## Done
 
@@ -42,6 +42,28 @@ Where we are: native voice entrypoint / done: STT, settings, hotkeys, dry-run di
   - app invokes local `leaderkey-dispatcher execute`
   - dry-run remains default
   - real execution only if Voice setting is `execute`
+- Confirmation UI exists:
+  - `NSAlert`-based confirm/cancel dialog for `needs_confirmation` actions
+  - 10-second auto-cancel timeout prevents stalled voice state
+  - saves/restores frontmost app so user doesn't get stranded in Leader Key
+  - confirmation body shows action labels with reasons
+- Planner fallback exists:
+  - `planDispatch` wraps planner call in try/catch
+  - on planner failure, fast-match plan preserved with `planner_error` field
+  - Swift decodes `plannerError` from dispatch result
+  - status message surfaces planner error when `voiceNotifyTierUnavailable` is true
+- App-side reporting improved:
+  - single-step display shows action label directly
+  - multi-step chains get 3s display time (vs 1.5s for single)
+  - full dispatch JSON logged at debug level
+- Audio polish exists:
+  - trailing silence trimming (RMS < -40dB, last 0.5s)
+  - `cleanupTempFiles()` sweeps leftover `/tmp/leaderkey-voice-*` files
+  - `stopCompletely()` deletes active and last capture files
+- Dispatcher tests expanded:
+  - 10 tests total (was 8)
+  - planner error fallback test
+  - multi-clause unresolved array test
 
 ## Current Implementation
 
@@ -184,25 +206,19 @@ Voice dry run: Shortcut: Cmd+T
 
 ## Remaining Milestones
 
-1. Confirmation UI:
-   - When `needs_confirmation` is true, show a user-visible confirm/cancel surface.
-   - Do not execute automatically.
-2. Production packaging:
+1. Production packaging:
    - Current bridge relies on local Node + repo CLI.
    - Decide whether to bundle a JS runtime, ship a helper binary, or move hot path native later.
-3. Tier router in app:
-   - Fast-only works now.
-   - Tiered mode can call llama-server for unresolved cases.
-   - Add clear UI/logging when llama-server is not reachable.
-4. Better app-side reporting:
-   - Show planned chain in menu/status.
-   - Keep JSON/debug output benchmarkable.
-5. Benchmark live voice transcripts:
+2. Advanced confirmation UI:
+   - Replace NSAlert with a floating panel (similar to hint overlay) for a more integrated look.
+3. Benchmark live voice transcripts:
    - Record actual Groq mishears into bench rows.
    - Prefer matcher aliases over STT prompt priming.
-6. Optional audio polish:
-   - VAD/silence trimming.
-   - Better temp-file cleanup.
+4. Llama-server lifecycle management:
+   - Optionally start/stop llama-server from Leader Key.
+   - Add clear UI/logging when llama-server is not reachable.
+5. Optional audio refinements:
+   - VAD/silence detection at recording start (skip empty recordings earlier).
    - Check prewarm CPU/power with Activity Monitor.
 
 ## If Taking Over
