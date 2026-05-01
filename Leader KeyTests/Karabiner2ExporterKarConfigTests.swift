@@ -666,6 +666,15 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
           stickyMode: nil,
           actions: [.action(makeCommandAction(key: "x", label: "Run", value: "echo x"))]
         )
+      ),
+      .group(
+        Group(
+          key: "s",
+          label: "Sticky Group",
+          iconPath: nil,
+          stickyMode: true,
+          actions: [.action(makeCommandAction(key: "x", label: "Sticky Run", value: "echo sticky"))]
+        )
       )
     ]
     let normalFallbackRoot = Group(
@@ -692,6 +701,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       let disabledActivation = try XCTUnwrap(disabledManipulators.first(where: isLeaderActivationManipulator))
       XCTAssertNil(disabledActivation["to_delayed_action"])
       XCTAssertNil(disabledManipulators.first(where: { fromKeyCode(in: $0) == "g" })?["to_delayed_action"])
+      XCTAssertNil(disabledManipulators.first(where: { fromKeyCode(in: $0) == "s" })?["to_delayed_action"])
       XCTAssertNil(disabledManipulators.first(where: { fromKeyCode(in: $0) == "n" })?["to_delayed_action"])
 
       Defaults[.leaderSequenceTimeoutEnabled] = true
@@ -714,7 +724,10 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
         eventHasSendUserCommand($0, prefix: "deactivate")
       }))
 
-      let leaderGroup = try XCTUnwrap(enabledManipulators.first(where: { fromKeyCode(in: $0) == "g" }))
+      let leaderGroup = try XCTUnwrap(enabledManipulators.first(where: {
+        fromKeyCode(in: $0) == "g"
+          && hasVariableCondition($0, name: "leaderkey_sticky", value: 1, type: "variable_unless")
+      }))
       XCTAssertEqual(delayedActionDelay(in: leaderGroup), 250)
       XCTAssertTrue(delayedInvokedEvents(in: leaderGroup).contains(where: {
         eventHasSetVariable($0, name: "leader_state", value: 0)
@@ -724,6 +737,19 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
       }))
       XCTAssertTrue(delayedInvokedEvents(in: leaderGroup).contains(where: {
         eventHasSendUserCommand($0, prefix: "deactivate")
+      }))
+
+      let stickyLeaderGroup = try XCTUnwrap(enabledManipulators.first(where: {
+        fromKeyCode(in: $0) == "g"
+          && hasVariableCondition($0, name: "leaderkey_sticky", value: 1, type: "variable_if")
+      }))
+      XCTAssertNil(stickyLeaderGroup["to_delayed_action"])
+
+      let stickyModeGroupBranches = enabledManipulators.filter { fromKeyCode(in: $0) == "s" }
+      XCTAssertFalse(stickyModeGroupBranches.isEmpty)
+      XCTAssertTrue(stickyModeGroupBranches.allSatisfy { $0["to_delayed_action"] == nil })
+      XCTAssertTrue(stickyModeGroupBranches.contains(where: {
+        hasSetVariable(manipulator: $0, name: "leaderkey_sticky", value: 1)
       }))
 
       let normalGroup = try XCTUnwrap(enabledManipulators.first(where: {

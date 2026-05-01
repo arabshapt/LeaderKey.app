@@ -775,7 +775,8 @@ final class Karabiner2Exporter {
   private static func generateKarStateTransitionMapping(
     key: String,
     toState: Int32,
-    hasStickyMode: Bool
+    hasStickyMode: Bool,
+    includeTimeout: Bool = true
   ) -> [String: Any]? {
     guard let (keyCode, modifiers) = parseKarKeySpec(key) else {
       return nil
@@ -793,7 +794,7 @@ final class Karabiner2Exporter {
       "from": karFrom(keyCode: keyCode, modifiers: modifiers),
       "to": toEvents
     ]
-    if let timeout = leaderSequenceTimeoutMilliseconds() {
+    if includeTimeout, let timeout = leaderSequenceTimeoutMilliseconds() {
       mapping["to_delayed_action"] = leaderSequenceTimeoutDelayedAction()
       mapping["parameters"] = ["basic.to_delayed_action_delay_milliseconds": timeout]
     }
@@ -2252,6 +2253,35 @@ final class Karabiner2Exporter {
           groupStickyMode = group.stickyMode ?? false
         } else {
           groupStickyMode = false
+        }
+        if leaderSequenceTimeoutMilliseconds() != nil {
+          guard
+            var stickyMapping = generateKarStateTransitionMapping(
+              key: key,
+              toState: stateId,
+              hasStickyMode: groupStickyMode,
+              includeTimeout: false
+            ),
+            var nonStickyMapping = generateKarStateTransitionMapping(
+              key: key,
+              toState: stateId,
+              hasStickyMode: groupStickyMode,
+              includeTimeout: !groupStickyMode
+            )
+          else {
+            return []
+          }
+
+          stickyMapping["condition"] = [
+            variableCondition(name: "leader_state", value: binding.parentStateId),
+            variableCondition(name: "leaderkey_sticky", value: 1),
+          ]
+          nonStickyMapping["condition"] = [
+            variableCondition(name: "leader_state", value: binding.parentStateId),
+            variableUnlessCondition(name: "leaderkey_sticky", value: 1),
+          ]
+
+          return [stickyMapping, nonStickyMapping]
         }
         mapping = generateKarStateTransitionMapping(
           key: key,
