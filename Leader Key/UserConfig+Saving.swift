@@ -55,6 +55,14 @@ extension UserConfig {
     }
     // -----------------
 
+    let cleanedDraftResult = removeEmptyDraftActions(from: groupToProcess)
+    if cleanedDraftResult.removedCount > 0 {
+      print(
+        "[SAVE LOG] saveCurrentlyEditingConfig: Removed \(cleanedDraftResult.removedCount) empty draft action(s) before validation."
+      )
+      groupToProcess = cleanedDraftResult.group
+    }
+
     // --- CONDITIONAL SORTING ---
     let finalGroup: Group
     if isActivelyEditing {
@@ -241,6 +249,104 @@ extension UserConfig {
     cleanLayer.isFromFallback = layer.isFromFallback
     cleanLayer.fallbackSource = layer.fallbackSource
     return cleanLayer
+  }
+
+  private func removeEmptyDraftActions(from group: Group) -> (group: Group, removedCount: Int) {
+    var cleanedActions: [ActionOrGroup] = []
+    var removedCount = 0
+
+    for item in group.actions {
+      switch item {
+      case .action(let action):
+        if isEmptyDraftAction(action) {
+          removedCount += 1
+        } else {
+          cleanedActions.append(.action(action))
+        }
+
+      case .group(let subgroup):
+        let cleanedSubgroupResult = removeEmptyDraftActions(from: subgroup)
+        removedCount += cleanedSubgroupResult.removedCount
+        cleanedActions.append(.group(cleanedSubgroupResult.group))
+
+      case .layer(let layer):
+        var cleanedLayer = layer
+        let cleanedLayerGroupResult = removeEmptyDraftActions(
+          from: Group(
+            key: layer.key,
+            label: layer.label,
+            iconPath: layer.iconPath,
+            stickyMode: nil,
+            actions: layer.actions
+          )
+        )
+        cleanedLayer.actions = cleanedLayerGroupResult.group.actions
+        removedCount += cleanedLayerGroupResult.removedCount
+
+        if let tapAction = cleanedLayer.tapAction, isEmptyDraftAction(tapAction) {
+          cleanedLayer.tapAction = nil
+          removedCount += 1
+        }
+
+        cleanedActions.append(.layer(cleanedLayer))
+      }
+    }
+
+    var cleanedGroup = Group(
+      key: group.key,
+      label: group.label,
+      iconPath: group.iconPath,
+      stickyMode: group.stickyMode,
+      actions: cleanedActions
+    )
+    cleanedGroup.isFromFallback = group.isFromFallback
+    cleanedGroup.fallbackSource = group.fallbackSource
+    return (cleanedGroup, removedCount)
+  }
+
+  private func isEmptyDraftAction(_ action: Action) -> Bool {
+    if action.type.isModeControlAction {
+      return false
+    }
+
+    if !action.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return false
+    }
+
+    if hasMeaningfulDraftMetadata(action) {
+      return false
+    }
+
+    if action.type == .macro {
+      return action.macroSteps?.isEmpty ?? true
+    }
+
+    return true
+  }
+
+  private func hasMeaningfulDraftMetadata(_ action: Action) -> Bool {
+    let textFields = [
+      action.label,
+      action.description,
+      action.aiDescription,
+      action.iconPath,
+    ]
+
+    if textFields.contains(where: { field in
+      field?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }) {
+      return true
+    }
+
+    if action.activates != nil || action.stickyMode != nil || action.normalModeAfter != nil {
+      return true
+    }
+
+    if action.menuFallbackPaths?.isEmpty == false {
+      return true
+    }
+
+    return false
   }
 
   // Recursively sorts actions and groups within a group alphabetically by key

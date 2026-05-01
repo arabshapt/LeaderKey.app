@@ -100,6 +100,62 @@ final class UserConfigTests: XCTestCase {
     }))
   }
 
+  func testSavePrunesEmptyDraftActionsBeforeValidation() throws {
+    let chromeConfigPath = (tempBaseDir as NSString).appendingPathComponent(
+      "app.com.google.Chrome.json")
+    let chromeConfig = Group(
+      key: nil,
+      label: "Chrome",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            stickyMode: nil,
+            actions: [
+              .action(Action(key: ";", type: .url, value: "")),
+              .action(Action(key: "n", type: .shortcut, label: "New Window", value: "Cn")),
+            ]
+          )
+        )
+      ]
+    )
+    let encoder = JSONEncoder()
+    try encoder.encode(chromeConfig).write(to: URL(fileURLWithPath: chromeConfigPath))
+
+    subject.ensureAndLoad()
+    testAlertManager.reset()
+    subject.loadConfigForEditing(key: "App: com.google.Chrome")
+    subject.saveCurrentlyEditingConfig()
+
+    let savedData = try Data(contentsOf: URL(fileURLWithPath: chromeConfigPath))
+    let savedConfig = try JSONDecoder().decode(Group.self, from: savedData)
+
+    guard case .group(let windowGroup) = savedConfig.actions.first else {
+      return XCTFail("Expected saved Chrome config to keep the Window group")
+    }
+
+    XCTAssertFalse(
+      windowGroup.actions.contains(where: {
+        guard case .action(let action) = $0 else { return false }
+        return action.key == ";" && action.type == .url && action.value.isEmpty
+      })
+    )
+    XCTAssertTrue(
+      windowGroup.actions.contains(where: {
+        guard case .action(let action) = $0 else { return false }
+        return action.key == "n" && action.type == .shortcut && action.value == "Cn"
+      })
+    )
+    XCTAssertFalse(
+      testAlertManager.shownAlerts.contains(where: {
+        $0.message.contains("validation issue")
+      })
+    )
+  }
+
   func testCreatesDefaultConfigDirIfNotExists() throws {
     // Pre-create the directory so ensureValidConfigDirectory doesn't reset to default.
     // This test verifies that ensureAndLoad creates the config *files* inside an existing dir.
