@@ -6,10 +6,13 @@ struct VoiceDispatchOptions: Sendable {
   let execute: Bool
   let allowDestructive: Bool
   let plannerMode: VoicePlannerMode
+  let cloudPlannerProvider: VoiceCloudPlannerProvider
   let llamaURL: String
   let model: String
   let groqApiKey: String
   let geminiApiKey: String
+  let cloudPlannerApiKey: String
+  let cloudPlannerBaseURL: String
   let contextJSON: String?
 
   func withAllowDestructive(_ allow: Bool) -> VoiceDispatchOptions {
@@ -18,10 +21,13 @@ struct VoiceDispatchOptions: Sendable {
       execute: execute,
       allowDestructive: allow,
       plannerMode: plannerMode,
+      cloudPlannerProvider: cloudPlannerProvider,
       llamaURL: llamaURL,
       model: model,
       groqApiKey: groqApiKey,
       geminiApiKey: geminiApiKey,
+      cloudPlannerApiKey: cloudPlannerApiKey,
+      cloudPlannerBaseURL: cloudPlannerBaseURL,
       contextJSON: contextJSON
     )
   }
@@ -341,6 +347,8 @@ final class VoiceDispatchBridge {
       plannerFlag = "llama"
     case .tieredOllama:
       plannerFlag = "ollama"
+    case .tieredCloud, .cloudOnly:
+      plannerFlag = options.cloudPlannerProvider.plannerKind
     case .tieredGroq, .groqOnly:
       plannerFlag = "groq"
     case .tieredGemini, .geminiOnly:
@@ -367,6 +375,32 @@ final class VoiceDispatchBridge {
         "--ollama-url", options.llamaURL,
         "--model", options.model,
       ]
+    } else if options.plannerMode == .tieredCloud || options.plannerMode == .cloudOnly {
+      arguments += [
+        "--model", options.model,
+      ]
+      if !options.cloudPlannerBaseURL.isEmpty {
+        arguments += ["--planner-base-url", options.cloudPlannerBaseURL]
+      }
+      switch options.cloudPlannerProvider {
+      case .openAI:
+        arguments += ["--openai-api-key", options.cloudPlannerApiKey]
+      case .openRouter:
+        arguments += ["--openrouter-api-key", options.cloudPlannerApiKey]
+      case .fireworks:
+        arguments += ["--fireworks-api-key", options.cloudPlannerApiKey]
+      case .together:
+        arguments += ["--together-api-key", options.cloudPlannerApiKey]
+      case .deepInfra:
+        arguments += ["--deepinfra-api-key", options.cloudPlannerApiKey]
+      case .perplexity:
+        arguments += ["--perplexity-api-key", options.cloudPlannerApiKey]
+      case .compatible:
+        arguments += ["--openai-api-key", options.cloudPlannerApiKey]
+      }
+      if options.plannerMode == .cloudOnly {
+        arguments.append("--always-plan")
+      }
     } else if options.plannerMode == .tieredGroq || options.plannerMode == .groqOnly {
       arguments += [
         "--groq-api-key", options.groqApiKey,

@@ -160,6 +160,15 @@ extension Defaults.Keys {
   /// Gemini model for the planner tier.
   static let voiceGeminiPlannerModel = Key<String>(
     "voiceGeminiPlannerModel", default: "gemini-2.5-flash", suite: defaultsSuite)
+  /// Generic cloud planner provider.
+  static let voiceCloudPlannerProvider = Key<VoiceCloudPlannerProvider>(
+    "voiceCloudPlannerProvider", default: .openRouter, suite: defaultsSuite)
+  /// Generic cloud planner model.
+  static let voiceCloudPlannerModel = Key<String>(
+    "voiceCloudPlannerModel", default: "openai/gpt-4.1-mini", suite: defaultsSuite)
+  /// Custom OpenAI-compatible planner base URL.
+  static let voiceCloudPlannerBaseURL = Key<String>(
+    "voiceCloudPlannerBaseURL", default: "", suite: defaultsSuite)
 }
 
 enum AutoOpenCheatsheetSetting: String, Defaults.Serializable {
@@ -333,10 +342,12 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
   case fastOnly
   case tiered
   case tieredOllama
+  case tieredCloud
   case tieredGroq
   case groqOnly
   case tieredGemini
   case geminiOnly
+  case cloudOnly
 
   var id: Self { self }
 
@@ -348,6 +359,8 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Tiered (llama-server)"
     case .tieredOllama:
       return "Tiered (Ollama)"
+    case .tieredCloud:
+      return "Tiered (Cloud API)"
     case .tieredGroq:
       return "Tiered (Groq Cloud)"
     case .groqOnly:
@@ -356,6 +369,8 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Tiered (Gemini)"
     case .geminiOnly:
       return "Gemini Only"
+    case .cloudOnly:
+      return "Cloud Only"
     }
   }
 
@@ -367,6 +382,8 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Fast matcher first, then llama-server (/v1/chat/completions) for harder commands."
     case .tieredOllama:
       return "Fast matcher first, then Ollama (/api/chat) for harder commands."
+    case .tieredCloud:
+      return "Fast matcher first, then a cloud planner provider for harder commands."
     case .tieredGroq:
       return "Fast matcher first, then Groq Cloud API for harder commands. Uses your Groq API key."
     case .groqOnly:
@@ -375,12 +392,106 @@ enum VoicePlannerMode: String, Defaults.Serializable, CaseIterable, Identifiable
       return "Fast matcher first, then Gemini API for harder commands. Uses your Gemini API key."
     case .geminiOnly:
       return "Always use Gemini API with retrieved candidates only. Handles complex voice commands."
+    case .cloudOnly:
+      return "Always use the selected cloud planner provider."
     }
   }
 
   var isTiered: Bool {
-    self == .tiered || self == .tieredOllama || self == .tieredGroq || self == .groqOnly
-      || self == .tieredGemini || self == .geminiOnly
+    self == .tiered || self == .tieredOllama || self == .tieredCloud || self == .tieredGroq
+      || self == .groqOnly || self == .tieredGemini || self == .geminiOnly || self == .cloudOnly
+  }
+}
+
+enum VoiceCloudPlannerProvider: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case openAI
+  case openRouter
+  case fireworks
+  case together
+  case deepInfra
+  case perplexity
+  case compatible
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .openAI:
+      return "OpenAI"
+    case .openRouter:
+      return "OpenRouter"
+    case .fireworks:
+      return "Fireworks"
+    case .together:
+      return "Together"
+    case .deepInfra:
+      return "DeepInfra"
+    case .perplexity:
+      return "Perplexity"
+    case .compatible:
+      return "Custom OpenAI-compatible"
+    }
+  }
+
+  var plannerKind: String {
+    switch self {
+    case .openAI:
+      return "openai"
+    case .openRouter:
+      return "openrouter"
+    case .fireworks:
+      return "fireworks"
+    case .together:
+      return "together"
+    case .deepInfra:
+      return "deepinfra"
+    case .perplexity:
+      return "perplexity"
+    case .compatible:
+      return "compatible"
+    }
+  }
+
+  var defaultModel: String {
+    switch self {
+    case .openAI:
+      return "gpt-4.1-mini"
+    case .openRouter:
+      return "openai/gpt-4.1-mini"
+    case .fireworks:
+      return "accounts/fireworks/models/kimi-k2p5"
+    case .together:
+      return "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+    case .deepInfra:
+      return "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    case .perplexity:
+      return "sonar-pro"
+    case .compatible:
+      return "gpt-4.1-mini"
+    }
+  }
+
+  var baseURL: String {
+    switch self {
+    case .openAI:
+      return "https://api.openai.com/v1"
+    case .openRouter:
+      return "https://openrouter.ai/api/v1"
+    case .fireworks:
+      return "https://api.fireworks.ai/inference/v1"
+    case .together:
+      return "https://api.together.ai/v1"
+    case .deepInfra:
+      return "https://api.deepinfra.com/v1/openai"
+    case .perplexity:
+      return "https://api.perplexity.ai"
+    case .compatible:
+      return ""
+    }
+  }
+
+  var keychainAccount: String {
+    "voice.cloud.\(rawValue)"
   }
 }
 

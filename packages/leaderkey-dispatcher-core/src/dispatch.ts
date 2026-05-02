@@ -56,12 +56,19 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
   if (shouldCallPlanner) {
     try {
       const planner = createPlanner({
+        deepinfraApiKey: request.deepinfraApiKey,
         geminiApiKey: request.geminiApiKey,
         groqApiKey: request.groqApiKey,
+        fireworksApiKey: request.fireworksApiKey,
         llamaUrl: request.llamaUrl,
         model: request.model,
+        openaiApiKey: request.openaiApiKey,
+        openrouterApiKey: request.openrouterApiKey,
         ollamaUrl: request.ollamaUrl,
+        perplexityApiKey: request.perplexityApiKey,
+        plannerBaseURL: request.plannerBaseURL,
         planner: request.planner,
+        togetherApiKey: request.togetherApiKey,
       });
       if (planner) {
         if (plannerCandidatesByClause.length === 0 || plannerCandidatesByClause.every((candidates) => candidates.length === 0)) {

@@ -176,6 +176,15 @@
           "voiceId": "window_right_half",
           "voiceAliases": ["right half", "move right", "tile right", "snap right"],
           "value": "raycast://extensions/raycast/window-management/right-half"
+        },
+        {
+          "key": "f",
+          "type": "url",
+          "label": "Raycast: Toggle Fullscreen",
+          "description": "Toggle fullscreen for the active window",
+          "voiceId": "window_toggle_fullscreen",
+          "voiceAliases": ["exit full screen", "exit fullscreen", "leave full screen", "toggle fullscreen"],
+          "value": "raycast://extensions/raycast/window-management/toggle-fullscreen"
         }
       ]
     },

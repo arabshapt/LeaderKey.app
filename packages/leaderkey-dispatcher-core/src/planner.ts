@@ -7,6 +7,13 @@ export interface PlannerOptions {
   ollamaUrl?: string;
   groqApiKey?: string;
   geminiApiKey?: string;
+  openaiApiKey?: string;
+  openrouterApiKey?: string;
+  fireworksApiKey?: string;
+  togetherApiKey?: string;
+  deepinfraApiKey?: string;
+  perplexityApiKey?: string;
+  plannerBaseURL?: string;
 }
 
 export interface LlmPlanner {
@@ -58,6 +65,16 @@ const PLANNER_RESPONSE_SCHEMA = {
     type: "object",
   },
 } as const;
+
+interface OpenAICompatiblePlannerOptions {
+  apiKey: string;
+  model?: string;
+  baseURL?: string;
+  authHeader?: string;
+  authPrefix?: string;
+  extraHeaders?: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+}
 
 function compactContext(context: DispatchContext | undefined): Record<string, unknown> | undefined {
   if (!context?.currentApp && !context?.recentCommands?.length) {
@@ -137,6 +154,44 @@ function parsePlannerJson(value: unknown): DispatchPlan {
   };
 }
 
+async function planWithOpenAICompatibleEndpoint(
+  options: OpenAICompatiblePlannerOptions,
+  transcript: string,
+  candidatesByClause: ActionCandidate[][],
+  context?: DispatchContext,
+): Promise<DispatchPlan> {
+  if (!options.apiKey) {
+    throw new Error("API key is required for planner");
+  }
+
+  const baseURL = (options.baseURL ?? "https://api.openai.com/v1").replace(/\/$/, "");
+  const response = await fetch(`${baseURL}/chat/completions`, {
+    body: JSON.stringify({
+      messages: [
+        { role: "system", content: "Return valid JSON only. No markdown, no explanation." },
+        { role: "user", content: plannerPrompt(transcript, candidatesByClause, context) },
+      ],
+      model: options.model ?? "gpt-4.1-mini",
+      response_format: { type: "json_object" },
+      stream: false,
+      temperature: 0,
+      ...(options.extraBody ?? {}),
+    }),
+    headers: {
+      ...(options.extraHeaders ?? {}),
+      [options.authHeader ?? "authorization"]: `${options.authPrefix ?? "Bearer "}${options.apiKey}`,
+      "content-type": "application/json",
+    },
+    method: "POST",
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) {
+    throw new Error(`planner failed: ${response.status} ${await response.text()}`);
+  }
+  const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  return parsePlannerJson(json.choices?.[0]?.message?.content ?? "{}");
+}
+
 function geminiReasoningEffort(model: string | undefined): "none" | undefined {
   const normalized = (model ?? "gemini-2.5-flash").trim().toLowerCase();
   return normalized.startsWith("gemini-2.5-flash") || normalized.startsWith("gemini-2.5-flash-lite")
@@ -175,6 +230,20 @@ export class LlamaServerPlanner implements LlmPlanner {
     }
     const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     return parsePlannerJson(json.choices?.[0]?.message?.content ?? "{}");
+  }
+}
+
+export class OpenAICompatiblePlanner implements LlmPlanner {
+  constructor(
+    private readonly options: OpenAICompatiblePlannerOptions = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint(this.options, transcript, candidatesByClause, context);
   }
 }
 
@@ -232,29 +301,119 @@ export class GroqPlanner implements LlmPlanner {
     if (!this.options.apiKey) {
       throw new Error("Groq API key is required for planner");
     }
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: "Return valid JSON only. No markdown, no explanation." },
-          { role: "user", content: plannerPrompt(transcript, candidatesByClause, context) },
-        ],
-        model: this.options.model ?? "llama-3.3-70b-versatile",
-        response_format: { type: "json_object" },
-        stream: false,
-        temperature: 0,
-      }),
-      headers: {
-        "authorization": `Bearer ${this.options.apiKey}`,
-        "content-type": "application/json",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) {
-      throw new Error(`groq planner failed: ${response.status} ${await response.text()}`);
-    }
-    const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return parsePlannerJson(json.choices?.[0]?.message?.content ?? "{}");
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.groq.com/openai/v1",
+      model: this.options.model ?? "llama-3.3-70b-versatile",
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class OpenAIPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.openai.com/v1",
+      model: this.options.model,
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class OpenRouterPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://openrouter.ai/api/v1",
+      model: this.options.model,
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class FireworksPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.fireworks.ai/inference/v1",
+      model: this.options.model,
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class TogetherPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.together.ai/v1",
+      model: this.options.model,
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class DeepInfraPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.deepinfra.com/v1/openai",
+      model: this.options.model,
+    }, transcript, candidatesByClause, context);
+  }
+}
+
+export class PerplexityPlanner implements LlmPlanner {
+  constructor(
+    private readonly options: { apiKey: string; model?: string } = { apiKey: "" },
+  ) {}
+
+  async plan(
+    transcript: string,
+    candidatesByClause: ActionCandidate[][],
+    context?: DispatchContext,
+  ): Promise<DispatchPlan> {
+    return planWithOpenAICompatibleEndpoint({
+      apiKey: this.options.apiKey,
+      baseURL: "https://api.perplexity.ai",
+      model: this.options.model ?? "sonar-pro",
+    }, transcript, candidatesByClause, context);
   }
 }
 
@@ -312,6 +471,24 @@ export function createPlanner(options: PlannerOptions): LlmPlanner | undefined {
       return new GroqPlanner({ apiKey: options.groqApiKey ?? "", model: options.model });
     case "gemini":
       return new GeminiPlanner({ apiKey: options.geminiApiKey ?? "", model: options.model });
+    case "openai":
+      return new OpenAIPlanner({ apiKey: options.openaiApiKey ?? "", model: options.model });
+    case "openrouter":
+      return new OpenRouterPlanner({ apiKey: options.openrouterApiKey ?? "", model: options.model });
+    case "fireworks":
+      return new FireworksPlanner({ apiKey: options.fireworksApiKey ?? "", model: options.model });
+    case "together":
+      return new TogetherPlanner({ apiKey: options.togetherApiKey ?? "", model: options.model });
+    case "deepinfra":
+      return new DeepInfraPlanner({ apiKey: options.deepinfraApiKey ?? "", model: options.model });
+    case "perplexity":
+      return new PerplexityPlanner({ apiKey: options.perplexityApiKey ?? "", model: options.model });
+    case "compatible":
+      return new OpenAICompatiblePlanner({
+        apiKey: options.openaiApiKey ?? "",
+        baseURL: options.plannerBaseURL,
+        model: options.model,
+      });
     case "none":
       return undefined;
   }

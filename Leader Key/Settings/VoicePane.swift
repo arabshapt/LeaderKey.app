@@ -20,11 +20,16 @@ struct VoicePane: View {
   @Default(.voiceTier3ModelPath) private var voiceTier3ModelPath
   @Default(.voiceGroqPlannerModel) private var voiceGroqPlannerModel
   @Default(.voiceGeminiPlannerModel) private var voiceGeminiPlannerModel
+  @Default(.voiceCloudPlannerProvider) private var voiceCloudPlannerProvider
+  @Default(.voiceCloudPlannerModel) private var voiceCloudPlannerModel
+  @Default(.voiceCloudPlannerBaseURL) private var voiceCloudPlannerBaseURL
 
   @State private var groqAPIKeyInput = ""
   @State private var hasStoredGroqAPIKey = false
   @State private var geminiAPIKeyInput = ""
   @State private var hasStoredGeminiAPIKey = false
+  @State private var cloudAPIKeyInput = ""
+  @State private var hasStoredCloudAPIKey = false
   @State private var keychainMessage: String?
   @State private var microphoneMessage = ""
 
@@ -246,6 +251,59 @@ struct VoicePane: View {
               .padding(.top, 8)
             }
 
+            DisclosureGroup("Cloud planner settings") {
+              VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                  Text("Provider")
+                  Spacer()
+                  Picker("", selection: $voiceCloudPlannerProvider) {
+                    ForEach(VoiceCloudPlannerProvider.allCases) { provider in
+                      Text(provider.displayName).tag(provider)
+                    }
+                  }
+                  .labelsHidden()
+                  .frame(width: 240)
+                }
+
+                Text("Use an OpenAI-compatible cloud provider for harder commands.")
+                  .font(.callout)
+                  .foregroundColor(.secondary)
+
+                labeledTextField("Cloud model", text: $voiceCloudPlannerModel)
+                if voiceCloudPlannerProvider == .compatible {
+                  labeledTextField("Base URL", text: $voiceCloudPlannerBaseURL)
+                }
+
+                HStack(spacing: 10) {
+                  SecureField("Cloud API key", text: $cloudAPIKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 360)
+
+                  Button("Save") {
+                    saveCloudAPIKey()
+                  }
+                  .disabled(cloudAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                  Button("Delete") {
+                    deleteCloudAPIKey()
+                  }
+                  .disabled(!hasStoredCloudAPIKey)
+                }
+
+                HStack(spacing: 8) {
+                  Image(
+                    systemName: hasStoredCloudAPIKey
+                      ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                  )
+                    .foregroundColor(hasStoredCloudAPIKey ? .green : .orange)
+                  Text(hasStoredCloudAPIKey ? "\(voiceCloudPlannerProvider.displayName) key stored in Keychain" : "No cloud planner key stored")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                }
+              }
+              .padding(.top, 8)
+            }
+
             Defaults.Toggle(
               "Notify when llama-server is unreachable",
               key: .voiceNotifyTierUnavailable
@@ -260,6 +318,16 @@ struct VoicePane: View {
     .onAppear {
       refreshStoredKeyState()
       microphoneMessage = currentMicrophoneStatusMessage()
+    }
+    .onChange(of: voiceCloudPlannerProvider) { _ in
+      refreshStoredKeyState()
+      notifyVoiceSettingsChanged()
+    }
+    .onChange(of: voiceCloudPlannerModel) { _ in
+      notifyVoiceSettingsChanged()
+    }
+    .onChange(of: voiceCloudPlannerBaseURL) { _ in
+      notifyVoiceSettingsChanged()
     }
   }
 
@@ -315,9 +383,34 @@ struct VoicePane: View {
     refreshStoredKeyState()
   }
 
+  private func saveCloudAPIKey() {
+    let trimmed = cloudAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+
+    if KeychainHelper.save(
+      account: VoiceKeychain.cloudAPIKeyAccount(for: voiceCloudPlannerProvider),
+      key: trimmed
+    ) {
+      cloudAPIKeyInput = ""
+      keychainMessage = "\(voiceCloudPlannerProvider.displayName) key saved."
+    } else {
+      keychainMessage = "Failed to save cloud planner key."
+    }
+    refreshStoredKeyState()
+  }
+
+  private func deleteCloudAPIKey() {
+    _ = KeychainHelper.delete(account: VoiceKeychain.cloudAPIKeyAccount(for: voiceCloudPlannerProvider))
+    cloudAPIKeyInput = ""
+    keychainMessage = "\(voiceCloudPlannerProvider.displayName) key deleted."
+    refreshStoredKeyState()
+  }
+
   private func refreshStoredKeyState() {
     hasStoredGroqAPIKey = KeychainHelper.hasKey(account: VoiceKeychain.groqAPIKeyAccount)
     hasStoredGeminiAPIKey = KeychainHelper.hasKey(account: VoiceKeychain.geminiAPIKeyAccount)
+    hasStoredCloudAPIKey = KeychainHelper.hasKey(
+      account: VoiceKeychain.cloudAPIKeyAccount(for: voiceCloudPlannerProvider))
   }
 
   private func requestMicrophoneAccess() {

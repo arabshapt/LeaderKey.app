@@ -7,6 +7,10 @@ import KeyboardShortcuts
 enum VoiceKeychain {
   static let groqAPIKeyAccount = "voice.groq"
   static let geminiAPIKeyAccount = "voice.gemini"
+
+  static func cloudAPIKeyAccount(for provider: VoiceCloudPlannerProvider) -> String {
+    provider.keychainAccount
+  }
 }
 
 final class VoiceCoordinator {
@@ -375,24 +379,32 @@ final class VoiceCoordinator {
 
   private func voiceDispatchOptions(bundleId: String?) -> VoiceDispatchOptions {
     let plannerMode = Defaults[.voicePlannerMode]
+    let cloudProvider = Defaults[.voiceCloudPlannerProvider]
     let model: String
     switch plannerMode {
     case .tieredGroq, .groqOnly:
       model = Defaults[.voiceGroqPlannerModel]
     case .tieredGemini, .geminiOnly:
       model = Defaults[.voiceGeminiPlannerModel]
+    case .tieredCloud, .cloudOnly:
+      model = Defaults[.voiceCloudPlannerModel]
     case .fastOnly, .tiered, .tieredOllama:
       model = Defaults[.voiceTier2Model]
     }
+    let cloudAPIKey =
+      KeychainHelper.load(account: VoiceKeychain.cloudAPIKeyAccount(for: cloudProvider)) ?? ""
     return VoiceDispatchOptions(
       configDirectory: Defaults[.configDir],
       execute: Defaults[.voiceDispatchMode] == .execute,
       allowDestructive: false,
       plannerMode: plannerMode,
+      cloudPlannerProvider: cloudProvider,
       llamaURL: Defaults[.voiceLlamaServerURL],
       model: model,
       groqApiKey: KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) ?? "",
       geminiApiKey: KeychainHelper.load(account: VoiceKeychain.geminiAPIKeyAccount) ?? "",
+      cloudPlannerApiKey: cloudAPIKey,
+      cloudPlannerBaseURL: Defaults[.voiceCloudPlannerBaseURL],
       contextJSON: voiceDispatchContextJSON(bundleId: bundleId)
     )
   }

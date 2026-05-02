@@ -33,7 +33,7 @@ The fast path is deterministic: aliases, BM25-like token scoring, and fuzzy matc
 
 The LLM planner is fallback-only. It receives only retrieved candidates, never the whole action catalog. This keeps prompt prefill small and prevents choosing IDs outside the retrieved set.
 
-Production-oriented local planner path is `llama-server` with GBNF grammar. Ollama is kept as a developer fallback. Groq and Gemini are optional cloud planner paths for complex voice commands; both still receive only retrieved candidates. Verified model candidates:
+Production-oriented local planner path is `llama-server` with GBNF grammar. Ollama is kept as a developer fallback. Groq, Gemini, OpenAI, OpenRouter, Fireworks, Together, DeepInfra, and Perplexity are supported cloud planner paths for complex voice commands; all still receive only retrieved candidates. Verified model candidates:
 
 - [Qwen2.5-1.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF)
 - [Phi-3.5-mini-instruct](https://huggingface.co/microsoft/Phi-3.5-mini-instruct)
@@ -68,3 +68,5 @@ For Gemini API planning, save a Gemini API key in Voice settings or pass it dire
 ```sh
 leaderkey-dispatcher plan --planner gemini --gemini-api-key "$GEMINI_API_KEY" --model gemini-2.5-flash "open intellij and then open terminal in it"
 ```
+
+For OpenRouter, Fireworks, Together, DeepInfra, Perplexity, OpenAI, or a custom OpenAI-compatible endpoint, use the matching planner kind and API key flag. The custom path accepts `--planner compatible --planner-base-url <url> --openai-api-key <key>`.

@@ -43,6 +43,9 @@ function expandQuery(value: string): string {
   if (/\b(?:side by side|split screen|next to each other)\b/.test(normalized)) {
     additions.push("left half right half raycast window management");
   }
+  if (/\b(?:exit|leave|toggle|full\s*screen|fullscreen)\b/.test(normalized) && /\b(?:full\s*screen|fullscreen)\b/.test(normalized)) {
+    additions.push("toggle fullscreen full screen raycast window management");
+  }
   if (/\b(?:settings|preferences|prefs)\b/.test(normalized)) {
     additions.push("settings preferences prefs showsettings show settings");
   }
@@ -95,6 +98,14 @@ function lexicalBoost(query: string, entry: ActionEntry): number {
   }
   if (label.includes(rawNormalized) || search.includes(rawNormalized)) {
     return 5;
+  }
+  if (/\b(?:full\s*screen|fullscreen)\b/.test(rawNormalized)) {
+    if (label.includes("fullscreen") || value.includes("fullscreen") || value.includes("toggle-fullscreen")) {
+      return 7;
+    }
+    if (entry.type === "command") {
+      return -2;
+    }
   }
 
   const tokens = queryTokens(normalized);

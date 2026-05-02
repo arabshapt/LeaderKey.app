@@ -8,7 +8,19 @@ import type {
 } from "@leaderkey/config-core";
 
 export type DispatchScope = "frontmost" | "global" | "all";
-export type PlannerKind = "none" | "llama" | "ollama" | "groq" | "gemini";
+export type PlannerKind =
+  | "none"
+  | "llama"
+  | "ollama"
+  | "groq"
+  | "gemini"
+  | "openai"
+  | "openrouter"
+  | "fireworks"
+  | "together"
+  | "deepinfra"
+  | "perplexity"
+  | "compatible";
 
 export interface DispatchRequest {
   transcript: string;
@@ -27,6 +39,13 @@ export interface DispatchRequest {
   ollamaUrl?: string;
   groqApiKey?: string;
   geminiApiKey?: string;
+  openaiApiKey?: string;
+  openrouterApiKey?: string;
+  fireworksApiKey?: string;
+  togetherApiKey?: string;
+  deepinfraApiKey?: string;
+  perplexityApiKey?: string;
+  plannerBaseURL?: string;
   alwaysPlan?: boolean;
 }
 

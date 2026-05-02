@@ -1,5 +1,5 @@
 import { retrieveActions } from "./retriever.js";
-import { normalizeText, tokenize } from "./text.js";
+import { normalizeText, splitTranscript, tokenize } from "./text.js";
 import type { ActionCandidate, ActionCatalog, DispatchContext, DispatchPlan, RecentVoiceCommandContext } from "./types.js";
 
 export interface LayoutIntentExpansion {
@@ -17,6 +17,7 @@ const LEADING_COMMAND_WORDS = /^(?:please\s+)?(?:(?:i\s+want\s+you\s+to|can\s+yo
 const APP_TRAILING_WORDS = /\s+(?:app|application|window)$/;
 const SIDE_BY_SIDE_PATTERN = /\b(?:side[-\s]?by[-\s]?side|split\s+screen|next\s+to\s+each\s+other|beside\s+each\s+other)\b/;
 const POSITION_WORDS = /\b(?:(?:with\s+)?(?:their\s+)?(?:window\s+)?positions?|(?:with\s+)?(?:their\s+)?position|windows?)\b/g;
+const PRE_LAYOUT_MARKER = /\b(?:and\s+then|after\s+that|then)\b/g;
 
 function cleanAppName(value: string): string {
   return normalizeText(value)
@@ -141,6 +142,33 @@ function parseSideBySideIntent(transcript: string, context: DispatchContext | un
   return apps ? { ...apps, reason: "layout_side_by_side" } : undefined;
 }
 
+function splitPreLayoutClauses(transcript: string): { layoutTranscript: string; preClauses: string[] } {
+  const normalized = normalizeText(transcript).replace(/side-by-side/g, "side by side");
+  const sideBySideIndex = normalized.search(SIDE_BY_SIDE_PATTERN);
+  if (sideBySideIndex < 0) {
+    return { layoutTranscript: transcript, preClauses: [] };
+  }
+
+  let lastMarker: RegExpExecArray | undefined;
+  PRE_LAYOUT_MARKER.lastIndex = 0;
+  for (let match = PRE_LAYOUT_MARKER.exec(normalized); match; match = PRE_LAYOUT_MARKER.exec(normalized)) {
+    if (match.index < sideBySideIndex) {
+      lastMarker = match;
+    }
+  }
+
+  if (!lastMarker) {
+    return { layoutTranscript: transcript, preClauses: [] };
+  }
+
+  const prefix = normalized.slice(0, lastMarker.index).trim();
+  const layoutTranscript = normalized.slice(lastMarker.index + lastMarker[0].length).trim();
+  return {
+    layoutTranscript,
+    preClauses: splitTranscript(prefix),
+  };
+}
+
 function tokenSet(value: string): Set<string> {
   return new Set(tokenize(value));
 }
@@ -200,17 +228,52 @@ function retrieveWindowHalfCandidates(catalog: ActionCatalog, side: "left" | "ri
     .slice(0, 4);
 }
 
+function isToggleFullscreenCandidate(candidate: ActionCandidate): boolean {
+  const label = normalizeText(candidate.action.label);
+  const value = normalizeText(candidate.action.value);
+  return candidate.action.type === "url"
+    && (
+      value.includes("window-management/toggle-fullscreen")
+      || (label.includes("toggle") && label.includes("fullscreen"))
+      || (label.includes("toggle") && label.includes("full") && label.includes("screen"))
+    );
+}
+
+function retrievePreLayoutCandidates(catalog: ActionCatalog, clause: string): ActionCandidate[] {
+  const candidates = retrieveActions(catalog, clause, 12);
+  if (!/\b(?:full\s*screen|fullscreen)\b/.test(normalizeText(clause))) {
+    return candidates;
+  }
+
+  const fullscreenCandidates = candidates
+    .filter(isToggleFullscreenCandidate)
+    .map((candidate) => ({
+      ...candidate,
+      confidence: Math.max(candidate.confidence, 0.95),
+      reason: `${candidate.reason}:layout_pre_toggle_fullscreen`,
+    }))
+    .sort(preferShortestPath);
+  const fullscreenIds = new Set(fullscreenCandidates.map((candidate) => candidate.action.id));
+  return [
+    ...fullscreenCandidates,
+    ...candidates.filter((candidate) => !fullscreenIds.has(candidate.action.id)),
+  ];
+}
+
 export function expandLayoutIntent(
   catalog: ActionCatalog,
   transcript: string,
   context?: DispatchContext,
 ): LayoutIntentExpansion | undefined {
-  const intent = parseSideBySideIntent(transcript, context);
+  const split = splitPreLayoutClauses(transcript);
+  const intent = parseSideBySideIntent(split.layoutTranscript, context);
   if (!intent) {
     return undefined;
   }
 
+  const preCandidatesByClause = split.preClauses.map((clause) => retrievePreLayoutCandidates(catalog, clause));
   const candidatesByClause = [
+    ...preCandidatesByClause,
     retrieveAppCandidates(catalog, intent.leftApp),
     retrieveWindowHalfCandidates(catalog, "left"),
     retrieveAppCandidates(catalog, intent.rightApp),
@@ -218,10 +281,11 @@ export function expandLayoutIntent(
   ];
   const chosen = candidatesByClause.map((candidates) => candidates[0]);
   const unresolved = [
-    chosen[0] ? undefined : intent.leftApp,
-    chosen[1] ? undefined : "left half",
-    chosen[2] ? undefined : intent.rightApp,
-    chosen[3] ? undefined : "right half",
+    ...split.preClauses.map((clause, index) => chosen[index] ? undefined : clause),
+    chosen[split.preClauses.length] ? undefined : intent.leftApp,
+    chosen[split.preClauses.length + 1] ? undefined : "left half",
+    chosen[split.preClauses.length + 2] ? undefined : intent.rightApp,
+    chosen[split.preClauses.length + 3] ? undefined : "right half",
   ].filter((value): value is string => Boolean(value));
 
   if (unresolved.length > 0 || chosen.some((candidate) => !candidate || candidate.confidence < 0.85)) {
@@ -238,7 +302,7 @@ export function expandLayoutIntent(
     };
   }
 
-  const concrete = chosen as [ActionCandidate, ActionCandidate, ActionCandidate, ActionCandidate];
+  const concrete = chosen as ActionCandidate[];
   const overall = Math.min(...concrete.map((candidate) => candidate.confidence));
   return {
     candidatesByClause,

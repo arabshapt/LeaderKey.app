@@ -2,7 +2,21 @@ export { buildActionCatalog } from "./catalog.js";
 export { runBench, readBenchRows } from "./bench.js";
 export { executeDispatch, executeValidation, planDispatch } from "./dispatch.js";
 export { fastMatch } from "./matcher.js";
-export { GeminiPlanner, GroqPlanner, LlamaServerPlanner, MockPlanner, OllamaPlanner, createPlanner } from "./planner.js";
+export {
+  DeepInfraPlanner,
+  FireworksPlanner,
+  GeminiPlanner,
+  GroqPlanner,
+  LlamaServerPlanner,
+  MockPlanner,
+  OllamaPlanner,
+  OpenAICompatiblePlanner,
+  OpenAIPlanner,
+  OpenRouterPlanner,
+  PerplexityPlanner,
+  TogetherPlanner,
+  createPlanner,
+} from "./planner.js";
 export { retrieveActions } from "./retriever.js";
 export { readFrontmostBundleId, sendLeaderKeySocketRequest } from "./socket.js";
 export { validateDispatchPlan } from "./validator.js";

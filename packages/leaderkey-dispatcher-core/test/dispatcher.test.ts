@@ -9,6 +9,7 @@ import {
   executeValidation,
   fastMatch,
   GeminiPlanner,
+  createPlanner,
   planDispatch,
   retrieveActions,
   validateDispatchPlan,
@@ -177,6 +178,23 @@ test("layout intent handles explicit left and right wording", async () => {
     "app_google_chrome",
     "window_right_half",
   ]);
+});
+
+test("layout intent preserves pre-layout fullscreen command", async () => {
+  const result = await planDispatch({
+    catalogPath: fixturePath,
+    transcript: "Exit full screen of Chrome then bring Activity Monitor and Chrome side by side",
+  });
+
+  assert.equal(result.plan.reason, "layout_side_by_side");
+  assert.deepEqual(result.plan.chain.map((step) => step.action_id), [
+    "window_toggle_fullscreen",
+    "app_activity_monitor",
+    "window_left_half",
+    "app_google_chrome",
+    "window_right_half",
+  ]);
+  assert.equal(result.validation.valid, true);
 });
 
 test("layout intent handles named app swap wording", async () => {
@@ -395,6 +413,63 @@ test("Gemini planner uses OpenAI-compatible endpoint and candidate-only prompt",
     const messages = requestBody?.messages as Array<{ content: string }>;
     assert.match(messages[1]?.content ?? "", new RegExp(candidate.action.id));
     assert.doesNotMatch(messages[1]?.content ?? "", /tab_close/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible planners target the expected provider endpoints", async () => {
+  const catalog = await buildActionCatalog({ catalogPath: fixturePath });
+  const candidate = retrieveActions(catalog, "new tab", 1)[0]!;
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; authorization: string }> = [];
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      authorization: new Headers(init?.headers).get("authorization") ?? "",
+      url: String(input),
+    });
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            chain: [{ action_id: candidate.action.id, confidence: 0.96 }],
+            mode: "llm_planner",
+            needs_confirmation: false,
+            overall_confidence: 0.96,
+            reason: "provider test",
+          }),
+        },
+      }],
+    }), { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const providers = [
+      { planner: "openai" as const, apiKey: "a", expected: "https://api.openai.com/v1/chat/completions", keyField: "openaiApiKey" as const },
+      { planner: "openrouter" as const, apiKey: "b", expected: "https://openrouter.ai/api/v1/chat/completions", keyField: "openrouterApiKey" as const },
+      { planner: "fireworks" as const, apiKey: "c", expected: "https://api.fireworks.ai/inference/v1/chat/completions", keyField: "fireworksApiKey" as const },
+      { planner: "together" as const, apiKey: "d", expected: "https://api.together.ai/v1/chat/completions", keyField: "togetherApiKey" as const },
+      { planner: "deepinfra" as const, apiKey: "e", expected: "https://api.deepinfra.com/v1/openai/chat/completions", keyField: "deepinfraApiKey" as const },
+      { planner: "perplexity" as const, apiKey: "f", expected: "https://api.perplexity.ai/chat/completions", keyField: "perplexityApiKey" as const },
+      { planner: "compatible" as const, apiKey: "g", expected: "https://custom.example/v1/chat/completions", baseURL: "https://custom.example/v1", keyField: "openaiApiKey" as const },
+    ];
+
+    for (const provider of providers) {
+      const plannerOptions: Record<string, unknown> = {
+        planner: provider.planner,
+        model: "test-model",
+        plannerBaseURL: provider.baseURL,
+      };
+      plannerOptions[provider.keyField] = provider.apiKey;
+      const planner = createPlanner(plannerOptions);
+      assert.ok(planner);
+      const plan = await planner.plan("open a new tab", [[candidate]]);
+      assert.equal(plan.chain[0]?.action_id, candidate.action.id);
+      const call = calls.at(-1);
+      assert.equal(call?.url, provider.expected);
+      assert.equal(call?.authorization, `Bearer ${provider.apiKey}`);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

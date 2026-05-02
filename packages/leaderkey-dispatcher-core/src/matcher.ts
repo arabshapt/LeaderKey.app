@@ -99,6 +99,24 @@ const ALIASES: AliasSpec[] = [
     reason: "alias:window_right_half",
   },
   {
+    aliases: [
+      "exit full screen",
+      "exit fullscreen",
+      "leave full screen",
+      "leave fullscreen",
+      "toggle full screen",
+      "toggle fullscreen",
+    ],
+    predicate: (entry) =>
+      entry.type === "url" &&
+      (
+        entry.value.includes("window-management/toggle-fullscreen") ||
+        hasAllWords(entry.searchText, ["toggle", "fullscreen"]) ||
+        hasAllWords(entry.searchText, ["toggle", "full", "screen"])
+      ),
+    reason: "alias:toggle_fullscreen",
+  },
+  {
     aliases: ["remove everything", "run rm rf documents", "delete all documents", "sudo cleanup", "dangerous remove command"],
     predicate: (entry) => entry.type === "command" || entry.safety !== "safe",
     reason: "alias:unsafe",

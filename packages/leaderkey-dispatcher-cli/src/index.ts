@@ -34,12 +34,19 @@ Flags:
   --scope frontmost|global|all
   --bundle-id id
   --include-global
-  --planner none|llama|ollama|groq|gemini
+  --planner none|llama|ollama|groq|gemini|openai|openrouter|fireworks|together|deepinfra|perplexity|compatible
   --model name
   --llama-url url
   --ollama-url url
   --groq-api-key key
   --gemini-api-key key
+  --openai-api-key key
+  --openrouter-api-key key
+  --fireworks-api-key key
+  --together-api-key key
+  --deepinfra-api-key key
+  --perplexity-api-key key
+  --planner-base-url url
   --always-plan
   --context-json json
   --pretty
@@ -94,13 +101,20 @@ async function requestFromArgs(args: string[], transcript: string): Promise<Disp
     execute: hasFlag(args, "--execute") && !hasFlag(args, "--dry-run"),
     allowDestructive: hasFlag(args, "--allow-destructive"),
     alwaysPlan: hasFlag(args, "--always-plan"),
+    deepinfraApiKey: readFlag(args, "--deepinfra-api-key"),
     geminiApiKey: readFlag(args, "--gemini-api-key"),
     groqApiKey: readFlag(args, "--groq-api-key"),
+    fireworksApiKey: readFlag(args, "--fireworks-api-key"),
     includeGlobal: hasFlag(args, "--include-global"),
     llamaUrl: readFlag(args, "--llama-url"),
     model: readFlag(args, "--model"),
+    openaiApiKey: readFlag(args, "--openai-api-key"),
+    openrouterApiKey: readFlag(args, "--openrouter-api-key"),
     ollamaUrl: readFlag(args, "--ollama-url"),
+    perplexityApiKey: readFlag(args, "--perplexity-api-key"),
+    plannerBaseURL: readFlag(args, "--planner-base-url"),
     planner: (readFlag(args, "--planner") ?? "none") as PlannerKind,
+    togetherApiKey: readFlag(args, "--together-api-key"),
     scope,
     transcript,
   };
