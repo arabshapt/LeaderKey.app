@@ -19,6 +19,7 @@ import {
   locateNodeInFile,
   openInEditor,
   parentPathIsInsideLayer,
+  searchRecordsInSubtree,
   triggerLeaderKeyConfigReload,
   type CachePayload,
   type ConfigSummary,
@@ -40,6 +41,8 @@ import { buildRowPresentation, recordIcon } from "./presentation.js";
 import { keyPathText } from "./record-formatting.js";
 import { SHORTCUTS } from "./shortcuts.js";
 import { isNormalScope } from "./scope-utils.js";
+
+const MAX_SMART_MATCHES = 120;
 
 interface PathEditorViewProps {
   configDirectory: string;
@@ -275,6 +278,16 @@ export function PathEditorView(props: PathEditorViewProps) {
     () => payload.records.filter((record) => record.effectiveConfigDisplayName === configSummary.displayName),
     [configSummary.displayName, payload.records],
   );
+  const smartMatchRows = useMemo(() => {
+    const trimmedInput = pathInput.trim();
+    if (!trimmedInput) {
+      return [];
+    }
+
+    return searchRecordsInSubtree(configRecords, trimmedInput, [])
+      .filter((record) => record.id !== analysis.exactMatch?.id)
+      .slice(0, MAX_SMART_MATCHES);
+  }, [analysis.exactMatch?.id, configRecords, pathInput]);
   const literalExactRecord = useMemo(
     () => configRecords.find((record) => keyPathMatches(record.effectiveKeyPath, literalTypedPath)),
     [configRecords, literalTypedPath],
@@ -1169,7 +1182,11 @@ export function PathEditorView(props: PathEditorViewProps) {
   }
 
   const topRows = [...literalTypedPathRows(), ...outcomeRows()];
-  const childRows = analysis.visibleChildren;
+  const hasPathInput = pathInput.trim().length > 0;
+  const childRows = hasPathInput ? smartMatchRows : analysis.visibleChildren;
+  const childRowsSectionTitle = hasPathInput
+    ? "Smart Matches"
+    : analysis.state === "exact-group" ? "Group Items" : "Deepest Existing Group";
   const combinedIds = [...topRows.map((row) => row.id), ...childRows.map((record) => record.id)];
   const activeSelectedId = selectedId && combinedIds.includes(selectedId)
     ? selectedId
@@ -1200,7 +1217,7 @@ export function PathEditorView(props: PathEditorViewProps) {
         ))}
       </List.Section>
 
-      <List.Section title={analysis.state === "exact-group" ? "Group Items" : "Deepest Existing Group"}>
+      <List.Section title={childRowsSectionTitle}>
         {childRows.map((record) => {
           const row = buildRowPresentation(record);
           const isSelected = activeSelectedId === record.id;
