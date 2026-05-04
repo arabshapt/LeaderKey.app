@@ -3,6 +3,7 @@ import type { ActionCandidate, ActionCatalog, DispatchPlan, ValidationReport } f
 export interface ValidatePlanOptions {
   candidatesByClause?: ActionCandidate[][];
   allowGlobalLookup?: boolean;
+  allowBlockedActions?: boolean;
   confidenceFloor?: number;
 }
 
@@ -45,7 +46,7 @@ export function validateDispatchPlan(
         requiresConfirmation: action.requiresConfirmation,
       };
     }
-    if (action.safety === "block") {
+    if (action.safety === "block" && !options.allowBlockedActions) {
       return {
         action,
         blocked: true,
@@ -58,13 +59,13 @@ export function validateDispatchPlan(
       action,
       blocked: false,
       confidence: step.confidence,
-      requiresConfirmation: action.requiresConfirmation || action.safety === "confirm",
+      requiresConfirmation: action.requiresConfirmation || action.safety === "confirm" || action.safety === "block",
     };
   });
 
   const invented = steps.some((step) => !step.action);
   const blocked = invented || steps.some((step) => step.blocked);
-  const needsConfirmation = plan.needs_confirmation || steps.some((step) => step.requiresConfirmation || step.action?.safety === "block");
+  const needsConfirmation = plan.needs_confirmation || steps.some((step) => step.requiresConfirmation);
   const typedSteps = steps.filter((step): step is typeof step & { action: NonNullable<typeof step.action> } => Boolean(step.action));
 
   if (plan.chain.length === 0) {

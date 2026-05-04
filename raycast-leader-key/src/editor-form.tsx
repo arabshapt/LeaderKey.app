@@ -326,20 +326,36 @@ function LayerTapActionEditor(props: LayerTapActionEditorProps) {
             setFormState={setTapState}
           />
           {tapState.type === "macro" ? (
-            <Action.Push
-              icon={Icon.List}
-              shortcut={SHORTCUTS.editMacroSteps}
-              target={
-                <MacroStepsEditor
-                  defaultMenuAppName={defaultMenuAppName}
-                  initialSteps={tapState.macroSteps}
-                  installedApps={installedApps}
-                  onChange={(macroSteps) => setTapState((current) => ({ ...current, macroSteps }))}
-                  title="Edit Tap Action Macro Steps"
-                />
-              }
-              title="Edit Macro Steps"
-            />
+            <>
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.edit}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={tapState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setTapState((current) => ({ ...current, macroSteps }))}
+                    title="Edit Tap Action Macro Steps"
+                  />
+                }
+                title="Edit Macro Steps"
+              />
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={tapState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setTapState((current) => ({ ...current, macroSteps }))}
+                    title="Edit Tap Action Macro Steps"
+                  />
+                }
+                title="Open Macro Steps"
+              />
+            </>
           ) : null}
           <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmitTapAction} shortcut={SHORTCUTS.save} title="Save Tap Action" />
         </ActionPanel>
@@ -596,7 +612,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
     };
   }, [initialPreserveItem, targetRecord]);
 
-  async function handleSubmit(): Promise<void> {
+  async function saveForm(submitState: ItemFormState): Promise<void> {
     const nextPathError = pathIsEditable(mode) ? pathError : undefined;
     if (nextPathError) {
       await showToast({ style: Toast.Style.Failure, title: nextPathError });
@@ -607,8 +623,8 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
       await showToast({ style: Toast.Style.Failure, title: usesScopedKey ? "A key is required." : "A full path is required." });
       return;
     }
-    const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
-    const nextItem = formStateToItem(formState, destinationKey, preservedItem, nextMenuAppName);
+    const nextMenuAppName = selectedMenuAppNameFor(submitState, defaultMenuAppName, installedApps);
+    const nextItem = formStateToItem(submitState, destinationKey, preservedItem, nextMenuAppName);
     const nextValueError = validateConfigItem(nextItem, {
       parentInsideLayer: destinationParentInsideLayer,
       scope: destinationScope,
@@ -801,35 +817,84 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
             setFormState={setFormState}
           />
           {formState.type === "macro" ? (
-            <Action.Push
-              icon={Icon.List}
-              shortcut={SHORTCUTS.editMacroSteps}
-              target={
-                <MacroStepsEditor
-                  defaultMenuAppName={defaultMenuAppName}
-                  initialSteps={formState.macroSteps}
-                  installedApps={installedApps}
-                  onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
-                  title="Edit Macro Steps"
-                />
-              }
-              title="Edit Macro Steps"
-            />
+            <>
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.edit}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={formState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
+                    onSaveAll={(macroSteps) => saveForm({ ...formState, macroSteps })}
+                    title="Edit Macro Steps"
+                  />
+                }
+                title="Edit Macro Steps"
+              />
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={formState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
+                    onSaveAll={(macroSteps) => saveForm({ ...formState, macroSteps })}
+                    title="Edit Macro Steps"
+                  />
+                }
+                title="Open Macro Steps"
+              />
+            </>
           ) : null}
           {formState.type === "layer" ? (
-            <Action.Push
-              icon={Icon.Layers}
-              shortcut={SHORTCUTS.editTapAction}
-              target={
-                <LayerTapActionEditor
-                  defaultMenuAppName={defaultMenuAppName}
-                  initialTapAction={formState.tapAction}
-                  installedApps={installedApps}
-                  onChange={(tapAction) => setFormState((current) => ({ ...current, tapAction }))}
+            formState.tapAction ? (
+              <>
+                <Action.Push
+                  icon={Icon.Layers}
+                  shortcut={SHORTCUTS.edit}
+                  target={
+                    <LayerTapActionEditor
+                      defaultMenuAppName={defaultMenuAppName}
+                      initialTapAction={formState.tapAction}
+                      installedApps={installedApps}
+                      onChange={(tapAction) => setFormState((current) => ({ ...current, tapAction }))}
+                    />
+                  }
+                  title="Edit Tap Action"
                 />
-              }
-              title={formState.tapAction ? "Edit Tap Action" : "Add Tap Action"}
-            />
+                <Action.Push
+                  icon={Icon.Layers}
+                  shortcut={SHORTCUTS.editTapAction}
+                  target={
+                    <LayerTapActionEditor
+                      defaultMenuAppName={defaultMenuAppName}
+                      initialTapAction={formState.tapAction}
+                      installedApps={installedApps}
+                      onChange={(tapAction) => setFormState((current) => ({ ...current, tapAction }))}
+                    />
+                  }
+                  title="Open Tap Action"
+                />
+              </>
+            ) : (
+              <Action.Push
+                icon={Icon.Layers}
+                shortcut={SHORTCUTS.editTapAction}
+                target={
+                  <LayerTapActionEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialTapAction={formState.tapAction}
+                    installedApps={installedApps}
+                    onChange={(tapAction) => setFormState((current) => ({ ...current, tapAction }))}
+                  />
+                }
+                title="Add Tap Action"
+              />
+            )
           ) : null}
           {formState.type === "layer" && formState.tapAction ? (
             <Action
@@ -839,7 +904,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
               title="Remove Tap Action"
             />
           ) : null}
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title={isSaving ? "Saving…" : "Save"} />
+          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={() => saveForm(formState)} shortcut={SHORTCUTS.save} title={isSaving ? "Saving…" : "Save"} />
           {canDeleteTarget ? (
             <Action
               icon={Icon.Trash}

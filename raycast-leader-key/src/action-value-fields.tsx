@@ -89,19 +89,34 @@ export function ActionValueFieldActions(props: ActionValueFieldActionsProps) {
         />
       ) : null}
       {formState.type === "menu" ? (
-        <Action.Push
-          icon={Icon.List}
-          shortcut={SHORTCUTS.editFallbackPaths}
-          target={
-            <MenuFallbackPathsEditor
-              appName={selectedMenuAppName}
-              initialPaths={formState.menuFallbackPaths}
-              onChange={(menuFallbackPaths) => setFormState((current) => ({ ...current, menuFallbackPaths }))}
-              title="Edit Fallback Menu Paths"
-            />
-          }
-          title="Edit Fallback Menu Paths"
-        />
+        <>
+          <Action.Push
+            icon={Icon.List}
+            shortcut={SHORTCUTS.edit}
+            target={
+              <MenuFallbackPathsEditor
+                appName={selectedMenuAppName}
+                initialPaths={formState.menuFallbackPaths}
+                onChange={(menuFallbackPaths) => setFormState((current) => ({ ...current, menuFallbackPaths }))}
+                title="Edit Fallback Menu Paths"
+              />
+            }
+            title="Edit Fallback Menu Paths"
+          />
+          <Action.Push
+            icon={Icon.List}
+            shortcut={SHORTCUTS.editFallbackPaths}
+            target={
+              <MenuFallbackPathsEditor
+                appName={selectedMenuAppName}
+                initialPaths={formState.menuFallbackPaths}
+                onChange={(menuFallbackPaths) => setFormState((current) => ({ ...current, menuFallbackPaths }))}
+                title="Edit Fallback Menu Paths"
+              />
+            }
+            title="Open Fallback Menu Paths"
+          />
+        </>
       ) : null}
       {formState.type === "intellij" ? (
         <Action.Push

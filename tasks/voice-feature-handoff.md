@@ -24,7 +24,7 @@ Where we are: voice dispatch end-to-end pipeline complete / done: STT, settings,
   - hold-to-talk shortcut
   - Groq API key in Keychain
   - STT model setting
-  - dry-run/execute setting
+  - dry-run/execute safe/execute any command setting
   - fast-only/tiered planner setting
 - Audio capture exists:
   - `VoiceAudioCapture`
@@ -136,12 +136,12 @@ Catalog-derived prompts caused severe short-clip hallucinations:
 ## Safety Invariants
 
 - Dry-run must remain default.
-- Real execution must require Voice setting `execute`.
+- Real execution must require an executing Voice setting (`execute` or dangerous `executeAnyCommand`).
 - No `leaderkey://` URL schemes or callbacks.
 - Real execution must remain socket-only through `/tmp/leaderkey.sock`.
 - Model/CLI raw values must never be executed.
-- `command` actions must remain blocked for voice.
-- Confirmation/block actions must not auto-run.
+- `command` actions remain blocked unless the user explicitly selects the dangerous `Execute any command` voice dispatch mode.
+- Confirmation/block actions must not auto-run unless the user explicitly selects the dangerous `Execute any command` voice dispatch mode.
 - Do not route around `Controller.runAction`; it preserves existing action semantics.
 
 ## Recent Matcher Update

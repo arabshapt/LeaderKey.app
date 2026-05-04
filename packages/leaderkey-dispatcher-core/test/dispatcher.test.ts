@@ -313,6 +313,10 @@ test("validator rejects invented IDs, low confidence, and command actions", asyn
   const validation = validateDispatchPlan(catalog, commandPlan);
   assert.equal(validation.blocked, true);
   assert.match(validation.reason, /command|blocked|voiceSafety|rm -rf/);
+
+  const dangerousValidation = validateDispatchPlan(catalog, commandPlan, { allowBlockedActions: true });
+  assert.equal(dangerousValidation.blocked, false);
+  assert.equal(dangerousValidation.needs_confirmation, true);
 });
 
 test("validator blocks catalog IDs outside retrieved candidates", async () => {

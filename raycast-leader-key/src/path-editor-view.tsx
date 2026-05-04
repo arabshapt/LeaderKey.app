@@ -534,7 +534,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={SHORTCUTS.primary}
+                shortcut={SHORTCUTS.edit}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -547,6 +547,22 @@ export function PathEditorView(props: PathEditorViewProps) {
                   />
                 }
                 title={record.inherited ? "Edit Fallback Source" : "Edit Action"}
+              />
+              <Action.Push
+                icon={Icon.Pencil}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <RecordEditorForm
+                    configDirectory={configDirectory}
+                    mode="edit-source"
+                    onDidSave={async (nextPayload, context) => {
+                      handleSavedPath(nextPayload, context.savedKeyPath);
+                    }}
+                    targetRecord={record}
+                    title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                  />
+                }
+                title="Open Editor"
               />
               <Action
                 icon={Icon.CopyClipboard}
@@ -715,7 +731,7 @@ export function PathEditorView(props: PathEditorViewProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={SHORTCUTS.primary}
+                shortcut={SHORTCUTS.edit}
                 target={
                   <RecordEditorForm
                     configDirectory={configDirectory}
@@ -728,6 +744,22 @@ export function PathEditorView(props: PathEditorViewProps) {
                   />
                 }
                 title={record.inherited ? "Edit Fallback Source" : "Edit Blocking Action"}
+              />
+              <Action.Push
+                icon={Icon.Pencil}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <RecordEditorForm
+                    configDirectory={configDirectory}
+                    mode="edit-source"
+                    onDidSave={async (nextPayload, context) => {
+                      handleSavedPath(nextPayload, context.savedKeyPath);
+                    }}
+                    targetRecord={record}
+                    title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                  />
+                }
+                title="Open Editor"
               />
               <Action.Push
                 icon={Icon.ChevronRight}
@@ -1268,22 +1300,40 @@ export function PathEditorView(props: PathEditorViewProps) {
                       />
                     </>
                   ) : (
-                    <Action.Push
-                      icon={Icon.Pencil}
-                      shortcut={SHORTCUTS.primary}
-                      target={
-                        <RecordEditorForm
-                          configDirectory={configDirectory}
-                          mode="edit-source"
-                          onDidSave={async (nextPayload) => {
-                            await handleDidMutate(nextPayload);
-                          }}
-                          targetRecord={record}
-                          title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
-                        />
-                      }
-                      title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
-                    />
+                    <>
+                      <Action.Push
+                        icon={Icon.Pencil}
+                        shortcut={SHORTCUTS.edit}
+                        target={
+                          <RecordEditorForm
+                            configDirectory={configDirectory}
+                            mode="edit-source"
+                            onDidSave={async (nextPayload) => {
+                              await handleDidMutate(nextPayload);
+                            }}
+                            targetRecord={record}
+                            title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                          />
+                        }
+                        title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                      />
+                      <Action.Push
+                        icon={Icon.Pencil}
+                        shortcut={SHORTCUTS.primary}
+                        target={
+                          <RecordEditorForm
+                            configDirectory={configDirectory}
+                            mode="edit-source"
+                            onDidSave={async (nextPayload) => {
+                              await handleDidMutate(nextPayload);
+                            }}
+                            targetRecord={record}
+                            title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                          />
+                        }
+                        title="Open Editor"
+                      />
+                    </>
                   )}
                   <Action.Push
                     icon={Icon.Sidebar}

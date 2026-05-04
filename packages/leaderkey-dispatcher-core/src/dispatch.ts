@@ -86,6 +86,7 @@ export async function planDispatch(request: DispatchRequest): Promise<PlanResult
   }
 
   const validation = validateDispatchPlan(validationCatalog, plan, {
+    allowBlockedActions: request.allowDestructive === true,
     candidatesByClause: plannerCandidatesByClause,
   });
   return { catalog: validationCatalog, plan, validation };
@@ -122,6 +123,7 @@ export async function executeValidation(
   }
 
   const payload = {
+    allowDestructive,
     dryRun: false,
     steps: validation.steps.map((step) => ({
       ...step.action.dispatchRef,

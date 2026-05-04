@@ -1,5 +1,7 @@
 import { Keyboard } from "@raycast/api";
 
+// Keep Raycast action shortcuts centralized here. Prefer Raycast Common
+// shortcuts for standard actions: edit is Cmd+E, remove follows Common.Remove.
 export const SHORTCUTS = {
   browseInConfig: { key: "o", modifiers: ["cmd"] } as Keyboard.Shortcut,
   copy: Keyboard.Shortcut.Common.Copy,
@@ -11,7 +13,6 @@ export const SHORTCUTS = {
   delete: Keyboard.Shortcut.Common.Remove,
   edit: Keyboard.Shortcut.Common.Edit,
   editFallbackPaths: { key: "f", modifiers: ["cmd", "shift"] } as Keyboard.Shortcut,
-  editMacroSteps: { key: "m", modifiers: ["cmd"] } as Keyboard.Shortcut,
   editTapAction: { key: "t", modifiers: ["cmd"] } as Keyboard.Shortcut,
   moveDown: Keyboard.Shortcut.Common.MoveDown,
   moveUp: Keyboard.Shortcut.Common.MoveUp,

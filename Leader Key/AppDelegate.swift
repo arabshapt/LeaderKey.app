@@ -1372,6 +1372,7 @@ extension AppDelegate {
     ensureControllerReady()
 
     let dryRun = payload["dryRun"] as? Bool ?? true
+    let allowDestructive = payload["allowDestructive"] as? Bool ?? false
     guard let steps = payload["steps"] as? [[String: Any]] else {
       return dispatchJSON([
         "blocked": true,
@@ -1392,24 +1393,25 @@ extension AppDelegate {
       let actionType = step["actionType"] as? String ?? ""
       let safety = step["safety"] as? String ?? "safe"
       let requiresConfirmation = step["requiresConfirmation"] as? Bool ?? false
+      let stepRequiresConfirmation = requiresConfirmation || safety == "confirm" || safety == "block"
       var report: [String: Any] = [
         "action_id": actionId,
         "blocked": false,
         "dry_run": dryRun,
         "executed": false,
         "label": label,
-        "requires_confirmation": requiresConfirmation || safety == "confirm",
+        "requires_confirmation": stepRequiresConfirmation,
         "type": actionType,
       ]
 
-      guard safety != "block" else {
+      guard safety != "block" || allowDestructive else {
         report["blocked"] = true
         report["reason"] = "action marked blocked"
         reports.append(report)
         continue
       }
 
-      guard !(requiresConfirmation || safety == "confirm") else {
+      guard !stepRequiresConfirmation || allowDestructive else {
         report["reason"] = "confirmation required"
         reports.append(report)
         continue
@@ -1438,7 +1440,7 @@ extension AppDelegate {
         continue
       }
 
-      guard action.type != .command, !dispatchActionContainsCommand(action) else {
+      guard allowDestructive || (action.type != .command && !dispatchActionContainsCommand(action)) else {
         report["blocked"] = true
         report["reason"] = "voice dispatch blocks command actions"
         reports.append(report)
@@ -1450,7 +1452,7 @@ extension AppDelegate {
     }
 
     let blocked = reports.contains { ($0["blocked"] as? Bool) == true }
-    let needsConfirmation = reports.contains { ($0["requires_confirmation"] as? Bool) == true }
+    let needsConfirmation = !allowDestructive && reports.contains { ($0["requires_confirmation"] as? Bool) == true }
     guard !blocked && !needsConfirmation && !dryRun else {
       return dispatchJSON([
         "blocked": blocked,

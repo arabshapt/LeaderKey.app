@@ -393,22 +393,40 @@ export default function SearchShortcutsCommand() {
                     title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
                 ) : (
-                  <Action.Push
-                    icon={Icon.Pencil}
-                    shortcut={SHORTCUTS.primary}
-                    target={
-                      <RecordEditorForm
-                        configDirectory={configDirectory}
-                        mode="edit-source"
-                        onDidSave={async (nextPayload) => {
-                          setPayload(nextPayload);
-                        }}
-                        targetRecord={record}
-                        title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
-                      />
-                    }
-                    title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
-                  />
+                  <>
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.edit}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          mode="edit-source"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                        />
+                      }
+                      title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.primary}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          mode="edit-source"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                        />
+                      }
+                      title="Open Editor"
+                    />
+                  </>
                 )}
                 <Action.Push
                   icon={Icon.Sidebar}

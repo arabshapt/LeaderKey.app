@@ -157,7 +157,7 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
               ) : null}
               <Action.Push
                 icon={Icon.Pencil}
-                shortcut={SHORTCUTS.primary}
+                shortcut={SHORTCUTS.edit}
                 target={
                   <ManualMenuPathForm
                     initialPath={path}
@@ -166,6 +166,18 @@ export function MenuFallbackPathsEditor(props: MenuFallbackPathsEditorProps) {
                   />
                 }
                 title="Edit Path"
+              />
+              <Action.Push
+                icon={Icon.Pencil}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <ManualMenuPathForm
+                    initialPath={path}
+                    onSave={(nextPath) => replacePath(index, nextPath)}
+                    title={`Edit Fallback Path ${index + 1}`}
+                  />
+                }
+                title="Open Path Editor"
               />
               <Action.Push
                 icon={Icon.Plus}

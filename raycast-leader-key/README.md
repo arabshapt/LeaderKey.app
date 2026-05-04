@@ -149,3 +149,5 @@ Current behavior:
 - `{frontmostBundleId}` is a template placeholder, not something Raycast expands by itself.
 - Leader Key must expand that placeholder before opening a `raycast://` deeplink.
 - The first-render seeded payload behavior for `Browse Configs` and `Add/Edit by Path` is deliberate. Do not remove it unless Raycast's list-mount behavior changes and the empty-list regression is re-tested.
+- Raycast action shortcuts must go through [`src/shortcuts.ts`](./src/shortcuts.ts). Use the shared aliases for standard actions: edit is `Keyboard.Shortcut.Common.Edit` (`Cmd+E`), delete/remove is `Keyboard.Shortcut.Common.Remove`, and save is `Keyboard.Shortcut.Common.Save` (`Cmd+S`).
+- Actions titled `Edit ...` should expose `SHORTCUTS.edit`. If an edit row should also keep the Raycast open muscle memory, add a second action titled `Open ...` with `SHORTCUTS.primary`; keep `SHORTCUTS.primary` alone for actions that only open, browse, select, use, or append.

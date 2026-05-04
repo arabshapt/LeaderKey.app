@@ -393,10 +393,11 @@ final class VoiceCoordinator {
     }
     let cloudAPIKey =
       KeychainHelper.load(account: VoiceKeychain.cloudAPIKeyAccount(for: cloudProvider)) ?? ""
+    let dispatchMode = Defaults[.voiceDispatchMode]
     return VoiceDispatchOptions(
       configDirectory: Defaults[.configDir],
-      execute: Defaults[.voiceDispatchMode] == .execute,
-      allowDestructive: false,
+      execute: dispatchMode.executesActions,
+      allowDestructive: dispatchMode.allowsDestructiveActions,
       plannerMode: plannerMode,
       cloudPlannerProvider: cloudProvider,
       llamaURL: Defaults[.voiceLlamaServerURL],

@@ -651,12 +651,20 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                     title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
                 ) : (
-                  <Action.Push
-                    icon={Icon.Pencil}
-                    shortcut={SHORTCUTS.primary}
-                    target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
-                    title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
-                  />
+                  <>
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.edit}
+                      target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
+                      title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.primary}
+                      target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
+                      title="Open Editor"
+                    />
+                  </>
                 )}
                 <Action.Push
                   icon={Icon.Sidebar}

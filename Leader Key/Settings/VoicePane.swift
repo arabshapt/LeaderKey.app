@@ -172,7 +172,9 @@ struct VoicePane: View {
 
             Text(voiceDispatchMode.description)
               .font(.callout)
-              .foregroundColor(voiceDispatchMode == .execute ? .orange : .secondary)
+              .foregroundColor(
+                voiceDispatchMode.allowsDestructiveActions
+                  ? .red : voiceDispatchMode == .execute ? .orange : .secondary)
           }
           .disabled(!voiceDispatcherEnabled)
         }

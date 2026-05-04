@@ -52,6 +52,7 @@ interface MacroStepsEditorProps {
   initialSteps: MacroStep[];
   installedApps: InstalledApp[];
   onChange: (steps: MacroStep[]) => void;
+  onSaveAll?: (steps: MacroStep[]) => Promise<void>;
   title: string;
 }
 
@@ -60,6 +61,7 @@ interface MacroStepEditorFormProps {
   initialStep: MacroStep;
   installedApps: InstalledApp[];
   onSave: (step: MacroStep) => void;
+  onSaveAll?: (step: MacroStep) => Promise<void>;
   title: string;
 }
 
@@ -145,7 +147,7 @@ function stepSummaryText(step: MacroStep): string {
 }
 
 export function MacroStepsEditor(props: MacroStepsEditorProps) {
-  const { defaultMenuAppName, initialSteps, installedApps, onChange, title } = props;
+  const { defaultMenuAppName, initialSteps, installedApps, onChange, onSaveAll, title } = props;
   const [steps, setSteps] = useState<MacroStep[]>(() => cloneMacroSteps(initialSteps));
 
   function updateSteps(nextSteps: MacroStep[]): void {
@@ -183,6 +185,26 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
     });
   }
 
+  async function saveAll(nextSteps: MacroStep[]): Promise<void> {
+    updateSteps(nextSteps);
+    await onSaveAll?.(cloneMacroSteps(nextSteps));
+  }
+
+  function saveAllAction() {
+    if (!onSaveAll) {
+      return null;
+    }
+
+    return (
+      <Action
+        icon={Icon.CheckCircle}
+        onAction={() => void saveAll(steps)}
+        shortcut={SHORTCUTS.save}
+        title="Save Macro"
+      />
+    );
+  }
+
   return (
     <List filtering={false} isShowingDetail navigationTitle={title} searchBarPlaceholder="Macro steps">
       {steps.length === 0 ? (
@@ -198,11 +220,13 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
                     initialStep={createEmptyMacroStep()}
                     installedApps={installedApps}
                     onSave={(nextStep) => updateSteps([...steps, nextStep])}
+                    onSaveAll={(nextStep) => saveAll([...steps, nextStep])}
                     title="Add Macro Step"
                   />
                 }
                 title="Add Step"
               />
+              {saveAllAction()}
             </ActionPanel>
           }
           icon={Icon.List}
@@ -220,6 +244,21 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
             <ActionPanel>
               <Action.Push
                 icon={Icon.Pencil}
+                shortcut={SHORTCUTS.edit}
+                target={
+                  <MacroStepEditorForm
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialStep={step}
+                    installedApps={installedApps}
+                    onSave={(nextStep) => replaceStep(index, nextStep)}
+                    onSaveAll={(nextStep) => saveAll(steps.map((candidate, stepIndex) => (stepIndex === index ? nextStep : candidate)))}
+                    title={`Edit Step ${index + 1}`}
+                  />
+                }
+                title="Edit Step"
+              />
+              <Action.Push
+                icon={Icon.Pencil}
                 shortcut={SHORTCUTS.primary}
                 target={
                   <MacroStepEditorForm
@@ -227,10 +266,11 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
                     initialStep={step}
                     installedApps={installedApps}
                     onSave={(nextStep) => replaceStep(index, nextStep)}
+                    onSaveAll={(nextStep) => saveAll(steps.map((candidate, stepIndex) => (stepIndex === index ? nextStep : candidate)))}
                     title={`Edit Step ${index + 1}`}
                   />
                 }
-                title="Edit Step"
+                title="Open Step Editor"
               />
               <Action.Push
                 icon={Icon.Plus}
@@ -241,6 +281,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
                     initialStep={createEmptyMacroStep()}
                     installedApps={installedApps}
                     onSave={(nextStep) => updateSteps([...steps, nextStep])}
+                    onSaveAll={(nextStep) => saveAll([...steps, nextStep])}
                     title="Add Macro Step"
                   />
                 }
@@ -271,6 +312,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
                 style={Action.Style.Destructive}
                 title="Delete Step"
               />
+              {saveAllAction()}
             </ActionPanel>
           }
           detail={<List.Item.Detail markdown={stepSummaryText(step)} />}
@@ -285,7 +327,7 @@ export function MacroStepsEditor(props: MacroStepsEditorProps) {
 }
 
 export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
-  const { defaultMenuAppName, initialStep, installedApps, onSave, title } = props;
+  const { defaultMenuAppName, initialStep, installedApps, onSave, onSaveAll, title } = props;
   const [formState, setFormState] = useState<ItemFormState>(() => itemToFormState(initialStep.action));
   const [delayText, setDelayText] = useState(() => String(initialStep.delay));
   const [enabled, setEnabled] = useState(initialStep.enabled);
@@ -314,14 +356,14 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
 
   const delayError = delayErrorText(delayText);
 
-  async function handleSubmit(): Promise<void> {
+  async function buildStep(nextFormState: ItemFormState = formState): Promise<MacroStep | undefined> {
     if (delayError) {
       await showToast({ style: Toast.Style.Failure, title: delayError });
-      return;
+      return undefined;
     }
 
-    const nextMenuAppName = selectedMenuAppNameFor(formState, defaultMenuAppName, installedApps);
-    const nextStepAction = formStateToActionNode(formState, {
+    const nextMenuAppName = selectedMenuAppNameFor(nextFormState, defaultMenuAppName, installedApps);
+    const nextStepAction = formStateToActionNode(nextFormState, {
       menuAppName: nextMenuAppName,
       preserveAction: preservedAction,
       preserveHiddenMetadata: true,
@@ -329,15 +371,39 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
     const nextValueError = validateActionNode(nextStepAction);
     if (nextValueError) {
       await showToast({ style: Toast.Style.Failure, title: nextValueError });
-      return;
+      return undefined;
     }
 
-    onSave({
+    return {
       action: nextStepAction,
       delay: Number(delayText.trim()),
       enabled,
-    });
+    };
+  }
+
+  async function handleSubmit(): Promise<void> {
+    const nextStep = await buildStep();
+    if (!nextStep) {
+      return;
+    }
+
+    onSave(nextStep);
     pop();
+  }
+
+  async function handleSubmitAll(nextFormState: ItemFormState = formState): Promise<void> {
+    const nextStep = await buildStep(nextFormState);
+    if (!nextStep) {
+      return;
+    }
+
+    if (!onSaveAll) {
+      onSave(nextStep);
+      pop();
+      return;
+    }
+
+    await onSaveAll(nextStep);
   }
 
   return (
@@ -350,22 +416,55 @@ export function MacroStepEditorForm(props: MacroStepEditorFormProps) {
             installedApps={installedApps}
             setFormState={setFormState}
           />
-          <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title="Save Step" />
+          {onSaveAll ? (
+            <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={() => handleSubmitAll()} shortcut={SHORTCUTS.save} title="Save Macro" />
+          ) : (
+            <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} shortcut={SHORTCUTS.save} title="Save Step" />
+          )}
+          {onSaveAll ? (
+            <Action.SubmitForm icon={Icon.CheckCircle} onSubmit={handleSubmit} title="Save Step" />
+          ) : null}
           {formState.type === "macro" ? (
-            <Action.Push
-              icon={Icon.List}
-              shortcut={SHORTCUTS.editMacroSteps}
-              target={
-                <MacroStepsEditor
-                  defaultMenuAppName={defaultMenuAppName}
-                  initialSteps={formState.macroSteps}
-                  installedApps={installedApps}
-                  onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
-                  title="Edit Nested Macro Steps"
-                />
-              }
-              title="Edit Nested Macro Steps"
-            />
+            <>
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.edit}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={formState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
+                    onSaveAll={async (macroSteps) => {
+                      const nextFormState = { ...formState, macroSteps };
+                      setFormState(nextFormState);
+                      await handleSubmitAll(nextFormState);
+                    }}
+                    title="Edit Nested Macro Steps"
+                  />
+                }
+                title="Edit Nested Macro Steps"
+              />
+              <Action.Push
+                icon={Icon.List}
+                shortcut={SHORTCUTS.primary}
+                target={
+                  <MacroStepsEditor
+                    defaultMenuAppName={defaultMenuAppName}
+                    initialSteps={formState.macroSteps}
+                    installedApps={installedApps}
+                    onChange={(macroSteps) => setFormState((current) => ({ ...current, macroSteps }))}
+                    onSaveAll={async (macroSteps) => {
+                      const nextFormState = { ...formState, macroSteps };
+                      setFormState(nextFormState);
+                      await handleSubmitAll(nextFormState);
+                    }}
+                    title="Edit Nested Macro Steps"
+                  />
+                }
+                title="Open Nested Macro Steps"
+              />
+            </>
           ) : null}
         </ActionPanel>
       }

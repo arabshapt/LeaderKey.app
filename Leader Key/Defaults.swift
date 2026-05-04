@@ -316,6 +316,7 @@ enum ShellPreference: String, Defaults.Serializable, CaseIterable, Identifiable 
 enum VoiceDispatchMode: String, Defaults.Serializable, CaseIterable, Identifiable {
   case dryRun
   case execute
+  case executeAnyCommand
 
   var id: Self { self }
 
@@ -325,6 +326,8 @@ enum VoiceDispatchMode: String, Defaults.Serializable, CaseIterable, Identifiabl
       return "Dry run"
     case .execute:
       return "Execute safe actions"
+    case .executeAnyCommand:
+      return "Execute any command"
     }
   }
 
@@ -334,7 +337,22 @@ enum VoiceDispatchMode: String, Defaults.Serializable, CaseIterable, Identifiabl
       return "Plans commands and reports intended actions without running them."
     case .execute:
       return "Runs only validated safe actions. Confirmation and blocked actions still do not run."
+    case .executeAnyCommand:
+      return "Dangerous: runs confirmed, blocked, and shell command actions matched from voice."
     }
+  }
+
+  var executesActions: Bool {
+    switch self {
+    case .dryRun:
+      return false
+    case .execute, .executeAnyCommand:
+      return true
+    }
+  }
+
+  var allowsDestructiveActions: Bool {
+    self == .executeAnyCommand
   }
 }
 
