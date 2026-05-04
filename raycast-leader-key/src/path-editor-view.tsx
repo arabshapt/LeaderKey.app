@@ -532,38 +532,92 @@ export function PathEditorView(props: PathEditorViewProps) {
         {
           actions: (
             <ActionPanel>
-              <Action.Push
-                icon={Icon.Pencil}
-                shortcut={SHORTCUTS.edit}
-                target={
-                  <RecordEditorForm
-                    configDirectory={configDirectory}
-                    mode="edit-source"
-                    onDidSave={async (nextPayload, context) => {
-                      handleSavedPath(nextPayload, context.savedKeyPath);
-                    }}
-                    targetRecord={record}
-                    title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+              {record.inherited ? (
+                <>
+                  <Action.Push
+                    icon={Icon.PlusCircle}
+                    shortcut={SHORTCUTS.edit}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        mode="override-in-effective-config"
+                        onDidSave={async (nextPayload, context) => {
+                          handleSavedPath(nextPayload, context.savedKeyPath);
+                        }}
+                        targetRecord={record}
+                        title={`Create Override for ${record.displayLabel}`}
+                      />
+                    }
+                    title={record.effectiveScope === "normalApp" ? "Create Normal App Override" : "Create App Override"}
                   />
-                }
-                title={record.inherited ? "Edit Fallback Source" : "Edit Action"}
-              />
-              <Action.Push
-                icon={Icon.Pencil}
-                shortcut={SHORTCUTS.primary}
-                target={
-                  <RecordEditorForm
-                    configDirectory={configDirectory}
-                    mode="edit-source"
-                    onDidSave={async (nextPayload, context) => {
-                      handleSavedPath(nextPayload, context.savedKeyPath);
-                    }}
-                    targetRecord={record}
-                    title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                  <Action.Push
+                    icon={Icon.Pencil}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        mode="edit-source"
+                        onDidSave={async (nextPayload, context) => {
+                          handleSavedPath(nextPayload, context.savedKeyPath);
+                        }}
+                        targetRecord={record}
+                        title={`Edit Fallback Source for ${record.displayLabel}`}
+                      />
+                    }
+                    title="Edit Fallback Source"
                   />
-                }
-                title="Open Editor"
-              />
+                  <Action.Push
+                    icon={Icon.Pencil}
+                    shortcut={SHORTCUTS.primary}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        mode="edit-source"
+                        onDidSave={async (nextPayload, context) => {
+                          handleSavedPath(nextPayload, context.savedKeyPath);
+                        }}
+                        targetRecord={record}
+                        title={`Edit Fallback Source for ${record.displayLabel}`}
+                      />
+                    }
+                    title="Open Fallback Source Editor"
+                  />
+                </>
+              ) : (
+                <>
+                  <Action.Push
+                    icon={Icon.Pencil}
+                    shortcut={SHORTCUTS.edit}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        mode="edit-source"
+                        onDidSave={async (nextPayload, context) => {
+                          handleSavedPath(nextPayload, context.savedKeyPath);
+                        }}
+                        targetRecord={record}
+                        title={`Edit ${record.displayLabel}`}
+                      />
+                    }
+                    title="Edit Action"
+                  />
+                  <Action.Push
+                    icon={Icon.Pencil}
+                    shortcut={SHORTCUTS.primary}
+                    target={
+                      <RecordEditorForm
+                        configDirectory={configDirectory}
+                        mode="edit-source"
+                        onDidSave={async (nextPayload, context) => {
+                          handleSavedPath(nextPayload, context.savedKeyPath);
+                        }}
+                        targetRecord={record}
+                        title={`Edit ${record.displayLabel}`}
+                      />
+                    }
+                    title="Open Editor"
+                  />
+                </>
+              )}
               <Action
                 icon={Icon.CopyClipboard}
                 onAction={() => void handleCopy(record)}
@@ -597,24 +651,6 @@ export function PathEditorView(props: PathEditorViewProps) {
                 }
                 title="Browse Parent Group"
               />
-              {record.inherited ? (
-                <Action.Push
-                  icon={Icon.PlusCircle}
-                  shortcut={SHORTCUTS.createOverride}
-                  target={
-                    <RecordEditorForm
-                      configDirectory={configDirectory}
-                      mode="override-in-effective-config"
-                      onDidSave={async (nextPayload, context) => {
-                        handleSavedPath(nextPayload, context.savedKeyPath);
-                      }}
-                      targetRecord={record}
-                      title={`Create Override for ${record.displayLabel}`}
-                    />
-                  }
-                  title="Create App Override"
-                />
-              ) : null}
               {!record.inherited ? (
                 <Action
                   icon={Icon.Trash}
@@ -631,7 +667,7 @@ export function PathEditorView(props: PathEditorViewProps) {
           id: `outcome:edit:${record.id}`,
           subtitle: {
             tooltip: record.displayLabel,
-            value: record.inherited ? "Edit fallback action" : "Edit action",
+            value: record.inherited ? "Create app override" : "Edit action",
           },
           title: {
             tooltip: typedPathTitle(analysis),

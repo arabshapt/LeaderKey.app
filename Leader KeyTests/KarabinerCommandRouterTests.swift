@@ -18,6 +18,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
     var normalModeStatus: StatusItem.NormalModeStatus?
     var hintOverlayCommand: HintOverlayCommand?
     var state: [String: Any] = ["active": true, "mode": "karabiner2"]
+    var dispatchExecutePayload: [String: Any]?
 
     func unixSocketServerDidReceiveActivation(bundleId: String?) {
       activationBundleId = bundleId
@@ -76,6 +77,11 @@ final class KarabinerCommandRouterTests: XCTestCase {
     func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String) {
       commandScoutBundleId = bundleId
       commandScoutSource = source
+    }
+
+    func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String {
+      dispatchExecutePayload = payload
+      return "OK: dispatch execute"
     }
   }
 

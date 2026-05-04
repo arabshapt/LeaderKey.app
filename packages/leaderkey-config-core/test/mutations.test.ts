@@ -115,6 +115,67 @@ test("creates app overrides for inherited items and preserves insertion order fo
   );
 });
 
+test("creates normal app overrides for inherited normal fallback items", async () => {
+  const configDirectory = await createTempConfigDirectory();
+
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [
+      {
+        key: "m",
+        type: "shortcut",
+        value: "COleft_arrow",
+      },
+    ],
+    type: "group",
+  });
+  const intellijPath = await writeConfigFile(configDirectory, "normal-app.com.jetbrains.intellij.json", {
+    actions: [],
+    type: "group",
+  }, {
+    customName: "IntelliJ Normal",
+  });
+
+  let payload = await buildCachePayload(configDirectory);
+  const inheritedRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigPath === intellijPath &&
+      record.inherited &&
+      record.keySequence === "m" &&
+      record.sourceScope === "normalFallback"
+    ),
+    "expected inherited normal fallback record in IntelliJ normal app config",
+  );
+
+  await updateRecord(
+    inheritedRecord,
+    {
+      key: "m",
+      type: "intellij",
+      value: "ActivateTerminalToolWindow",
+    },
+    "override-in-effective-config",
+  );
+
+  payload = await buildCachePayload(configDirectory);
+  const overriddenRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigPath === intellijPath &&
+      record.keySequence === "m"
+    ),
+    "expected normal app override record",
+  );
+  assert.equal(overriddenRecord.inherited, false);
+  assert.equal(overriddenRecord.sourceScope, "normalApp");
+  assert.equal(overriddenRecord.sourceConfigDisplayName, "IntelliJ Normal");
+
+  const savedRoot = await readJsonFile<GroupNode>(intellijPath);
+  assert.equal(savedRoot.actions.length, 1);
+  assert.equal(savedRoot.actions[0]?.key, "m");
+  assert.equal(savedRoot.actions[0]?.type, "intellij");
+  assert.equal(savedRoot.actions[0]?.value, "ActivateTerminalToolWindow");
+});
+
 test("createItemAtPath auto-creates missing intermediate groups before appending the final item", async () => {
   const configDirectory = await createTempConfigDirectory();
   const globalPath = await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });

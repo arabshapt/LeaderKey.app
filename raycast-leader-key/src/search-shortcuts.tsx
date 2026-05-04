@@ -392,6 +392,56 @@ export default function SearchShortcutsCommand() {
                     }
                     title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
+                ) : record.inherited ? (
+                  <>
+                    <Action.Push
+                      icon={Icon.PlusCircle}
+                      shortcut={SHORTCUTS.edit}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          mode="override-in-effective-config"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={`Create Override for ${record.displayLabel}`}
+                        />
+                      }
+                      title={createOverrideTitle}
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          mode="edit-source"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={`Edit Fallback Source for ${record.displayLabel}`}
+                        />
+                      }
+                      title="Edit Fallback Source"
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.primary}
+                      target={
+                        <RecordEditorForm
+                          configDirectory={configDirectory}
+                          mode="edit-source"
+                          onDidSave={async (nextPayload) => {
+                            setPayload(nextPayload);
+                          }}
+                          targetRecord={record}
+                          title={`Edit Fallback Source for ${record.displayLabel}`}
+                        />
+                      }
+                      title="Open Fallback Source Editor"
+                    />
+                  </>
                 ) : (
                   <>
                     <Action.Push
@@ -405,10 +455,10 @@ export default function SearchShortcutsCommand() {
                             setPayload(nextPayload);
                           }}
                           targetRecord={record}
-                          title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                          title={`Edit ${record.displayLabel}`}
                         />
                       }
-                      title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                      title="Edit Item"
                     />
                     <Action.Push
                       icon={Icon.Pencil}
@@ -421,7 +471,7 @@ export default function SearchShortcutsCommand() {
                             setPayload(nextPayload);
                           }}
                           targetRecord={record}
-                          title={record.inherited ? `Edit Fallback Source for ${record.displayLabel}` : `Edit ${record.displayLabel}`}
+                          title={`Edit ${record.displayLabel}`}
                         />
                       }
                       title="Open Editor"
@@ -483,7 +533,7 @@ export default function SearchShortcutsCommand() {
                     title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                   />
                 ) : null}
-                {record.inherited ? (
+                {record.inherited && isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.PlusCircle}
                     shortcut={SHORTCUTS.createOverride}

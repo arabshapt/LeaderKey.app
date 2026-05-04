@@ -1094,6 +1094,69 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testGenerateKarabinerTSExportEmitsNormalAppOverrideDeltas() throws {
+    let normalFallbackRoot = Group(
+      key: nil,
+      label: "Normal Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "m", label: "Fallback M", value: "COleft_arrow")),
+        .action(makeShortcutAction(key: "k", label: "Fallback Keep", value: "COright_arrow")),
+      ]
+    )
+    let globalConfig = UserConfig()
+    let normalAppConfig = UserConfig()
+    normalAppConfig.root = Group(
+      key: nil,
+      label: "IntelliJ Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeIntelliJAction(key: "m", label: "IntelliJ M", value: "ActivateTerminalToolWindow")),
+        .action(makeShortcutAction(key: "a", label: "App Add", value: "Ct")),
+        .action(makeShortcutAction(key: "k", label: "Fallback Keep", value: "COright_arrow")),
+      ]
+    )
+
+    try withTemporaryConfigDirectory(normalFallbackRoot: normalFallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [],
+        normalAppConfigs: [(bundleId: "com.jetbrains.intellij", config: normalAppConfig, customName: "IntelliJ")]
+      )
+
+      let descriptions = result.managedRules.compactMap { $0["description"] as? String }
+      let normalAppRuleIndex = try XCTUnwrap(descriptions.firstIndex(of: "LeaderKeyManaged/NormalAppMode/intellij"))
+      let normalFallbackRuleIndex = try XCTUnwrap(descriptions.firstIndex(of: "LeaderKeyManaged/NormalFallbackMode"))
+      XCTAssertLessThan(normalAppRuleIndex, normalFallbackRuleIndex)
+
+      let normalAppRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalAppMode/intellij" })
+      )
+      let normalFallbackRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/NormalFallbackMode" })
+      )
+      let normalAppManipulators = flattenManipulators(from: [normalAppRule])
+      let normalFallbackManipulators = flattenManipulators(from: [normalFallbackRule])
+
+      XCTAssertTrue(normalAppManipulators.contains(where: { fromKeyCode(in: $0) == "m" }))
+      XCTAssertTrue(normalAppManipulators.contains(where: { fromKeyCode(in: $0) == "a" }))
+      XCTAssertFalse(normalAppManipulators.contains(where: { fromKeyCode(in: $0) == "k" }))
+
+      XCTAssertTrue(normalFallbackManipulators.contains(where: { fromKeyCode(in: $0) == "m" }))
+      XCTAssertTrue(normalFallbackManipulators.contains(where: { fromKeyCode(in: $0) == "k" }))
+      XCTAssertFalse(normalFallbackManipulators.contains(where: { fromKeyCode(in: $0) == "a" }))
+
+      XCTAssertTrue(result.stateMappings.contains(where: {
+        $0.scope == .normalOverride &&
+          $0.bundleId == "com.jetbrains.intellij" &&
+          $0.path == ["m"] &&
+          $0.actionTypeRaw == "intellij"
+      }))
+    }
+  }
+
   func testGenerateKarabinerTSExportFailsOnStateIdCollision() {
     let config = UserConfig()
     config.root.actions = [
@@ -1300,6 +1363,19 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     Action(
       key: key,
       type: .shortcut,
+      label: label,
+      value: value,
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+  }
+
+  private func makeIntelliJAction(key: String, label: String, value: String) -> Action {
+    Action(
+      key: key,
+      type: .intellij,
       label: label,
       value: value,
       iconPath: nil,

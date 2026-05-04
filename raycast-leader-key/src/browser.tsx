@@ -650,13 +650,33 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                     }
                     title={record.kind === "layer" ? "Open Layer" : "Open Group"}
                   />
+                ) : record.inherited ? (
+                  <>
+                    <Action.Push
+                      icon={Icon.PlusCircle}
+                      shortcut={SHORTCUTS.edit}
+                      target={editorForm("override-in-effective-config", record, `Create Override for ${record.displayLabel}`)}
+                      title={record.effectiveScope === "normalApp" ? "Create Normal App Override" : "Create App Override"}
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      target={editorForm("edit-source", record, `Edit Fallback Source for ${record.displayLabel}`)}
+                      title="Edit Fallback Source"
+                    />
+                    <Action.Push
+                      icon={Icon.Pencil}
+                      shortcut={SHORTCUTS.primary}
+                      target={editorForm("edit-source", record, `Edit Fallback Source for ${record.displayLabel}`)}
+                      title="Open Fallback Source Editor"
+                    />
+                  </>
                 ) : (
                   <>
                     <Action.Push
                       icon={Icon.Pencil}
                       shortcut={SHORTCUTS.edit}
                       target={editorForm("edit-source", record, `Edit ${record.displayLabel}`)}
-                      title={record.inherited ? "Edit Fallback Source" : "Edit Item"}
+                      title="Edit Item"
                     />
                     <Action.Push
                       icon={Icon.Pencil}
@@ -711,12 +731,12 @@ export function ConfigNodesList(props: ConfigNodesListProps) {
                     title={record.inherited ? "Edit Fallback Source" : record.kind === "layer" ? "Edit Layer" : "Edit Group"}
                   />
                 ) : null}
-                {record.inherited ? (
+                {record.inherited && isContainerRecord(record) ? (
                   <Action.Push
                     icon={Icon.PlusCircle}
                     shortcut={SHORTCUTS.createOverride}
                     target={editorForm("override-in-effective-config", record, `Create Override for ${record.displayLabel}`)}
-                    title="Create App Override"
+                    title={record.effectiveScope === "normalApp" ? "Create Normal App Override" : "Create App Override"}
                   />
                 ) : null}
                 <Action.Push
