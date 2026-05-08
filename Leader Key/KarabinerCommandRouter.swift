@@ -136,8 +136,36 @@ enum KarabinerCommandRouter {
       guard let stateId = Int32(parts[1]) else {
         return "ERROR: Invalid state ID"
       }
-      let sticky = parts.count > 2 && parts[2].lowercased() == "sticky"
-      delegate?.unixSocketServerDidReceiveStateId(stateId, sticky: sticky)
+      var sticky = false
+      var bundleId: String?
+      let args = parts.dropFirst(2).map(String.init)
+      var index = 0
+      while index < args.count {
+        switch args[index].lowercased() {
+        case "sticky":
+          guard !sticky else {
+            return "ERROR: Duplicate sticky flag"
+          }
+          sticky = true
+          index += 1
+        case "bundle":
+          guard bundleId == nil else {
+            return "ERROR: Duplicate bundle value"
+          }
+          guard index + 1 < args.count else {
+            return "ERROR: stateid bundle requires a bundle ID"
+          }
+          let parsedBundleId = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+          guard !parsedBundleId.isEmpty else {
+            return "ERROR: stateid bundle requires a bundle ID"
+          }
+          bundleId = parsedBundleId
+          index += 2
+        default:
+          return "ERROR: Unknown stateid token: \(args[index])"
+        }
+      }
+      delegate?.unixSocketServerDidReceiveStateId(stateId, sticky: sticky, bundleId: bundleId)
       return "OK"
 
     case "normal_on":
@@ -220,6 +248,7 @@ enum KarabinerCommandRouter {
     case "tab": return 48
     case "delete", "delete_or_backspace", "backspace": return 51
     case "escape", "esc": return 53
+    case "caps_lock", "capslock": return 57
     case "period", ".": return 47
     case "comma", ",": return 43
     case "semicolon", ";": return 41

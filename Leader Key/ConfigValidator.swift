@@ -28,6 +28,7 @@ enum ValidationErrorType {
   case emptyKey
   case nonSingleCharacterKey
   case duplicateKey
+  case reservedControlKey
   case invalidActionValue
   case invalidLayerScope
   case invalidLayerTrigger
@@ -55,6 +56,11 @@ enum ValidationSeverity {
 }
 
 class ConfigValidator {
+  private static let reservedRegularControlKeys: Set<String> = [
+    "caps_lock",
+    "capslock",
+  ]
+
   private static let disallowedLayerTriggerKeys: Set<String> = [
     "caps_lock",
     "left_command",
@@ -358,6 +364,17 @@ class ConfigValidator {
           message: "Key is empty",
           type: .emptyKey,
           suggestion: "Click the key button and press a single character"
+        ))
+      return
+    }
+
+    if reservedRegularControlKeys.contains(key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+      errors.append(
+        ValidationError(
+          path: path,
+          message: "Caps Lock is reserved for the Caps layer",
+          type: .reservedControlKey,
+          suggestion: "Use another key; Caps Lock is handled by your Karabiner/Goku Caps layer"
         ))
       return
     }

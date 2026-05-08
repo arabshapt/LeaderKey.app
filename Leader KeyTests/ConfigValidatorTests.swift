@@ -79,6 +79,21 @@ final class ConfigValidatorTests: XCTestCase {
     XCTAssertTrue(errors.isEmpty, "Named Karabiner key codes are valid config keys")
   }
 
+  func testCapsLockIsReservedForCapsLayer() {
+    let group = Group(
+      key: nil,
+      label: "Root",
+      stickyMode: nil,
+      actions: [
+        .action(Action(key: "caps_lock", type: .shortcut, value: "Ct"))
+      ]
+    )
+
+    let errors = ConfigValidator.validate(group: group)
+
+    XCTAssertTrue(errors.contains(where: { $0.type == .reservedControlKey && $0.path == [0] }))
+  }
+
   func testUnknownMultiCharacterKeyIsInvalid() {
     let group = Group(
       key: nil,

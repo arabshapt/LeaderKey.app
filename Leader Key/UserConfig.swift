@@ -279,6 +279,20 @@ class UserConfig: ObservableObject {
     return nil
   }
 
+  func configKey(forBundleId bundleId: String?) -> String {
+    guard let bundleId = bundleId else { return globalDefaultDisplayName }
+
+    for (displayKey, _) in discoveredConfigFiles {
+      if let extractedId = extractRegularAppBundleId(from: displayKey),
+        extractedId == bundleId
+      {
+        return displayKey
+      }
+    }
+
+    return defaultAppConfigDisplayName
+  }
+
   func extractNormalAppBundleId(from displayName: String) -> String? {
     if case .normalApp(let bundleId) = configFileKind(forDisplayKey: displayName) {
       return bundleId

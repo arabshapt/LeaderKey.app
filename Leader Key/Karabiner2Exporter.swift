@@ -776,7 +776,8 @@ final class Karabiner2Exporter {
     key: String,
     toState: Int32,
     hasStickyMode: Bool,
-    includeTimeout: Bool = true
+    includeTimeout: Bool = true,
+    bundleId: String? = nil
   ) -> [String: Any]? {
     guard let (keyCode, modifiers) = parseKarKeySpec(key) else {
       return nil
@@ -784,7 +785,7 @@ final class Karabiner2Exporter {
 
     var toEvents: [Any] = [
       karSetVariable(name: "leader_state", value: toState),
-      karSendUserCommand("stateid \(toState)")
+      karSendStateIdCommand(stateId: toState, bundleId: bundleId)
     ]
     if hasStickyMode {
       toEvents.append(karSetVariable(name: "leaderkey_sticky", value: 1))
@@ -805,7 +806,8 @@ final class Karabiner2Exporter {
     key: String,
     toState: Int32,
     hasStickyMode: Bool,
-    node: StateNode
+    node: StateNode,
+    bundleId: String? = nil
   ) -> [String: Any]? {
     guard let (keyCode, modifiers) = parseKarKeySpec(key) else {
       return nil
@@ -971,14 +973,11 @@ final class Karabiner2Exporter {
       }
     }
 
-    let commandSuffix = hasStickyMode ? " sticky" : ""
-    let stateCommand = "stateid \(toState)\(commandSuffix)"
-
     if hasStickyMode {
       return [
         "from": karFrom(keyCode: keyCode, modifiers: modifiers),
         "to": [
-          karSendUserCommand(stateCommand),
+          karSendStateIdCommand(stateId: toState, sticky: true, bundleId: bundleId),
           karSetVariable(name: "leaderkey_sticky", value: 1)
         ]
       ]
@@ -987,7 +986,7 @@ final class Karabiner2Exporter {
     return [
       "from": karFrom(keyCode: keyCode, modifiers: modifiers),
       "to": [
-        karSendUserCommand(stateCommand),
+        karSendStateIdCommand(stateId: toState, bundleId: bundleId),
         karSetVariable(name: "leader_state", value: inactiveStateId)
       ]
     ]
@@ -1040,6 +1039,25 @@ final class Karabiner2Exporter {
 
   private static func karSendUserCommand(_ command: String) -> [String: Any] {
     ["send_user_command": ["payload": command]]
+  }
+
+  private static func karStateIdPayload(stateId: Int32, sticky: Bool = false, bundleId: String? = nil) -> String {
+    var payload = "stateid \(stateId)"
+    if sticky {
+      payload += " sticky"
+    }
+    if let bundleId, !bundleId.isEmpty {
+      payload += " bundle \(bundleId)"
+    }
+    return payload
+  }
+
+  private static func karSendStateIdCommand(
+    stateId: Int32,
+    sticky: Bool = false,
+    bundleId: String? = nil
+  ) -> [String: Any] {
+    karSendUserCommand(karStateIdPayload(stateId: stateId, sticky: sticky, bundleId: bundleId))
   }
 
   private static func karShortcutEvents(for shortcutSequence: String) -> [Any]? {
@@ -2228,8 +2246,17 @@ final class Karabiner2Exporter {
     }
   }
 
+  private static func isReservedRegularLeaderKeyControlKey(_ key: String) -> Bool {
+    guard let (keyCode, modifiers) = parseKarKeySpec(key), modifiers.isEmpty else {
+      return false
+    }
+    return keyCode == "caps_lock"
+  }
+
   private static func karIntermediateMappings(
-    from bindings: [ManagedBinding]
+    from bindings: [ManagedBinding],
+    stateCommandBundleId: String? = nil,
+    skipRegularReservedControlKeys: Bool = true
   ) -> [[String: Any]] {
     bindings.sorted {
       if $0.parentStateId != $1.parentStateId {
@@ -2243,6 +2270,10 @@ final class Karabiner2Exporter {
       guard let key = binding.item.item.key else {
         return []
       }
+      guard !skipRegularReservedControlKeys || !isReservedRegularLeaderKeyControlKey(key) else {
+        return []
+      }
+      let commandBundleId = stateCommandBundleId ?? binding.bundleId
 
       let mapping: [String: Any]?
       switch binding.kind {
@@ -2260,13 +2291,15 @@ final class Karabiner2Exporter {
               key: key,
               toState: stateId,
               hasStickyMode: groupStickyMode,
-              includeTimeout: false
+              includeTimeout: false,
+              bundleId: commandBundleId
             ),
             var nonStickyMapping = generateKarStateTransitionMapping(
               key: key,
               toState: stateId,
               hasStickyMode: groupStickyMode,
-              includeTimeout: !groupStickyMode
+              includeTimeout: !groupStickyMode,
+              bundleId: commandBundleId
             )
           else {
             return []
@@ -2286,7 +2319,8 @@ final class Karabiner2Exporter {
         mapping = generateKarStateTransitionMapping(
           key: key,
           toState: stateId,
-          hasStickyMode: groupStickyMode
+          hasStickyMode: groupStickyMode,
+          bundleId: commandBundleId
         )
 
       case .action:
@@ -2306,13 +2340,15 @@ final class Karabiner2Exporter {
               key: key,
               toState: stateId,
               hasStickyMode: true,
-              node: node
+              node: node,
+              bundleId: commandBundleId
             ),
             var nonStickyMapping = generateKarTerminalActionMapping(
               key: key,
               toState: stateId,
               hasStickyMode: false,
-              node: node
+              node: node,
+              bundleId: commandBundleId
             )
           else {
             return []
@@ -2334,7 +2370,8 @@ final class Karabiner2Exporter {
           key: key,
           toState: stateId,
           hasStickyMode: true,
-          node: node
+          node: node,
+          bundleId: commandBundleId
         )
 
       case .suppress:
@@ -2911,6 +2948,25 @@ final class Karabiner2Exporter {
       }
     }
 
+    let sharedRootEntryBindings = sharedCollections.bindings.filter {
+      $0.parentStateId == fallbackInitialStateId
+    }
+    for appConfig in appConfigs {
+      guard let aliasConfig = appAliasByBundleId[appConfig.bundleId] else { continue }
+      let sharedAppContextMappings = karIntermediateMappings(
+        from: sharedRootEntryBindings,
+        stateCommandBundleId: aliasConfig.bundleId
+      )
+      if !sharedAppContextMappings.isEmpty {
+        rules.append(
+          makeKarRule(
+            description: "\(managedRuleDescriptionPrefix)FallbackAppContext/\(aliasConfig.alias)",
+            mappings: sharedAppContextMappings,
+            condition: [["app": aliasConfig.bundleId]]
+          ))
+      }
+    }
+
     let normalFallbackRoot = globalConfig.getNormalFallbackConfig()
     let normalSharedCollections = try collectFullBindings(
       from: normalFallbackRoot,
@@ -3108,6 +3164,8 @@ final class Karabiner2Exporter {
       "right": "right_arrow",
       "escape": "escape",
       "esc": "escape",
+      "caps_lock": "caps_lock",
+      "capslock": "caps_lock",
     ]
 
     let keyCode = keyMap[baseKey.lowercased()] ?? baseKey.lowercased()

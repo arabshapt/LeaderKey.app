@@ -15,6 +15,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
     var lastSequence: String?
     var lastStateId: Int32?
     var lastSticky = false
+    var lastStateBundleId: String?
     var normalModeStatus: StatusItem.NormalModeStatus?
     var hintOverlayCommand: HintOverlayCommand?
     var state: [String: Any] = ["active": true, "mode": "karabiner2"]
@@ -50,9 +51,10 @@ final class KarabinerCommandRouterTests: XCTestCase {
       lastSequence = sequence
     }
 
-    func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
+    func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool, bundleId: String?) {
       lastStateId = stateId
       lastSticky = sticky
+      lastStateBundleId = bundleId
     }
 
     func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
@@ -127,6 +129,11 @@ final class KarabinerCommandRouterTests: XCTestCase {
     XCTAssertEqual(delegate.lastKeyCode, 0)
     XCTAssertTrue(delegate.lastModifiers?.contains(.command) == true)
     XCTAssertTrue(delegate.lastModifiers?.contains(.shift) == true)
+
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "key caps_lock", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.lastKeyCode, 57)
+    XCTAssertEqual(KarabinerCommandRouter.route(command: "key capslock", delegate: delegate), "OK")
+    XCTAssertEqual(delegate.lastKeyCode, 57)
   }
 
   func testRouteStateIdSequenceSettingsAndShakeCommands() {
@@ -135,6 +142,32 @@ final class KarabinerCommandRouterTests: XCTestCase {
     XCTAssertEqual(KarabinerCommandRouter.route(command: "stateid 42 sticky", delegate: delegate), "OK")
     XCTAssertEqual(delegate.lastStateId, 42)
     XCTAssertTrue(delegate.lastSticky)
+    XCTAssertNil(delegate.lastStateBundleId)
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "stateid 43 sticky bundle com.raycast.macos", delegate: delegate),
+      "OK"
+    )
+    XCTAssertEqual(delegate.lastStateId, 43)
+    XCTAssertTrue(delegate.lastSticky)
+    XCTAssertEqual(delegate.lastStateBundleId, "com.raycast.macos")
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "stateid 44 bundle com.apple.Safari", delegate: delegate),
+      "OK"
+    )
+    XCTAssertEqual(delegate.lastStateId, 44)
+    XCTAssertFalse(delegate.lastSticky)
+    XCTAssertEqual(delegate.lastStateBundleId, "com.apple.Safari")
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "stateid 45 bundle", delegate: delegate),
+      "ERROR: stateid bundle requires a bundle ID"
+    )
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "stateid 46 bundle com.raycast.macos extra", delegate: delegate),
+      "ERROR: Unknown stateid token: extra"
+    )
 
     XCTAssertEqual(KarabinerCommandRouter.route(command: "sequence a b c", delegate: delegate), "OK")
     XCTAssertEqual(delegate.lastSequence, "a b c")

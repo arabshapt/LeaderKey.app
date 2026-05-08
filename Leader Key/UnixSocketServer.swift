@@ -228,7 +228,7 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerDidReceiveDeactivation()
   func unixSocketServerDidReceiveSettings()
   func unixSocketServerDidReceiveSequence(_ sequence: String)
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool)
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool, bundleId: String?)
   func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus)
   func unixSocketServerDidReceiveHintOverlay(_ command: HintOverlayCommand)
   func unixSocketServerDidReceiveShake()

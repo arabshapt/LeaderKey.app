@@ -1073,6 +1073,8 @@ extension AppDelegate {
     refreshActiveSequenceAfterReload: () -> Void
   ) {
     switch event {
+    case .willDeactivate:
+      break
     case .willReload:
       isReloading = true
       #if DEBUG
@@ -1308,10 +1310,12 @@ extension AppDelegate {
     inputMethodDidReceiveSequence(sequence)
   }
 
-  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool) {
-    debugLog("[AppDelegate] Control socket state ID: \(stateId), sticky: \(sticky)")
+  func unixSocketServerDidReceiveStateId(_ stateId: Int32, sticky: Bool, bundleId: String?) {
+    debugLog(
+      "[AppDelegate] Control socket state ID: \(stateId), sticky: \(sticky), bundleId: \(bundleId ?? "nil")"
+    )
     recordSocketTransportState(0)
-    inputMethodDidReceiveStateId(stateId, sticky: sticky)
+    inputMethodDidReceiveStateId(stateId, sticky: sticky, bundleId: bundleId)
   }
 
   func unixSocketServerDidReceiveNormalModeStatus(_ status: StatusItem.NormalModeStatus) {
@@ -2496,7 +2500,10 @@ extension AppDelegate {
 
   // This function is called when an activation shortcut is pressed or a socket/user command arrives.
   // It sets up the initial state for a new key sequence based on the loaded config.
-  private func startSequence(activationType: Controller.ActivationType, bundleId: String? = nil) {
+  private func startSequence(
+    activationType: Controller.ActivationType,
+    bundleId: String? = nil
+  ) {
     let spid = OSSignpostID(log: signpostLog)
     os_signpost(.begin, log: signpostLog, name: "startSequence", signpostID: spid)
     defer { os_signpost(.end, log: signpostLog, name: "startSequence", signpostID: spid) }
@@ -3018,6 +3025,15 @@ extension AppDelegate {
 
       // Process the key through the normal flow
       if self.controller.userState.isActive {
+        if keyCode == 57 {
+          // Primary Caps Lock cancel comes from the user's Goku to_if_alone rule.
+          // This fallback keeps direct socket/legacy key input consistent if key 57 reaches the app.
+          debugLog("[InputMethod] Caps Lock key received while active; deactivating")
+          self.controller.hide()
+          self.resetSequenceState()
+          return
+        }
+
         // Convert keyCode to character
         guard let character = self.keyCodeToCharacter(keyCode) else {
           debugLog("[InputMethod] Unable to convert keyCode \(keyCode) to character")
@@ -3142,16 +3158,18 @@ extension AppDelegate {
     }
   }
   
-  func inputMethodDidReceiveStateId(_ stateId: Int32, sticky: Bool = false) {
+  func inputMethodDidReceiveStateId(_ stateId: Int32, sticky: Bool = false, bundleId: String? = nil) {
     // Handle state ID from Karabiner 2.0
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       self.ensureControllerReady()
       
-      debugLog("[InputMethod] State ID received: \(stateId), sticky: \(sticky)")
+      debugLog(
+        "[InputMethod] State ID received: \(stateId), sticky: \(sticky), bundleId: \(bundleId ?? "nil")"
+      )
       
       // Look up the action by state ID and execute it
-      self.executeActionByStateId(stateId, sticky: sticky)
+      self.executeActionByStateId(stateId, sticky: sticky, bundleId: bundleId)
     }
   }
 
@@ -3335,15 +3353,40 @@ extension AppDelegate {
     }
   }
 
-  private func resolvedActivationContext(for mapping: Karabiner2Exporter.StateMapping) -> KarabinerActivationContext {
+  private func appSpecificContext(
+    bundleId: String?,
+    activatedAt: Date
+  ) -> KarabinerActivationContext? {
+    guard let bundleId = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !bundleId.isEmpty,
+          bundleId != "__FALLBACK__"
+    else {
+      return nil
+    }
+    return KarabinerActivationContext(
+      mode: .appSpecificWithFallback,
+      bundleId: bundleId,
+      activatedAt: activatedAt
+    )
+  }
+
+  private func resolvedActivationContext(
+    for mapping: Karabiner2Exporter.StateMapping,
+    explicitBundleId: String? = nil
+  ) -> KarabinerActivationContext {
+    let activatedAt = karabinerActivationContext?.activatedAt ?? Date()
+
     switch mapping.scope {
     case .global:
-      return KarabinerActivationContext(mode: .defaultOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .defaultOnly, bundleId: nil, activatedAt: activatedAt)
 
     case .fallbackOnly:
-      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activatedAt)
 
     case .appShared:
+      if let context = appSpecificContext(bundleId: explicitBundleId, activatedAt: activatedAt) {
+        return context
+      }
       if let activationContext = karabinerActivationContext {
         switch activationContext.mode {
         case .defaultOnly:
@@ -3352,30 +3395,97 @@ extension AppDelegate {
           return activationContext
         }
       }
-      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activatedAt)
 
     case .appOverride, .appSuppress:
+      if let context = appSpecificContext(bundleId: mapping.bundleId, activatedAt: activatedAt) {
+        return context
+      }
+      if let context = appSpecificContext(bundleId: explicitBundleId, activatedAt: activatedAt) {
+        return context
+      }
       if let activationContext = karabinerActivationContext,
          activationContext.mode == .appSpecificWithFallback {
         return activationContext
       }
-      if let bundleId = mapping.bundleId {
-        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
-      }
-      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activatedAt)
 
     case .normalShared:
       if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
-        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
+        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: activatedAt)
       }
-      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activatedAt)
 
     case .normalOverride, .normalSuppress:
       if let bundleId = mapping.bundleId {
-        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: Date())
+        return KarabinerActivationContext(mode: .appSpecificWithFallback, bundleId: bundleId, activatedAt: activatedAt)
       }
-      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: Date())
+      return KarabinerActivationContext(mode: .fallbackOnly, bundleId: nil, activatedAt: activatedAt)
     }
+  }
+
+  private func cacheId(for context: KarabinerActivationContext) -> String {
+    switch context.mode {
+    case .defaultOnly:
+      return "global"
+    case .appSpecificWithFallback:
+      return context.bundleId ?? "global"
+    case .fallbackOnly:
+      return "fallback"
+    }
+  }
+
+  private func configKey(for context: KarabinerActivationContext) -> String {
+    switch context.mode {
+    case .defaultOnly:
+      return globalDefaultDisplayName
+    case .appSpecificWithFallback:
+      return config.configKey(forBundleId: context.bundleId)
+    case .fallbackOnly:
+      return defaultAppConfigDisplayName
+    }
+  }
+
+  private func applyRegularSequenceContext(
+    mapping: Karabiner2Exporter.StateMapping,
+    activationContext: KarabinerActivationContext
+  ) {
+    let resolvedRoot = rootGroupForMapping(mapping, activationContext: activationContext)
+    let previousContext = karabinerActivationContext
+    let contextChanged =
+      previousContext?.mode != activationContext.mode || previousContext?.bundleId != activationContext.bundleId
+    let shouldResetNavigation =
+      contextChanged ||
+      !controller.userState.isActive ||
+      controller.userState.activeRoot == nil ||
+      controller.userState.navigationPath.isEmpty
+    let root = shouldResetNavigation ? resolvedRoot : (controller.userState.activeRoot ?? resolvedRoot)
+    let cacheId = cacheId(for: activationContext)
+    let cache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(root, for: cacheId)
+
+    controller.userState.activeRoot = root
+    controller.userState.activeBundleId =
+      activationContext.mode == .appSpecificWithFallback ? activationContext.bundleId : nil
+    controller.userState.activeConfigKey = configKey(for: activationContext)
+    if shouldResetNavigation {
+      controller.userState.navigationPath = [root]
+    }
+    controller.userState.display = nil
+    controller.userState.isActive = true
+
+    activeRootGroup = root
+    if shouldResetNavigation || currentSequenceGroup == nil {
+      currentSequenceGroup = controller.userState.navigationPath.last ?? root
+    }
+    currentBundleId = cacheId
+    karabinerActivationContext = activationContext
+
+    currentKeyLookupCache = cache
+    controller.keyLookupCache = cache
+
+    var callback = callbackState
+    callback.stickyModeKeycodes = cache.getValidKeycodes(forGroupId: root.id)
+    callbackState = callback
   }
 
   private func isNormalModeScope(_ scope: Karabiner2Exporter.StateMapping.Scope) -> Bool {
@@ -3508,7 +3618,11 @@ extension AppDelegate {
     return action
   }
   
-  private func executeActionByStateId(_ stateId: Int32, sticky: Bool = false) {
+  private func executeActionByStateId(
+    _ stateId: Int32,
+    sticky: Bool = false,
+    bundleId: String? = nil
+  ) {
     // Load mappings if they haven't been loaded yet
     if stateMappingsLastLoaded == nil {
       loadStateMappings()
@@ -3519,7 +3633,7 @@ extension AppDelegate {
       return
     }
 
-    let activationContext = resolvedActivationContext(for: mapping)
+    let activationContext = resolvedActivationContext(for: mapping, explicitBundleId: bundleId)
     let isNormalModeDispatch = isNormalModeScope(mapping.scope)
     let activationType = activationType(for: activationContext.mode)
     let activationBundleId = bundleIdForShow(context: activationContext)
@@ -3527,7 +3641,11 @@ extension AppDelegate {
     debugLog(
       "[AppDelegate] Found mapping for state ID \(stateId): scope=\(mapping.scope.rawValue), " +
         "type=\(mapping.actionType), label=\(mapping.actionLabel ?? "unknown"), " +
-        "bundleId=\(mapping.bundleId ?? "nil"), activeBundle=\(activationBundleId ?? "nil")")
+        "bundleId=\(mapping.bundleId ?? "nil"), explicitBundle=\(bundleId ?? "nil"), activeBundle=\(activationBundleId ?? "nil")")
+
+    if !isNormalModeDispatch {
+      applyRegularSequenceContext(mapping: mapping, activationContext: activationContext)
+    }
 
     // Helper: ensure window is visible with the correct config, then run continuation
     let ensureWindowVisible: (@escaping () -> Void) -> Void = { [weak self] continuation in

@@ -1094,6 +1094,106 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testAppOverrideStateIdPayloadIncludesBundleContext() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "r", label: "Fallback", value: "Ct")),
+      ]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "r", label: "Raycast", value: "COr")),
+      ]
+    )
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+      )
+      let appManipulator = try XCTUnwrap(flattenManipulators(from: [appRule]).first(where: {
+        fromKeyCode(in: $0) == "r"
+          && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      let payloads = sendUserCommandPayloads(manipulator: appManipulator)
+
+      XCTAssertTrue(payloads.contains(where: { $0.contains(" bundle com.raycast.macos") }))
+    }
+  }
+
+  func testSharedRootEntryStateIdPayloadIncludesAppContextBeforeGenericFallback() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "s", label: "Shared", value: "Cs")),
+      ]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let descriptions = result.managedRules.compactMap { $0["description"] as? String }
+      let appContextRuleIndex = try XCTUnwrap(
+        descriptions.firstIndex(of: "LeaderKeyManaged/FallbackAppContext/raycast")
+      )
+      let fallbackRuleIndex = try XCTUnwrap(descriptions.firstIndex(of: "LeaderKeyManaged/FallbackMode"))
+      XCTAssertLessThan(appContextRuleIndex, fallbackRuleIndex)
+
+      let appContextRule = try XCTUnwrap(
+        result.managedRules.first(where: {
+          ($0["description"] as? String) == "LeaderKeyManaged/FallbackAppContext/raycast"
+        })
+      )
+      let appContextManipulator = try XCTUnwrap(flattenManipulators(from: [appContextRule]).first(where: {
+        fromKeyCode(in: $0) == "s"
+          && hasConditionType($0, type: "frontmost_application_if")
+          && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      let payloads = sendUserCommandPayloads(manipulator: appContextManipulator)
+
+      XCTAssertTrue(payloads.contains(where: { $0.contains(" bundle com.raycast.macos") }))
+    }
+  }
+
+  func testRegularCapsLockSequenceBindingIsSkippedDefensively() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .action(makeShortcutAction(key: "caps_lock", label: "Caps", value: "Ct"))
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let allManipulators = flattenManipulators(from: result.managedRules)
+
+    XCTAssertFalse(allManipulators.contains(where: {
+      fromKeyCode(in: $0) == "caps_lock"
+        && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+    }))
+    XCTAssertTrue(allManipulators.contains(where: {
+      fromKeyCode(in: $0) == "escape"
+        && hasSendUserCommand(manipulator: $0, prefix: "deactivate")
+    }))
+  }
+
   func testGenerateKarabinerTSExportIncludesTagAssignedVirtualApps() throws {
     let tagRoot = Group(
       key: nil,

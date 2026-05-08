@@ -18,7 +18,7 @@ protocol InputMethodDelegate: AnyObject {
   func inputMethodDidReceiveDeactivation()
   func inputMethodDidReceiveSettings()
   func inputMethodDidReceiveSequence(_ sequence: String)
-  func inputMethodDidReceiveStateId(_ stateId: Int32, sticky: Bool)
+  func inputMethodDidReceiveStateId(_ stateId: Int32, sticky: Bool, bundleId: String?)
   func inputMethodDidReceiveShake()
   func inputMethodDidRequestState() -> [String: Any]
 }

@@ -96,24 +96,7 @@ class Controller {
       } else {
         // Use bundleId from Karabiner (single source of truth for app detection)
         configToLoad = userConfig.getConfig(for: bundleId)
-
-        // Determine the config key to use in settings
-        if let bundleId = bundleId {
-          // Look for the display name that matches this bundle ID in discovered configs
-          var foundConfigKey: String? = nil
-          for (displayKey, _) in userConfig.discoveredConfigFiles {
-            if let extractedId = userConfig.extractRegularAppBundleId(from: displayKey),
-              extractedId == bundleId
-            {
-              foundConfigKey = displayKey
-              break
-            }
-          }
-          configKeyForSettings = foundConfigKey ?? defaultAppConfigDisplayName
-        } else {
-          // No bundle ID, use the default
-          configKeyForSettings = globalDefaultDisplayName
-        }
+        configKeyForSettings = userConfig.configKey(forBundleId: bundleId)
       }
     case .fallbackOnly:
       configToLoad = userConfig.getFallbackConfig()  // Load only the fallback config
