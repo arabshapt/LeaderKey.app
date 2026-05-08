@@ -2899,10 +2899,11 @@ extension AppDelegate {
       guard let self = self else { return }
       self.ensureControllerReady()
 
+      debugLog("[ConfigDebug] activation bundleId from Karabiner: \(bundleId ?? "nil")")
       if let bundleId = bundleId {
         debugLog("[InputMethod] Activation received with bundleId: \(bundleId)")
       }
-      
+
       // Reset Karabiner sticky mode when activating
       self.isKarabinerStickyMode = false
 

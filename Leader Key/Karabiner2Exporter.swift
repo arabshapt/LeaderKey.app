@@ -630,7 +630,7 @@ final class Karabiner2Exporter {
     if let app = condition["app"] as? String {
       return [[
         "type": "frontmost_application_if",
-        "bundle_identifiers": [app],
+        "bundle_identifiers": appConditionBundleIdentifiers(for: app),
       ]]
     }
 
@@ -1204,6 +1204,25 @@ final class Karabiner2Exporter {
     ]
   }
 
+  private static func appConditionBundleIdentifiers(for bundleId: String) -> [String] {
+    let trimmedBundleId = bundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedBundleId.isEmpty else { return [] }
+
+    // Karabiner treats bundle_identifiers as regex. Anchor with ^...$ and escape dots so
+    // "com.google.Chrome" doesn't match PWAs like "com.google.Chrome.app.<id>" (substring/regex bleed).
+    func anchor(_ literal: String) -> String {
+      let escaped = NSRegularExpression.escapedPattern(for: literal)
+      return "^\(escaped)$"
+    }
+
+    let overlaySuffix = ".overlay"
+    guard !trimmedBundleId.hasSuffix(overlaySuffix) else {
+      return [anchor(trimmedBundleId)]
+    }
+
+    return [anchor(trimmedBundleId), anchor("\(trimmedBundleId)\(overlaySuffix)")]
+  }
+
   private static func appleBuiltInDeviceCondition() -> [String: Any] {
     [
       "type": "device_if",
@@ -1484,6 +1503,96 @@ final class Karabiner2Exporter {
       && lhs.tapAction == rhs.tapAction
   }
 
+  private static func regularAppDeltaExists(
+    appItem: ActionOrGroup,
+    fallbackItem: ActionOrGroup
+  ) -> Bool {
+    switch (appItem, fallbackItem) {
+    case let (.action(appAction), .action(fallbackAction)):
+      return isSuppressionAction(appAction) || appAction != fallbackAction
+
+    case let (.group(appGroup), .group(fallbackGroup)):
+      return !groupMetadataMatches(appGroup, fallbackGroup)
+        || sharedSubtreeContainsRegularAppDelta(appGroup: appGroup, fallbackGroup: fallbackGroup)
+
+    case (.layer, _):
+      return false
+
+    case (.action, _), (.group, _):
+      return true
+    }
+  }
+
+  private static func sharedSubtreeContainsRegularAppDelta(
+    appGroup: Group,
+    fallbackGroup: Group
+  ) -> Bool {
+    let appItems = keyedItems(appGroup.actions)
+    let fallbackItems = keyedItems(fallbackGroup.actions)
+
+    for normalizedKey in Set(appItems.keys).union(fallbackItems.keys) {
+      guard let appItem = appItems[normalizedKey] else {
+        continue
+      }
+      guard let fallbackItem = fallbackItems[normalizedKey] else {
+        switch appItem {
+        case .action, .group:
+          return true
+        case .layer:
+          continue
+        }
+      }
+
+      if regularAppDeltaExists(appItem: appItem, fallbackItem: fallbackItem) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private static func promotedMergedActions(
+    appActions: [ActionOrGroup],
+    fallbackActions: [ActionOrGroup]
+  ) -> [ActionOrGroup] {
+    let appItems = keyedItems(appActions)
+    let fallbackItems = keyedItems(fallbackActions)
+    let orderedKeys = Array(Set(appItems.keys).union(fallbackItems.keys)).sorted()
+
+    return orderedKeys.compactMap { normalizedKey in
+      let appItem = appItems[normalizedKey]
+      let fallbackItem = fallbackItems[normalizedKey]
+
+      switch (appItem, fallbackItem) {
+      case let (.some(.group(appGroup)), .some(.group(fallbackGroup)))
+        where groupMetadataMatches(appGroup, fallbackGroup):
+        return .group(promotedMergedGroup(appGroup: appGroup, fallbackGroup: fallbackGroup))
+
+      case let (.some(item), _):
+        return item
+
+      case let (.none, .some(item)):
+        return item
+
+      case (.none, .none):
+        return nil
+      }
+    }
+  }
+
+  private static func promotedMergedGroup(appGroup: Group, fallbackGroup: Group) -> Group {
+    Group(
+      key: appGroup.key,
+      label: appGroup.label,
+      iconPath: appGroup.iconPath,
+      stickyMode: appGroup.stickyMode,
+      actions: promotedMergedActions(
+        appActions: appGroup.actions,
+        fallbackActions: fallbackGroup.actions
+      )
+    )
+  }
+
   private static func isSuppressionAction(_ action: Action) -> Bool {
     action.type == .shortcut && action.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "vk_none"
   }
@@ -1742,6 +1851,82 @@ final class Karabiner2Exporter {
           collections: &collections
         )
       }
+    }
+  }
+
+  private static func appendPromotedSharedGroupBinding(
+    group: Group,
+    scope: StateMapping.Scope,
+    appAlias: String?,
+    bundleId: String?,
+    parentStateId: Int32,
+    parentPath: [String],
+    originalParentPath: [String],
+    parentGroupHasStickyMode: Bool,
+    registry: StateIdRegistry,
+    collections: inout ManagedBindingCollections
+  ) throws {
+    guard let originalKey = group.key, !originalKey.isEmpty else {
+      return
+    }
+
+    let normalizedKey = normalizeKeyForPath(originalKey)
+    guard !normalizedKey.isEmpty else {
+      return
+    }
+
+    let path = parentPath + [normalizedKey]
+    let originalPath = originalParentPath + [originalKey]
+    let namespace = stateIdNamespace(for: scope, bundleId: bundleId)
+    let groupStateId = try registry.makeStateId(
+      namespace: namespace,
+      path: path,
+      kind: "group.shared_promoted.\(groupSignature(for: group))",
+      scope: scope,
+      bundleId: bundleId
+    )
+
+    collections.bindings.append(
+      ManagedBinding(
+        parentStateId: parentStateId,
+        stateId: groupStateId,
+        path: path,
+        originalPath: originalPath,
+        item: .group(group),
+        kind: .group,
+        parentGroupHasStickyMode: parentGroupHasStickyMode,
+        scope: scope,
+        appAlias: appAlias,
+        bundleId: bundleId
+      ))
+    if !isNormalModeScope(scope) {
+      collections.stateMappings.append(
+        makeStateMapping(
+          stateId: groupStateId,
+          path: originalPath,
+          scope: scope,
+          appAlias: appAlias,
+          bundleId: bundleId,
+          actionType: "group",
+          actionTypeRaw: nil,
+          actionValue: nil,
+          actionLabel: group.label
+        ))
+    }
+
+    for child in group.actions {
+      try appendFullBinding(
+        item: child,
+        scope: scope,
+        appAlias: appAlias,
+        bundleId: bundleId,
+        parentStateId: groupStateId,
+        parentPath: path,
+        originalParentPath: originalPath,
+        parentGroupHasStickyMode: group.stickyMode ?? false,
+        registry: registry,
+        collections: &collections
+      )
     }
   }
 
@@ -2090,7 +2275,24 @@ final class Karabiner2Exporter {
         let path = parentPath + [normalizedKey]
         let originalPath = originalParentPath + [originalKey]
 
-        if groupMetadataMatches(appSubgroup, fallbackSubgroup) {
+        if groupMetadataMatches(appSubgroup, fallbackSubgroup),
+          sharedScope == .appShared,
+          overrideScope == .appOverride,
+          sharedSubtreeContainsRegularAppDelta(appGroup: appSubgroup, fallbackGroup: fallbackSubgroup)
+        {
+          try appendPromotedSharedGroupBinding(
+            group: promotedMergedGroup(appGroup: appSubgroup, fallbackGroup: fallbackSubgroup),
+            scope: overrideScope,
+            appAlias: appAlias,
+            bundleId: bundleId,
+            parentStateId: parentStateId,
+            parentPath: parentPath,
+            originalParentPath: originalParentPath,
+            parentGroupHasStickyMode: appGroup.stickyMode ?? false,
+            registry: registry,
+            collections: &collections
+          )
+        } else if groupMetadataMatches(appSubgroup, fallbackSubgroup) {
           let sharedStateId = try registry.makeStateId(
             namespace: stateIdNamespace(for: sharedScope, bundleId: nil),
             path: path,
@@ -2251,6 +2453,24 @@ final class Karabiner2Exporter {
       return false
     }
     return keyCode == "caps_lock"
+  }
+
+  private static func addingCondition(
+    _ condition: [String: Any],
+    to mappings: [[String: Any]]
+  ) -> [[String: Any]] {
+    mappings.map { mapping in
+      var updated = mapping
+      if var conditions = updated["condition"] as? [[String: Any]] {
+        conditions.append(condition)
+        updated["condition"] = conditions
+      } else if let existingCondition = updated["condition"] as? [String: Any] {
+        updated["condition"] = [existingCondition, condition]
+      } else {
+        updated["condition"] = [condition]
+      }
+      return updated
+    }
   }
 
   private static func karIntermediateMappings(
@@ -2937,13 +3157,29 @@ final class Karabiner2Exporter {
       appBindingsByAlias[aliasConfig.alias] = deltaCollections.bindings
       stateMappings.append(contentsOf: deltaCollections.stateMappings)
 
-      let appMappings = karIntermediateMappings(from: deltaCollections.bindings)
+      let appOwnedGroupStateIds = Set(
+        deltaCollections.bindings.compactMap { binding -> Int32? in
+          guard binding.kind == .group, binding.scope == .appOverride else { return nil }
+          return binding.stateId
+        })
+      let appConditionedBindings = deltaCollections.bindings.filter {
+        !appOwnedGroupStateIds.contains($0.parentStateId)
+      }
+      let appLockedContinuationBindings = deltaCollections.bindings.filter {
+        appOwnedGroupStateIds.contains($0.parentStateId)
+      }
+
+      let appMappings =
+        addingCondition(
+          ["app": aliasConfig.bundleId],
+          to: karIntermediateMappings(from: appConditionedBindings)
+        ) +
+        karIntermediateMappings(from: appLockedContinuationBindings)
       if !appMappings.isEmpty {
         rules.append(
           makeKarRule(
             description: "\(managedRuleDescriptionPrefix)AppMode/\(aliasConfig.alias)",
-            mappings: appMappings,
-            condition: [["app": aliasConfig.bundleId]]
+            mappings: appMappings
           ))
       }
     }
@@ -2953,8 +3189,17 @@ final class Karabiner2Exporter {
     }
     for appConfig in appConfigs {
       guard let aliasConfig = appAliasByBundleId[appConfig.bundleId] else { continue }
+      let appRootKeys = Set(
+        (appBindingsByAlias[aliasConfig.alias] ?? []).compactMap { binding -> String? in
+          guard binding.parentStateId == fallbackInitialStateId else { return nil }
+          return binding.path.first
+        })
+      let sharedRootBindingsForApp = sharedRootEntryBindings.filter { binding in
+        guard let key = binding.path.first else { return true }
+        return !appRootKeys.contains(key)
+      }
       let sharedAppContextMappings = karIntermediateMappings(
-        from: sharedRootEntryBindings,
+        from: sharedRootBindingsForApp,
         stateCommandBundleId: aliasConfig.bundleId
       )
       if !sharedAppContextMappings.isEmpty {
@@ -3284,9 +3529,17 @@ final class Karabiner2Exporter {
     
     var appLines: [String] = []
     for (bundleId, alias, _) in appAliases {
-      appLines.append("   :\(alias) [\"\(bundleId)\"]")
+      let bundleIds = appConditionBundleIdentifiers(for: bundleId)
+        .map { pattern -> String in
+          // EDN string literals use \\ for backslash. The pattern contains \. (escaped regex dot)
+          // which must be written as \\. in EDN so Goku reads back \. and emits it correctly to JSON.
+          let ednEscaped = pattern.replacingOccurrences(of: "\\", with: "\\\\")
+          return "\"\(ednEscaped)\""
+        }
+        .joined(separator: " ")
+      appLines.append("   :\(alias) [\(bundleIds)]")
     }
-    
+
     return " :applications {\n\(appLines.joined(separator: "\n"))\n }"
   }
   

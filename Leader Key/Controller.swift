@@ -97,6 +97,7 @@ class Controller {
         // Use bundleId from Karabiner (single source of truth for app detection)
         configToLoad = userConfig.getConfig(for: bundleId)
         configKeyForSettings = userConfig.configKey(forBundleId: bundleId)
+        debugLog("[ConfigDebug] Controller.show bundleId=\(bundleId ?? "nil") configKey=\(configKeyForSettings) topLevelItems=\(configToLoad.actions.count)")
       }
     case .fallbackOnly:
       configToLoad = userConfig.getFallbackConfig()  // Load only the fallback config

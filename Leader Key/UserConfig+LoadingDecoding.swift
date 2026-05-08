@@ -102,30 +102,37 @@ extension UserConfig {
 
   // Gets the config for a specific app bundle ID, falling back to app-fallback-config.json, then default global-config.json
   func getConfig(for bundleId: String?) -> Group {
+    debugLog("[ConfigDebug] getConfig in: \(bundleId ?? "nil")")
     // 1. Try specific app config
-    if let bundleId = bundleId, !bundleId.isEmpty {
+    if let bundleId = canonicalRegularAppBundleId(for: bundleId), !bundleId.isEmpty {
       // Check cache first
       if let cachedConfig = appConfigs[bundleId] {
+        debugLog("[ConfigDebug] getConfig cache hit for \(bundleId): \(cachedConfig == nil ? "nil (returning root)" : "non-nil (returning cached merged)")")
         return cachedConfig ?? root  // Return cached config or default if cache entry is nil (load failed previously)
       }
 
       // Construct app-specific config path
       let appFileName = "\(appConfigPrefix)\(bundleId).json"
       let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
+      let exists = fileManager.fileExists(atPath: appConfigPath)
+      debugLog("[ConfigDebug] getConfig path=\(appConfigPath) exists=\(exists)")
 
-      if fileManager.fileExists(atPath: appConfigPath) {
+      if exists {
         // Attempt to load and decode app-specific config
         if let appRoot = decodeConfig(
           from: appConfigPath, suppressAlerts: true, isDefaultConfig: false)
         {
+          debugLog("[ConfigDebug] getConfig decode OK for \(bundleId), merging with fallback")
           // Try to merge with fallback if available
           let rawMergedConfig = mergeConfigWithFallback(
             appSpecificConfig: appRoot, bundleId: bundleId)
           // Sort the merged result to ensure app-specific and fallback items are properly intermixed
           let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
           appConfigs[bundleId] = mergedConfig  // Cache merged result
+          debugLog("[ConfigDebug] getConfig returning merged config for \(bundleId) with \(mergedConfig.actions.count) top-level items")
           return mergedConfig
         } else {
+          debugLog("[ConfigDebug] getConfig decode FAILED for \(bundleId), caching nil and falling back")
           appConfigs[bundleId] = nil  // Cache failed load explicitly as nil
           // Fall through to try app-fallback-config.json
         }
@@ -133,6 +140,7 @@ extension UserConfig {
         // File doesn't exist, cache this fact by storing nil
         let tagIds = assignedTagIds(for: bundleId, normalMode: false)
         if !tagIds.isEmpty {
+          debugLog("[ConfigDebug] getConfig file missing but tags assigned for \(bundleId), merging tags-only with fallback")
           let rawMergedConfig = mergeConfigWithFallback(
             appSpecificConfig: Group(actions: []),
             bundleId: bundleId
@@ -142,12 +150,14 @@ extension UserConfig {
           return mergedConfig
         }
 
+        debugLog("[ConfigDebug] getConfig file missing and no tags for \(bundleId), caching nil and falling back")
         appConfigs[bundleId] = nil
         // Fall through to try app-fallback-config.json
       }
     }
 
     // 2. Try fallback app config, then default global-config.json
+    debugLog("[ConfigDebug] getConfig returning getFallbackConfig() for input \(bundleId ?? "nil")")
     return getFallbackConfig()
   }
 

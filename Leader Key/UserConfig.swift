@@ -279,8 +279,60 @@ class UserConfig: ObservableObject {
     return nil
   }
 
+  func canonicalRegularAppBundleId(for bundleId: String?) -> String? {
+    guard let bundleId = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !bundleId.isEmpty
+    else {
+      debugLog("[ConfigDebug] canonical: nil/empty input -> nil")
+      return nil
+    }
+
+    if hasRegularAppConfig(for: bundleId) {
+      debugLog("[ConfigDebug] canonical: \(bundleId) -> \(bundleId) (direct match)")
+      return bundleId
+    }
+
+    let overlaySuffix = ".overlay"
+    if bundleId.hasSuffix(overlaySuffix) {
+      let baseBundleId = String(bundleId.dropLast(overlaySuffix.count))
+      if hasRegularAppConfig(for: baseBundleId) {
+        debugLog("[ConfigDebug] canonical: \(bundleId) -> \(baseBundleId) (overlay-stripped)")
+        return baseBundleId
+      }
+    }
+
+    debugLog("[ConfigDebug] canonical: \(bundleId) -> \(bundleId) (no config match, returning input)")
+    return bundleId
+  }
+
+  private func hasRegularAppConfig(for bundleId: String) -> Bool {
+    for (displayKey, _) in discoveredConfigFiles {
+      if let extractedId = extractRegularAppBundleId(from: displayKey),
+        extractedId == bundleId
+      {
+        debugLog("[ConfigDebug] hasRegularAppConfig(\(bundleId))=true via discoveredConfigFiles displayKey=\(displayKey)")
+        return true
+      }
+    }
+
+    let appFileName = "\(appConfigPrefix)\(bundleId).json"
+    let appConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(appFileName)
+    let fileExists = fileManager.fileExists(atPath: appConfigPath)
+    if fileExists {
+      debugLog("[ConfigDebug] hasRegularAppConfig(\(bundleId))=true via fileExists at \(appConfigPath)")
+      return true
+    }
+    let hasTags = !assignedTagIds(for: bundleId, normalMode: false).isEmpty
+    if hasTags {
+      debugLog("[ConfigDebug] hasRegularAppConfig(\(bundleId))=true via assignedTagIds")
+      return true
+    }
+    debugLog("[ConfigDebug] hasRegularAppConfig(\(bundleId))=false (no discovered match, no file, no tags)")
+    return false
+  }
+
   func configKey(forBundleId bundleId: String?) -> String {
-    guard let bundleId = bundleId else { return globalDefaultDisplayName }
+    guard let bundleId = canonicalRegularAppBundleId(for: bundleId) else { return globalDefaultDisplayName }
 
     for (displayKey, _) in discoveredConfigFiles {
       if let extractedId = extractRegularAppBundleId(from: displayKey),

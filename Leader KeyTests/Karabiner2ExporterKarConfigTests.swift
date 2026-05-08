@@ -1134,6 +1134,402 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testRaycastAppConditionsIncludeOverlayBundleAlias() throws {
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeTextAction(key: "a", label: "App", value: "app"))
+      ]
+    )
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
+      globalConfig: globalConfig,
+      appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+    )
+    let activationRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/ActivationShortcuts" })
+    )
+    let activationManipulators = flattenManipulators(from: [activationRule])
+    let raycastActivation = try XCTUnwrap(activationManipulators.first(where: {
+      fromKeyCode(in: $0) == "semicolon"
+        && sendUserCommandPayloads(manipulator: $0).contains("activate com.raycast.macos")
+    }))
+
+    XCTAssertEqual(
+      Set(frontmostBundleIdentifiers(in: raycastActivation)),
+      Set(["^com\\.raycast\\.macos$", "^com\\.raycast\\.macos\\.overlay$"])
+    )
+
+    let appRule = try XCTUnwrap(
+      result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+    )
+    let appAction = try XCTUnwrap(flattenManipulators(from: [appRule]).first(where: {
+      fromKeyCode(in: $0) == "a"
+    }))
+
+    XCTAssertEqual(
+      Set(frontmostBundleIdentifiers(in: appAction)),
+      Set(["^com\\.raycast\\.macos$", "^com\\.raycast\\.macos\\.overlay$"])
+    )
+    XCTAssertTrue(sendUserCommandPayloads(manipulator: appAction).contains(where: {
+      $0.contains(" bundle com.raycast.macos")
+    }))
+  }
+
+  func testOverlayBundleResolvesToBaseAppConfigWhenBaseExists() throws {
+    let raycastRoot = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeTextAction(key: "a", label: "Raycast Action", value: "app"))
+      ]
+    )
+
+    try withTemporaryConfigDirectory {
+      let appPath = URL(fileURLWithPath: Defaults[.configDir])
+        .appendingPathComponent("app.com.raycast.macos.json")
+      try JSONEncoder().encode(raycastRoot).write(to: appPath)
+
+      let userConfig = UserConfig()
+      userConfig.discoverConfigFiles()
+
+      let resolvedRoot = userConfig.getConfig(for: "com.raycast.macos.overlay")
+      XCTAssertEqual(resolvedRoot.label, "Raycast")
+      XCTAssertEqual(userConfig.configKey(forBundleId: "com.raycast.macos.overlay"), "App: com.raycast.macos")
+    }
+  }
+
+  func testAppOverrideGroupContinuationDoesNotRequireFrontmostAppCondition() throws {
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "g",
+            label: "App Group",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .action(makeShortcutAction(key: "x", label: "Nested", value: "Cx"))
+            ]
+          ))
+      ]
+    )
+
+    try withTemporaryConfigDirectory {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+      )
+      let appManipulators = flattenManipulators(from: [appRule])
+
+      let appGroupEntry = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "g" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+      let lockedChild = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "x"
+          && hasSendUserCommand(manipulator: $0, prefix: "stateid ")
+      }))
+      let payloads = sendUserCommandPayloads(manipulator: lockedChild)
+
+      XCTAssertTrue(hasSendUserCommand(manipulator: appGroupEntry, prefix: "stateid "))
+      XCTAssertFalse(hasConditionType(lockedChild, type: "frontmost_application_if"))
+      XCTAssertTrue(payloads.contains(where: { $0.contains(" bundle com.raycast.macos") }))
+    }
+  }
+
+  func testSharedParentWithAppOverrideChildPromotesToAppState() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .action(makeTextAction(key: "a", label: "Fallback", value: "fallback"))
+            ]
+          ))
+      ]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .action(makeTextAction(key: "x", label: "App", value: "app"))
+            ]
+          ))
+      ]
+    )
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+      )
+      let appManipulators = flattenManipulators(from: [appRule])
+      let promotedEntry = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "w" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+      let promotedState = try XCTUnwrap(setVariableValue(in: promotedEntry, name: "leader_state"))
+
+      let appChild = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "x"
+          && hasVariableCondition($0, name: "leader_state", value: promotedState, type: "variable_if")
+      }))
+      let fallbackChild = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "a"
+          && hasVariableCondition($0, name: "leader_state", value: promotedState, type: "variable_if")
+      }))
+
+      XCTAssertFalse(hasConditionType(appChild, type: "frontmost_application_if"))
+      XCTAssertFalse(hasConditionType(fallbackChild, type: "frontmost_application_if"))
+      XCTAssertTrue(sendUserCommandPayloads(manipulator: appChild).contains(where: {
+        $0.contains(" bundle com.raycast.macos")
+      }))
+      XCTAssertTrue(sendUserCommandPayloads(manipulator: fallbackChild).contains(where: {
+        $0.contains(" bundle com.raycast.macos")
+      }))
+    }
+  }
+
+  func testSharedParentWithoutAppOverrideKeepsSharedState() throws {
+    let sharedGroup = Group(
+      key: "w",
+      label: "Window",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "a", label: "Shared", value: "Ca"))
+      ]
+    )
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.group(sharedGroup)]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.group(sharedGroup)]
+    )
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = result.managedRules.first(where: {
+        ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast"
+      })
+      let appManipulators = appRule.map { flattenManipulators(from: [$0]) } ?? []
+      let appContextRule = try XCTUnwrap(
+        result.managedRules.first(where: {
+          ($0["description"] as? String) == "LeaderKeyManaged/FallbackAppContext/raycast"
+        })
+      )
+      let appContextManipulators = flattenManipulators(from: [appContextRule])
+
+      XCTAssertFalse(appManipulators.contains(where: { fromKeyCode(in: $0) == "w" }))
+      XCTAssertTrue(appContextManipulators.contains(where: {
+        fromKeyCode(in: $0) == "w" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+    }
+  }
+
+  func testNestedSharedParentsPropagatePromotion() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .group(
+                Group(
+                  key: "q",
+                  label: "Quick",
+                  iconPath: nil,
+                  stickyMode: nil,
+                  actions: [
+                    .action(makeTextAction(key: "a", label: "Fallback", value: "fallback"))
+                  ]
+                ))
+            ]
+          ))
+      ]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .group(
+                Group(
+                  key: "q",
+                  label: "Quick",
+                  iconPath: nil,
+                  stickyMode: nil,
+                  actions: [
+                    .action(makeTextAction(key: "x", label: "App", value: "app"))
+                  ]
+                ))
+            ]
+          ))
+      ]
+    )
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+      )
+      let appManipulators = flattenManipulators(from: [appRule])
+      let promotedW = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "w" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+      let wState = try XCTUnwrap(setVariableValue(in: promotedW, name: "leader_state"))
+      let promotedQ = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "q"
+          && hasVariableCondition($0, name: "leader_state", value: wState, type: "variable_if")
+      }))
+      let qState = try XCTUnwrap(setVariableValue(in: promotedQ, name: "leader_state"))
+      let appChild = try XCTUnwrap(appManipulators.first(where: {
+        fromKeyCode(in: $0) == "x"
+          && hasVariableCondition($0, name: "leader_state", value: qState, type: "variable_if")
+      }))
+
+      XCTAssertFalse(hasConditionType(promotedQ, type: "frontmost_application_if"))
+      XCTAssertFalse(hasConditionType(appChild, type: "frontmost_application_if"))
+      XCTAssertTrue(sendUserCommandPayloads(manipulator: promotedQ).contains(where: {
+        $0.contains(" bundle com.raycast.macos")
+      }))
+      XCTAssertTrue(sendUserCommandPayloads(manipulator: appChild).contains(where: {
+        $0.contains(" bundle com.raycast.macos")
+      }))
+    }
+  }
+
+  func testPromotedLevel0TransitionNotDuplicatedInFallbackAppContext() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .action(makeShortcutAction(key: "a", label: "Fallback", value: "Ca"))
+            ]
+          ))
+      ]
+    )
+    let globalConfig = UserConfig()
+    let appConfig = UserConfig()
+    appConfig.root = Group(
+      key: nil,
+      label: "Raycast",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            iconPath: nil,
+            stickyMode: nil,
+            actions: [
+              .action(makeShortcutAction(key: "x", label: "App", value: "Cx"))
+            ]
+          ))
+      ]
+    )
+
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot) {
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [(bundleId: "com.raycast.macos", config: appConfig, customName: "Raycast")]
+      )
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: { ($0["description"] as? String) == "LeaderKeyManaged/AppMode/raycast" })
+      )
+      let fallbackContextRule = result.managedRules.first(where: {
+        ($0["description"] as? String) == "LeaderKeyManaged/FallbackAppContext/raycast"
+      })
+
+      XCTAssertTrue(flattenManipulators(from: [appRule]).contains(where: {
+        fromKeyCode(in: $0) == "w" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+      XCTAssertFalse((fallbackContextRule.map { flattenManipulators(from: [$0]) } ?? []).contains(where: {
+        fromKeyCode(in: $0) == "w"
+      }))
+    }
+  }
+
   func testSharedRootEntryStateIdPayloadIncludesAppContextBeforeGenericFallback() throws {
     let fallbackRoot = Group(
       key: nil,
@@ -1356,7 +1752,7 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     XCTAssertFalse(edn.contains("leaderkey_appspecific"))
     XCTAssertFalse(edn.contains("leaderkey_mode"))
     XCTAssertEqual(edn.components(separatedBy: "Leader Key - Catch All").count - 1, 1)
-    XCTAssertEqual(edn.components(separatedBy: ":any \"key_code\"").count - 1, 1)
+    XCTAssertLessThanOrEqual(edn.components(separatedBy: "Leader Key - Normal Mode Catch All").count - 1, 1)
     XCTAssertFalse(stateMappings.isEmpty)
   }
 
@@ -1515,6 +1911,19 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     Action(
       key: key,
       type: .shortcut,
+      label: label,
+      value: value,
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+  }
+
+  private func makeTextAction(key: String, label: String, value: String) -> Action {
+    Action(
+      key: key,
+      type: .text,
       label: label,
       value: value,
       iconPath: nil,
@@ -1809,6 +2218,25 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  private func setVariableValue(in manipulator: [String: Any], name: String) -> Int? {
+    let events = (manipulator["to"] as? [Any]) ?? []
+    for event in events {
+      guard
+        let eventObject = event as? [String: Any],
+        let variableObject = eventObject["set_variable"] as? [String: Any],
+        let variableName = variableObject["name"] as? String,
+        let variableValue = variableObject["value"] as? NSNumber,
+        variableName == name
+      else {
+        continue
+      }
+
+      return variableValue.intValue
+    }
+
+    return nil
+  }
+
   private func hasSetVariableNamed(_ manipulator: [String: Any], name: String) -> Bool {
     let events = (manipulator["to"] as? [Any]) ?? []
     return events.contains { event in
@@ -1834,6 +2262,16 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
   private func hasConditionType(_ manipulator: [String: Any], type: String) -> Bool {
     let conditions = (manipulator["conditions"] as? [[String: Any]]) ?? []
     return conditions.contains(where: { ($0["type"] as? String) == type })
+  }
+
+  private func frontmostBundleIdentifiers(in manipulator: [String: Any]) -> [String] {
+    let conditions = (manipulator["conditions"] as? [[String: Any]]) ?? []
+    return conditions.compactMap { condition in
+      guard (condition["type"] as? String) == "frontmost_application_if" else {
+        return nil
+      }
+      return condition["bundle_identifiers"] as? [String]
+    }.first ?? []
   }
 
   private func hasKeyCodeEvent(_ manipulator: [String: Any], keyCode: String) -> Bool {
