@@ -20,7 +20,8 @@ export type ActionType =
 export type NormalModeAfter = "disabled" | "input" | "normal";
 export type VoiceSafety = "safe" | "confirm" | "block";
 
-export type ScopeType = "app" | "fallback" | "global" | "normalApp" | "normalFallback";
+export type ScopeType = "app" | "fallback" | "global" | "normalApp" | "normalFallback" | "normalTag" | "tag";
+export type TagAssignmentScope = "app" | "normalApp";
 
 export interface MacroStep {
   action: ActionNode;
@@ -72,6 +73,19 @@ export interface ConfigMetadata {
   lastModified?: number;
 }
 
+export interface TagDefinition {
+  createdAt?: number;
+  id: string;
+  lastModified?: number;
+  name: string;
+}
+
+export interface TagsRegistry {
+  assignments: Record<TagAssignmentScope, Record<string, string[]>>;
+  tags: TagDefinition[];
+  version: 1;
+}
+
 export interface DiscoveredConfigFile {
   defaultDisplayName: string;
   displayName: string;
@@ -83,6 +97,8 @@ export interface DiscoveredConfigFile {
   customName?: string;
   fileMtimeMs: number;
   metaMtimeMs?: number;
+  tagId?: string;
+  virtual?: boolean;
 }
 
 export interface ConfigSummary {
@@ -90,6 +106,31 @@ export interface ConfigSummary {
   displayName: string;
   filePath: string;
   scope: ScopeType;
+  tagId?: string;
+  virtual?: boolean;
+}
+
+export interface SourceSummary {
+  bundleId?: string;
+  configDisplayName: string;
+  configPath: string;
+  keySequence?: string;
+  priority: number;
+  scope: ScopeType;
+  sourceStatus: "fallback" | "local" | "tag";
+  tagId?: string;
+}
+
+export interface ConfigDiagnostic {
+  affectedBundleIds?: string[];
+  hiddenSource?: SourceSummary;
+  id: string;
+  keySequence?: string;
+  kind: "missingTagConfig" | "missingTagDefinition" | "shadowedSource";
+  message: string;
+  severity: "warning";
+  tagId?: string;
+  winnerSource?: SourceSummary;
 }
 
 export interface FlatIndexRecord {
@@ -119,7 +160,10 @@ export interface FlatIndexRecord {
   sourceScope: ScopeType;
   sourceNodePath: number[];
   inherited: boolean;
-  sourceStatus: "fallback" | "local";
+  sourceStatus: "fallback" | "local" | "tag";
+  sourcePriority: number;
+  sourceTagId?: string;
+  hiddenSources?: SourceSummary[];
   stickyMode?: boolean;
   normalModeAfter?: NormalModeAfter;
   activates?: boolean;
@@ -137,9 +181,11 @@ export interface FlatIndexRecord {
 export interface CachePayload {
   configDirectory: string;
   configs: ConfigSummary[];
+  diagnostics: ConfigDiagnostic[];
   fingerprint: string;
   generatedAt: string;
   records: FlatIndexRecord[];
+  tagsRegistry: TagsRegistry;
   version: number;
 }
 

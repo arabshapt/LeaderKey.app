@@ -11,7 +11,7 @@ extension UserConfig {
       switch configFileKind(forPath: filePath) {
       case .app(let bundleId), .normalApp(let bundleId):
         return bundleId
-      case .global, .appFallback, .normalFallback, .unknown:
+      case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
         break
       }
     }
@@ -49,14 +49,25 @@ extension UserConfig {
     // then load from disk with error handling
     currentlyEditingGroup = emptyRoot
 
-    // Load and decode. Suppress validation alerts for non-default configs during this specific load.
-    let isDefault = false  // We already handled the default case
-    if let loadedGroup = decodeConfig(
-      from: filePath, suppressAlerts: true, isDefaultConfig: isDefault)
-    {
+    // Load and decode. Virtual tag-assigned app configs may not have a local file yet.
+    let fileKind = configFileKind(forPath: filePath)
+    let loadedGroup: Group?
+    if !fileManager.fileExists(atPath: filePath) {
+      switch fileKind {
+      case .app, .normalApp, .tag, .normalTag:
+        loadedGroup = Group(actions: [])
+      case .global, .appFallback, .normalFallback, .unknown:
+        loadedGroup = nil
+      }
+    } else {
+      loadedGroup = decodeConfig(
+        from: filePath, suppressAlerts: true, isDefaultConfig: false)
+    }
+
+    if let loadedGroup {
       // Apply fallback merging for app-specific configs, just like getConfig(for:) does
       let mergedGroup: Group
-      switch configFileKind(forPath: filePath) {
+      switch fileKind {
       case .app(let bundleId):
         let rawMergedGroup = mergeConfigWithFallback(
           appSpecificConfig: loadedGroup, bundleId: bundleId)
@@ -73,7 +84,7 @@ extension UserConfig {
           "[UserConfig loadConfigForEditing] Applied fallback merging and sorting for normal app config '\(key)'"
         )
 
-      case .global, .appFallback, .normalFallback, .unknown:
+      case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
         mergedGroup = loadedGroup
       }
 

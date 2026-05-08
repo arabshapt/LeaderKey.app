@@ -48,6 +48,7 @@ test("buildRecordDetailPresentation shows shortcut preview, raw value, and canon
   assert.match(presentation.markdown, /Sends Cmd\+T to the frontmost app\./);
   assert.match(presentation.markdown, /Raw: `Ct`/);
   assert.equal(presentation.metadata[0]?.title, "Type");
+  assert.equal(presentation.metadata.find((row) => row.title === "Source Status")?.text, "local");
 });
 
 test("buildRecordDetailPresentation renders descriptions when present", () => {
@@ -163,4 +164,43 @@ test("buildRecordDetailPresentation shows fallback menu paths for menu actions",
     presentation.metadata.find((row) => row.title === "Fallback Menu Paths")?.text,
     "View > Hide Sidebar | Window > Toggle Sidebar",
   );
+});
+
+test("buildRecordDetailPresentation renders tag source chains", () => {
+  const presentation = buildRecordDetailPresentation(makeRecord({
+    hiddenSources: [
+      {
+        configDisplayName: "Tag: Web",
+        configPath: "/tmp/tag.web.json",
+        keySequence: "o -> a",
+        priority: 2,
+        scope: "tag",
+        sourceStatus: "tag",
+        tagId: "web",
+      },
+      {
+        configDisplayName: "Fallback App Config",
+        configPath: "/tmp/app-fallback-config.json",
+        keySequence: "o -> a",
+        priority: 3,
+        scope: "fallback",
+        sourceStatus: "fallback",
+      },
+    ],
+    inherited: true,
+    sourceConfigDisplayName: "Tag: Browser",
+    sourceConfigPath: "/tmp/tag.browser.json",
+    sourceScope: "tag",
+    sourceStatus: "tag",
+    sourceTagId: "browser",
+  }));
+
+  assert.equal(presentation.metadata.find((row) => row.title === "Source Status")?.text, "tag");
+  assert.equal(
+    presentation.metadata.find((row) => row.title === "Overrides")?.text,
+    "Tag: Web at o -> a | Fallback App Config at o -> a",
+  );
+  assert.match(presentation.markdown, /\*\*Source Chain\*\*/);
+  assert.match(presentation.markdown, /Winning tag: Tag: Browser at o -> a/);
+  assert.match(presentation.markdown, /Shadowed fallback: Fallback App Config at o -> a/);
 });

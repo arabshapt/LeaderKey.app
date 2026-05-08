@@ -90,37 +90,45 @@ function subtitleTooltip(record: FlatIndexRecord): string {
     parts.push(record.valuePreview);
   }
 
-  if (record.inherited) {
-    parts.push(`Inherited from ${record.sourceConfigDisplayName}`);
-  }
+  parts.push(`Source: ${record.sourceConfigDisplayName}`);
 
   return parts.join("\n");
 }
 
+function sourceTooltip(record: FlatIndexRecord): string {
+  const inheritedText = record.inherited ? "Inherited" : "Local";
+  return `${inheritedText} source: ${record.sourceConfigDisplayName}`;
+}
+
+function hiddenSourcesTooltip(record: FlatIndexRecord): string {
+  return (record.hiddenSources ?? [])
+    .map((source) => `${source.configDisplayName}${source.keySequence ? ` at ${source.keySequence}` : ""}`)
+    .join("\n");
+}
+
 function recordStatusAccessories(record: FlatIndexRecord, options?: RowPresentationOptions): List.Item.Accessory[] | undefined {
-  const statusParts: string[] = [];
-  const tooltipParts: string[] = [];
+  const accessories: List.Item.Accessory[] = [];
 
   if (options?.relativeKeyPath && options.relativeKeyPath.length > 1) {
-    statusParts.push(`↳${options.relativeKeyPath.length}`);
-    tooltipParts.push(`${options.relativeKeyPath.length} levels below the current group`);
+    accessories.push({
+      text: `↳${options.relativeKeyPath.length}`,
+      tooltip: `${options.relativeKeyPath.length} levels below the current group`,
+    });
   }
 
-  if (record.inherited) {
-    statusParts.push("fb");
-    tooltipParts.push(`Inherited from ${record.sourceConfigDisplayName}`);
+  accessories.push({
+    tag: { value: record.sourceStatus },
+    tooltip: sourceTooltip(record),
+  });
+
+  if (record.hiddenSources?.length) {
+    accessories.push({
+      text: `overrides ${record.hiddenSources.length}`,
+      tooltip: hiddenSourcesTooltip(record),
+    });
   }
 
-  if (statusParts.length === 0) {
-    return undefined;
-  }
-
-  return [
-    {
-      text: statusParts.join(" "),
-      tooltip: tooltipParts.join("\n"),
-    },
-  ];
+  return accessories;
 }
 
 export function recordIcon(record: FlatIndexRecord): Image.ImageLike {

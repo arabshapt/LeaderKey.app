@@ -25,6 +25,11 @@ extension UserConfig {
       alertHandler.showAlert(
         style: .warning, message: "The Normal Fallback configuration cannot be deleted.")
       return false
+    case .tag, .normalTag:
+      alertHandler.showAlert(
+        style: .warning,
+        message: "Tags must be deleted from the tag manager so app assignments can be cleaned up safely.")
+      return false
     case .app, .normalApp, .unknown:
       break
     }

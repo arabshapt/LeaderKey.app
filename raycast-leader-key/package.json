@@ -80,6 +80,12 @@
       "mode": "view"
     },
     {
+      "name": "manage-tags",
+      "title": "Manage Tags",
+      "description": "Create tags, assign apps, reorder tag priority, and open tag configs.",
+      "mode": "view"
+    },
+    {
       "name": "add-edit-by-path",
       "title": "Add/Edit by Path",
       "description": "Type a Leader Key path like ab.c to edit or create the target fast.",

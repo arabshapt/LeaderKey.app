@@ -786,7 +786,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
         let rawMergedGroup = config.mergeNormalConfigWithFallback(
           appSpecificConfig: loadedGroup, bundleId: bundleId)
         rootGroup = config.sortGroupRecursively(group: rawMergedGroup)
-      case .global, .appFallback, .normalFallback, .unknown:
+      case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
         rootGroup = loadedGroup
       }
     } else {

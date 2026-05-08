@@ -131,6 +131,17 @@ extension UserConfig {
         }
       } else {
         // File doesn't exist, cache this fact by storing nil
+        let tagIds = assignedTagIds(for: bundleId, normalMode: false)
+        if !tagIds.isEmpty {
+          let rawMergedConfig = mergeConfigWithFallback(
+            appSpecificConfig: Group(actions: []),
+            bundleId: bundleId
+          )
+          let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
+          appConfigs[bundleId] = mergedConfig
+          return mergedConfig
+        }
+
         appConfigs[bundleId] = nil
         // Fall through to try app-fallback-config.json
       }
@@ -168,6 +179,17 @@ extension UserConfig {
         appConfigs[cacheKey] = nil
       }
     } else {
+      let tagIds = assignedTagIds(for: bundleId, normalMode: true)
+      if !tagIds.isEmpty {
+        let rawMergedConfig = mergeNormalConfigWithFallback(
+          appSpecificConfig: Group(actions: []),
+          bundleId: bundleId
+        )
+        let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
+        appConfigs[cacheKey] = mergedConfig
+        return mergedConfig
+      }
+
       appConfigs[cacheKey] = nil
     }
 
@@ -436,6 +458,51 @@ extension UserConfig {
     return mergedGroup
   }
 
+  private func inheritedTagSources(bundleId: String, normalMode: Bool) -> [(group: Group, source: String)] {
+    let registry = loadTagsRegistry()
+    return assignedTagIds(for: bundleId, normalMode: normalMode, registry: registry).compactMap { tagId in
+      let tagPath = tagConfigPath(for: tagId, normalMode: normalMode)
+      guard fileManager.fileExists(atPath: tagPath),
+        let tagRoot = decodeConfig(from: tagPath, suppressAlerts: true, isDefaultConfig: false)
+      else {
+        debugLog(
+          "[UserConfig] Missing \(normalMode ? "normal " : "")tag config for tag '\(tagId)' assigned to '\(bundleId)'"
+        )
+        return nil
+      }
+
+      let displayPrefix = normalMode ? normalTagConfigDisplayPrefix : tagConfigDisplayPrefix
+      return (tagRoot, "\(displayPrefix)\(tagDisplayName(for: tagId, registry: registry))")
+    }
+  }
+
+  private func mergeWithInheritedSources(
+    appSpecificConfig: Group,
+    bundleId: String,
+    normalMode: Bool,
+    fallbackConfig: Group?,
+    fallbackSource: String?
+  ) -> Group {
+    var mergedConfig = appSpecificConfig
+    for tagSource in inheritedTagSources(bundleId: bundleId, normalMode: normalMode) {
+      mergedConfig = mergeWithFallback(
+        appSpecificGroup: mergedConfig,
+        fallbackGroup: tagSource.group,
+        fallbackSource: tagSource.source
+      )
+    }
+
+    guard let fallbackConfig, let fallbackSource else {
+      return mergedConfig
+    }
+
+    return mergeWithFallback(
+      appSpecificGroup: mergedConfig,
+      fallbackGroup: fallbackConfig,
+      fallbackSource: fallbackSource
+    )
+  }
+
   // Merges app-specific config with Fallback App Config if available
   internal func mergeConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
     // Use getFallbackConfig() which handles caching and file existence checks
@@ -445,17 +512,25 @@ extension UserConfig {
     let defaultAppKey = "app.default"
     guard appConfigs[defaultAppKey] != nil else {
       debugLog(
-        "[UserConfig] mergeConfigWithFallback: No fallback app config available, returning app-specific config as-is"
+        "[UserConfig] mergeConfigWithFallback: No fallback app config available, merging only assigned tags"
       )
-      return appSpecificConfig
+      return mergeWithInheritedSources(
+        appSpecificConfig: appSpecificConfig,
+        bundleId: bundleId,
+        normalMode: false,
+        fallbackConfig: nil,
+        fallbackSource: nil
+      )
     }
 
     debugLog(
       "[UserConfig] mergeConfigWithFallback: Merging app-specific config for '\(bundleId)' with fallback app config"
     )
-    return mergeWithFallback(
-      appSpecificGroup: appSpecificConfig,
-      fallbackGroup: fallbackConfig,
+    return mergeWithInheritedSources(
+      appSpecificConfig: appSpecificConfig,
+      bundleId: bundleId,
+      normalMode: false,
+      fallbackConfig: fallbackConfig,
       fallbackSource: defaultAppConfigDisplayName
     )
   }
@@ -465,17 +540,25 @@ extension UserConfig {
     let normalFallbackKey = "normal.default"
     guard appConfigs[normalFallbackKey] != nil else {
       debugLog(
-        "[UserConfig] mergeNormalConfigWithFallback: No normal fallback config available, returning app-specific config as-is"
+        "[UserConfig] mergeNormalConfigWithFallback: No normal fallback config available, merging only assigned tags"
       )
-      return appSpecificConfig
+      return mergeWithInheritedSources(
+        appSpecificConfig: appSpecificConfig,
+        bundleId: bundleId,
+        normalMode: true,
+        fallbackConfig: nil,
+        fallbackSource: nil
+      )
     }
 
     debugLog(
       "[UserConfig] mergeNormalConfigWithFallback: Merging normal app config for '\(bundleId)' with normal fallback config"
     )
-    return mergeWithFallback(
-      appSpecificGroup: appSpecificConfig,
-      fallbackGroup: fallbackConfig,
+    return mergeWithInheritedSources(
+      appSpecificConfig: appSpecificConfig,
+      bundleId: bundleId,
+      normalMode: true,
+      fallbackConfig: fallbackConfig,
       fallbackSource: normalFallbackConfigDisplayName
     )
   }

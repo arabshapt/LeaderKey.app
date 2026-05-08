@@ -6,6 +6,11 @@ export {
   NORMAL_APP_CONFIG_PREFIX,
   NORMAL_FALLBACK_CONFIG_DISPLAY_NAME,
   NORMAL_FALLBACK_CONFIG_FILE_NAME,
+  NORMAL_TAG_CONFIG_DISPLAY_PREFIX,
+  NORMAL_TAG_CONFIG_PREFIX,
+  TAGS_REGISTRY_FILE_NAME,
+  TAG_CONFIG_DISPLAY_PREFIX,
+  TAG_CONFIG_PREFIX,
   defaultConfigDirectory,
 } from "./constants.js";
 export { EMPTY_APP_CONFIG_TEMPLATE, createAppConfig } from "./app-configs.js";
@@ -13,6 +18,26 @@ export { findInstalledApps } from "./apps.js";
 export { configFingerprint, discoverLiveConfigs, loadGroupFromFile, loadMetadata, saveMetadata } from "./discovery.js";
 export { buildEditorCommand, openInEditor } from "./editors.js";
 export { buildCachePayload, recordsForConfig } from "./indexing.js";
+export {
+  assignedTagIds,
+  createTag,
+  deleteTag,
+  emptyTagsRegistry,
+  ensureTagConfigFile,
+  generateTagId,
+  loadTagsRegistry,
+  moveAssignedTag,
+  normalizeTagsRegistry,
+  renameTag,
+  tagConfigFileName,
+  tagConfigPath,
+  tagDefinitionById,
+  tagDisplayName,
+  tagReferences,
+  tagsRegistryPath,
+  updateTagAssignments,
+  writeTagsRegistry,
+} from "./tags.js";
 export { encodeIntellijActionValue, encodeMenuActionValue, parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
 export { listLeaderKeyMenuItems, openLeaderKeyCommandScout, triggerLeaderKeyConfigReload, triggerLeaderKeyGokuProfileSync } from "./leaderkey.js";
 export {
@@ -55,10 +80,12 @@ export {
 export type { InstalledApp } from "./apps.js";
 export type { AppConfigTemplateSource, CreateAppConfigOptions } from "./app-configs.js";
 export type { ParsedIntellijActionValue, ParsedMenuActionValue } from "./action-values.js";
+export type { CreateTagOptions, DeleteTagOptions, TagReference } from "./tags.js";
 export type {
   ActionNode,
   ActionType,
   CachePayload,
+  ConfigDiagnostic,
   ConfigItem,
   ConfigMetadata,
   ConfigSummary,
@@ -70,7 +97,11 @@ export type {
   LayerNode,
   MacroStep,
   NormalModeAfter,
+  SourceSummary,
   ScopeType,
+  TagAssignmentScope,
+  TagDefinition,
+  TagsRegistry,
   VoiceSafety,
 } from "./types.js";
 export type { PathAnalysis, PathResolutionState } from "./path-navigation.js";

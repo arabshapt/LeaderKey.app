@@ -21,6 +21,7 @@ struct GeneralPane: View {
   @State private var keyToLoad: String?
   @State private var listSelection: String?
   @State private var showingAddConfigSheet = false
+  @State private var showingManageTagsSheet = false
   @State private var keyToDelete: String?
   @State private var highlightedPath: [Int]?
   @State private var showingCommandScout = false
@@ -168,13 +169,21 @@ struct GeneralPane: View {
               }
             }
 
-            // --- Add Config Button ---
-            Button {
-              showingAddConfigSheet = true
-            } label: {
-              Label("Add Config", systemImage: "plus")
+            HStack(spacing: 8) {
+              Button {
+                showingAddConfigSheet = true
+              } label: {
+                Label("Add Config", systemImage: "plus")
+              }
+              .buttonStyle(.borderless)
+
+              Button {
+                showingManageTagsSheet = true
+              } label: {
+                Label("Manage Tags", systemImage: "tag")
+              }
+              .buttonStyle(.borderless)
             }
-            .buttonStyle(.borderless)
             .padding(.top, 4)
 
             // Spacer to push button to top-left alignment
@@ -202,6 +211,16 @@ struct GeneralPane: View {
               }
             )
             .padding([.bottom], 8)
+
+            if let regularBundleId = config.extractRegularAppBundleId(from: config.selectedConfigKeyForEditing) {
+              TagAssignmentsEditor(bundleId: regularBundleId, normalMode: false)
+                .environmentObject(config)
+                .padding(.bottom, 8)
+            } else if let normalBundleId = config.extractNormalAppBundleId(from: config.selectedConfigKeyForEditing) {
+              TagAssignmentsEditor(bundleId: normalBundleId, normalMode: true)
+                .environmentObject(config)
+                .padding(.bottom, 8)
+            }
 
             // The existing config editor section
             VStack(alignment: .leading, spacing: 8) {
@@ -458,6 +477,10 @@ struct GeneralPane: View {
       AddConfigSheet(onCreateAndScout: { configKey in
         openCommandScout(forConfigKey: configKey)
       })
+      .environmentObject(config)
+    }
+    .sheet(isPresented: $showingManageTagsSheet) {
+      ManageTagsSheet()
         .environmentObject(config)
     }
     .sheet(isPresented: $showingCommandScout, onDismiss: {
@@ -575,6 +598,276 @@ struct GeneralPane: View {
   private func refreshNativeSession() {
     guard useNativeOutlineConfigEditor else { return }
     nativeEditorSession.bind(to: config)
+  }
+}
+
+// MARK: - Tags
+private struct TagAssignmentsEditor: View {
+  @EnvironmentObject private var config: UserConfig
+  let bundleId: String
+  let normalMode: Bool
+
+  private var registry: TagsRegistry {
+    config.loadTagsRegistry()
+  }
+
+  private var assignedTagIds: [String] {
+    config.assignedTagIds(for: bundleId, normalMode: normalMode, registry: registry)
+  }
+
+  private var availableTags: [TagDefinition] {
+    registry.tags.filter { !assignedTagIds.contains($0.id) }
+  }
+
+  private var warnings: [TagShadowWarning] {
+    config.tagShadowWarnings(for: bundleId, normalMode: normalMode)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        Label(normalMode ? "Normal Tags" : "Tags", systemImage: "tag")
+          .font(.headline)
+        Text("Top tag wins")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Spacer()
+        Menu {
+          if availableTags.isEmpty {
+            Text("No tags available")
+          } else {
+            ForEach(availableTags, id: \.id) { tag in
+              Button(tag.name) {
+                config.updateTagAssignments(
+                  bundleId: bundleId,
+                  normalMode: normalMode,
+                  tagIds: assignedTagIds + [tag.id]
+                )
+              }
+            }
+          }
+        } label: {
+          Label("Add Tag", systemImage: "plus")
+        }
+      }
+
+      if assignedTagIds.isEmpty {
+        Text("No tags assigned to this configuration.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(Array(assignedTagIds.enumerated()), id: \.element) { index, tagId in
+          HStack(spacing: 8) {
+            Text(config.tagDisplayName(for: tagId, registry: registry))
+              .lineLimit(1)
+            Spacer()
+            Button {
+              config.moveAssignedTag(bundleId: bundleId, normalMode: normalMode, tagId: tagId, direction: -1)
+            } label: {
+              Image(systemName: "chevron.up")
+            }
+            .disabled(index == 0)
+            .help("Move tag earlier. Earlier tags have higher priority.")
+
+            Button {
+              config.moveAssignedTag(bundleId: bundleId, normalMode: normalMode, tagId: tagId, direction: 1)
+            } label: {
+              Image(systemName: "chevron.down")
+            }
+            .disabled(index == assignedTagIds.count - 1)
+            .help("Move tag later.")
+
+            Button(role: .destructive) {
+              config.updateTagAssignments(
+                bundleId: bundleId,
+                normalMode: normalMode,
+                tagIds: assignedTagIds.filter { $0 != tagId }
+              )
+            } label: {
+              Image(systemName: "minus.circle")
+            }
+            .help("Remove tag assignment")
+          }
+        }
+      }
+
+      if !warnings.isEmpty {
+        VStack(alignment: .leading, spacing: 4) {
+          ForEach(warnings.prefix(5)) { warning in
+            Label(warning.message, systemImage: "exclamationmark.triangle")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          if warnings.count > 5 {
+            Text("\(warnings.count - 5) more override warning\(warnings.count - 5 == 1 ? "" : "s")")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+    }
+    .padding(10)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+  }
+}
+
+private struct ManageTagsSheet: View {
+  @EnvironmentObject private var config: UserConfig
+  @Environment(\.dismiss) private var dismiss
+  @State private var registry = TagsRegistry()
+  @State private var selectedTagId: String?
+  @State private var newTagName = ""
+  @State private var renameTagName = ""
+
+  private var selectedTag: TagDefinition? {
+    registry.tags.first(where: { $0.id == selectedTagId })
+  }
+
+  var body: some View {
+    HStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Tags")
+          .font(.title2)
+        List(selection: $selectedTagId) {
+          ForEach(registry.tags, id: \.id) { tag in
+            HStack {
+              Image(systemName: "tag")
+                .foregroundStyle(.secondary)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(tag.name)
+                  .lineLimit(1)
+                Text(referenceSummary(for: tag.id))
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+            .tag(tag.id as String?)
+          }
+        }
+        .frame(minWidth: 220)
+
+        HStack {
+          TextField("New tag name", text: $newTagName)
+          Button {
+            if let tag = config.createTag(name: newTagName) {
+              newTagName = ""
+              refresh(selecting: tag.id)
+            }
+          } label: {
+            Label("Create", systemImage: "plus")
+          }
+          .disabled(newTagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+      }
+      .padding()
+
+      Divider()
+
+      VStack(alignment: .leading, spacing: 12) {
+        if let tag = selectedTag {
+          Text(tag.name)
+            .font(.title2)
+          Text("ID: \(tag.id)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          TextField("Tag name", text: $renameTagName)
+          HStack {
+            Button {
+              _ = config.renameTag(id: tag.id, name: renameTagName)
+              refresh(selecting: tag.id)
+            } label: {
+              Label("Rename", systemImage: "pencil")
+            }
+            .disabled(renameTagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Button {
+              openTagConfig(tagId: tag.id, normalMode: false)
+            } label: {
+              Label("Edit Tag Config", systemImage: "square.and.pencil")
+            }
+
+            Button {
+              openTagConfig(tagId: tag.id, normalMode: true)
+            } label: {
+              Label("Edit Normal Tag Config", systemImage: "square.and.pencil")
+            }
+          }
+
+          let references = config.tagReferences(for: tag.id, registry: registry)
+          if references.isEmpty {
+            Text("No app assignments.")
+              .foregroundStyle(.secondary)
+          } else {
+            Text("Assigned to")
+              .font(.headline)
+            ForEach(references) { reference in
+              Text("\(reference.normalMode ? "Normal" : "App"): \(reference.bundleId)")
+                .font(.caption)
+            }
+          }
+
+          Spacer()
+
+          Button(role: .destructive) {
+            let removeAssignments = !references.isEmpty
+            if config.deleteTag(id: tag.id, removeAssignments: removeAssignments) {
+              refresh(selecting: nil)
+            }
+          } label: {
+            Label(references.isEmpty ? "Delete Tag" : "Delete Tag and Remove Assignments", systemImage: "trash")
+          }
+        } else {
+          Text("Select a tag to rename, edit, or delete it.")
+            .foregroundStyle(.secondary)
+          Spacer()
+        }
+
+        HStack {
+          Spacer()
+          Button("Done") { dismiss() }
+            .keyboardShortcut(.defaultAction)
+        }
+      }
+      .padding()
+      .frame(minWidth: 420)
+    }
+    .frame(width: 760, height: 460)
+    .onAppear {
+      refresh(selecting: selectedTagId ?? registry.tags.first?.id)
+    }
+    .onChange(of: selectedTagId) { tagId in
+      renameTagName = registry.tags.first(where: { $0.id == tagId })?.name ?? ""
+    }
+  }
+
+  private func refresh(selecting tagId: String?) {
+    registry = config.loadTagsRegistry()
+    if let tagId, registry.tags.contains(where: { $0.id == tagId }) {
+      selectedTagId = tagId
+    } else {
+      selectedTagId = registry.tags.first?.id
+    }
+    renameTagName = selectedTag?.name ?? ""
+  }
+
+  private func referenceSummary(for tagId: String) -> String {
+    let references = config.tagReferences(for: tagId, registry: registry)
+    guard !references.isEmpty else { return "No assignments" }
+    let appCount = references.filter { !$0.normalMode }.count
+    let normalCount = references.filter(\.normalMode).count
+    return "\(appCount) app, \(normalCount) normal"
+  }
+
+  private func openTagConfig(tagId: String, normalMode: Bool) {
+    guard let path = config.ensureTagConfigFile(tagId: tagId, normalMode: normalMode) else { return }
+    config.reloadConfig()
+    let fallbackKey =
+      "\(normalMode ? normalTagConfigDisplayPrefix : tagConfigDisplayPrefix)\(config.tagDisplayName(for: tagId))"
+    let displayKey = config.discoveredConfigFiles.first(where: { $0.value == path })?.key ?? fallbackKey
+    config.selectedConfigKeyForEditing = displayKey
+    config.loadConfigForEditing(key: displayKey)
+    dismiss()
   }
 }
 

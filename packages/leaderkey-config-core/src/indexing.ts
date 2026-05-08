@@ -9,16 +9,21 @@ import {
   resolveActionAiDescription,
   resolveActionDescription,
 } from "./labels.js";
+import { assignedTagIds, loadTagsRegistry, tagDefinitionById } from "./tags.js";
 import { stableHash } from "./utils.js";
 import type {
   ActionNode,
   CachePayload,
+  ConfigDiagnostic,
   ConfigItem,
   DiscoveredConfigFile,
   FlatIndexRecord,
   GroupNode,
   LayerNode,
+  SourceSummary,
   ScopeType,
+  TagAssignmentScope,
+  TagsRegistry,
 } from "./types.js";
 
 interface InternalSource {
@@ -26,11 +31,15 @@ interface InternalSource {
   configDisplayName: string;
   configPath: string;
   nodePath: number[];
+  priority: number;
   scope: ScopeType;
+  sourceStatus: "fallback" | "local" | "tag";
+  tagId?: string;
 }
 
 interface InternalNodeBase {
   effectiveKeyPath: string[];
+  hiddenSources: SourceSummary[];
   inherited: boolean;
   source: InternalSource;
 }
@@ -77,11 +86,29 @@ function containersCanMerge(localItem: ConfigItem, fallbackItem: ConfigItem): bo
   return false;
 }
 
+function keyForItem(item: ConfigItem, index: number): string {
+  return item.key ?? `#${index}`;
+}
+
+function sourceSummary(source: InternalSource, keySequence?: string): SourceSummary {
+  return {
+    bundleId: source.bundleId,
+    configDisplayName: source.configDisplayName,
+    configPath: source.configPath,
+    keySequence,
+    priority: source.priority,
+    scope: source.scope,
+    sourceStatus: source.sourceStatus,
+    tagId: source.tagId,
+  };
+}
+
 function createInternalNode(
   item: ConfigItem,
   source: InternalSource,
   effectiveKeyPath: string[],
   inherited: boolean,
+  hiddenSources: SourceSummary[] = [],
 ): InternalNode {
   if (isContainerItem(item)) {
     return {
@@ -89,10 +116,11 @@ function createInternalNode(
         createInternalNode(
           child,
           { ...source, nodePath: [...source.nodePath, index] },
-          [...effectiveKeyPath, child.key ?? `#${index}`],
+          [...effectiveKeyPath, keyForItem(child, index)],
           inherited,
         )),
       effectiveKeyPath,
+      hiddenSources,
       inherited,
       item,
       kind: item.type,
@@ -102,6 +130,7 @@ function createInternalNode(
 
   return {
     effectiveKeyPath,
+    hiddenSources,
     inherited,
     item,
     kind: "action",
@@ -109,95 +138,125 @@ function createInternalNode(
   };
 }
 
-function mergeGroups(
-  effectiveDescriptor: DiscoveredConfigFile,
-  localGroup: GroupNode | LayerNode,
-  localSource: InternalSource,
-  fallbackGroup: GroupNode | LayerNode | undefined,
-  fallbackSource: InternalSource | undefined,
-  effectiveKeyPath: string[] = [],
-): InternalContainerNode {
-  const children: InternalNode[] = [];
-  const fallbackChildrenByKey = new Map<string, { index: number; item: ConfigItem }>();
+interface SourceContainer {
+  group: GroupNode | LayerNode;
+  inherited: boolean;
+  source: InternalSource;
+}
 
-  if (fallbackGroup) {
-    fallbackGroup.actions.forEach((item, index) => {
-      fallbackChildrenByKey.set(item.key ?? `#${index}`, { index, item });
-    });
-  }
+interface SourceItemEntry {
+  index: number;
+  inherited: boolean;
+  item: ConfigItem;
+  source: InternalSource;
+}
 
-  localGroup.actions.forEach((localItem, index) => {
-    const localKey = localItem.key ?? `#${index}`;
-    const localItemSource: InternalSource = {
-      ...localSource,
-      nodePath: [...localSource.nodePath, index],
-    };
-    const mergedKeyPath = [...effectiveKeyPath, localKey];
-    const fallbackMatch = fallbackChildrenByKey.get(localKey);
+function sourceForChild(entry: SourceItemEntry): InternalSource {
+  return {
+    ...entry.source,
+    nodePath: [...entry.source.nodePath, entry.index],
+  };
+}
 
-    if (fallbackMatch && fallbackSource && containersCanMerge(localItem, fallbackMatch.item)) {
-      children.push(
-        mergeGroups(
-          effectiveDescriptor,
-          localItem as GroupNode | LayerNode,
-          localItemSource,
-          fallbackMatch.item as GroupNode | LayerNode,
-          {
-            ...fallbackSource,
-            nodePath: [...fallbackSource.nodePath, fallbackMatch.index],
-          },
-          mergedKeyPath,
-        ),
-      );
-      fallbackChildrenByKey.delete(localKey);
-      return;
-    }
-
-    children.push(createInternalNode(localItem, localItemSource, mergedKeyPath, false));
-    fallbackChildrenByKey.delete(localKey);
-  });
-
-  if (fallbackGroup && fallbackSource) {
-    for (const [fallbackKey, fallbackEntry] of fallbackChildrenByKey.entries()) {
-      const fallbackItemSource: InternalSource = {
-        ...fallbackSource,
-        nodePath: [...fallbackSource.nodePath, fallbackEntry.index],
-      };
-
-      const fallbackNode = createInternalNode(
-        fallbackEntry.item,
-        fallbackItemSource,
-        [...effectiveKeyPath, fallbackKey],
-        true,
-      );
-      children.push(fallbackNode);
-    }
-  }
-
-  const mergedItem = localGroup.type === "layer"
+function makeMergedContainerShell(sourceGroup: GroupNode | LayerNode): GroupNode | LayerNode {
+  return sourceGroup.type === "layer"
     ? {
         actions: [],
-        iconPath: localGroup.iconPath,
-        key: localGroup.key,
-        label: localGroup.label,
-        tapAction: localGroup.tapAction,
-        type: "layer" as const,
+        iconPath: sourceGroup.iconPath,
+        key: sourceGroup.key,
+        label: sourceGroup.label,
+        tapAction: sourceGroup.tapAction,
+        type: "layer",
       }
     : {
         actions: [],
-        key: localGroup.key,
-        label: localGroup.label,
-        stickyMode: localGroup.stickyMode,
-        type: "group" as const,
+        iconPath: sourceGroup.iconPath,
+        key: sourceGroup.key,
+        label: sourceGroup.label,
+        stickyMode: sourceGroup.stickyMode,
+        type: "group",
       };
+}
+
+function mergeSourceContainers(
+  containers: SourceContainer[],
+  effectiveKeyPath: string[] = [],
+): InternalContainerNode {
+  const winnerContainer = containers[0]!;
+  const children: InternalNode[] = [];
+
+  const entriesByKey = new Map<string, SourceItemEntry[]>();
+  const orderedKeys: string[] = [];
+
+  for (const container of containers) {
+    container.group.actions.forEach((item, index) => {
+      const key = keyForItem(item, index);
+      if (!entriesByKey.has(key)) {
+        entriesByKey.set(key, []);
+        orderedKeys.push(key);
+      }
+      entriesByKey.get(key)!.push({
+        index,
+        inherited: container.inherited,
+        item,
+        source: container.source,
+      });
+    });
+  }
+
+  for (const key of orderedKeys) {
+    const entries = entriesByKey.get(key)!;
+    const winnerEntry = entries[0]!;
+    const winnerSource = sourceForChild(winnerEntry);
+    const mergedKeyPath = [...effectiveKeyPath, key];
+
+    if (isContainerItem(winnerEntry.item)) {
+      const mergeableEntries: SourceItemEntry[] = [winnerEntry];
+      const hiddenSources: SourceSummary[] = [];
+
+      for (const lowerEntry of entries.slice(1)) {
+        if (containersCanMerge(winnerEntry.item, lowerEntry.item)) {
+          mergeableEntries.push(lowerEntry);
+        } else {
+          hiddenSources.push(sourceSummary(sourceForChild(lowerEntry), mergedKeyPath.join(" -> ")));
+        }
+      }
+
+      const mergedContainer = mergeSourceContainers(
+        mergeableEntries.map((entry) => ({
+          group: entry.item as GroupNode | LayerNode,
+          inherited: entry.inherited,
+          source: sourceForChild(entry),
+        })),
+        mergedKeyPath,
+      );
+      if (hiddenSources.length > 0) {
+        mergedContainer.hiddenSources.push(...hiddenSources);
+      }
+      children.push(mergedContainer);
+      continue;
+    }
+
+    const hiddenSources = entries
+      .slice(1)
+      .map((entry) => sourceSummary(sourceForChild(entry), mergedKeyPath.join(" -> ")));
+    children.push(createInternalNode(
+      winnerEntry.item,
+      winnerSource,
+      mergedKeyPath,
+      winnerEntry.inherited,
+      hiddenSources,
+    ));
+  }
 
   return {
     children,
     effectiveKeyPath,
-    inherited: false,
-    item: mergedItem,
-    kind: localGroup.type,
-    source: localSource,
+    hiddenSources: [],
+    inherited: winnerContainer.inherited,
+    item: makeMergedContainerShell(winnerContainer.group),
+    kind: winnerContainer.group.type,
+    source: winnerContainer.source,
   } as InternalContainerNode;
 }
 
@@ -212,7 +271,7 @@ function buildFlatRecord(
 ): FlatIndexRecord {
   const breadcrumbPath = buildBreadcrumb(effectiveDescriptor.displayName, node.effectiveKeyPath);
   const keySequence = node.effectiveKeyPath.join(" -> ");
-  const sourceStatus = node.inherited ? "fallback" : "local";
+  const sourceStatus = node.source.sourceStatus;
 
   if (node.kind === "group" || node.kind === "layer") {
     const label = node.kind === "layer" ? generateLayerLabel(node.item) : generateGroupLabel(node.item);
@@ -241,6 +300,7 @@ function buildFlatRecord(
         node.effectiveKeyPath.join("."),
         node.kind,
       ]),
+      hiddenSources: node.hiddenSources,
       inherited: node.inherited,
       key: node.item.key ?? "",
       keySequence,
@@ -265,8 +325,10 @@ function buildFlatRecord(
       sourceConfigPath: node.source.configPath,
       sourceBundleId: node.source.bundleId,
       sourceNodePath: node.source.nodePath,
+      sourcePriority: node.source.priority,
       sourceScope: node.source.scope,
       sourceStatus,
+      sourceTagId: node.source.tagId,
       stickyMode: node.kind === "group" ? node.item.stickyMode : undefined,
       tapAction: node.kind === "layer" ? node.item.tapAction : undefined,
       valuePreview: node.kind === "layer"
@@ -301,19 +363,20 @@ function buildFlatRecord(
     breadcrumbPath,
     childCount: undefined,
     description,
-    displayLabel,
-    effectiveConfigDisplayName: effectiveDescriptor.displayName,
-    effectiveConfigPath: effectiveDescriptor.filePath,
-    effectiveBundleId: effectiveDescriptor.bundleId,
-    effectiveKeyPath: node.effectiveKeyPath,
-    effectiveScope: effectiveDescriptor.scope,
-    id: stableHash([
-      effectiveDescriptor.filePath,
-      node.source.configPath,
-      node.source.nodePath.join("."),
-      node.effectiveKeyPath.join("."),
-      node.item.type,
-    ]),
+      displayLabel,
+      effectiveConfigDisplayName: effectiveDescriptor.displayName,
+      effectiveConfigPath: effectiveDescriptor.filePath,
+      effectiveBundleId: effectiveDescriptor.bundleId,
+      effectiveKeyPath: node.effectiveKeyPath,
+      effectiveScope: effectiveDescriptor.scope,
+      id: stableHash([
+        effectiveDescriptor.filePath,
+        node.source.configPath,
+        node.source.nodePath.join("."),
+        node.effectiveKeyPath.join("."),
+        node.item.type,
+      ]),
+    hiddenSources: node.hiddenSources,
     inherited: node.inherited,
     key: node.item.key ?? "",
     keySequence,
@@ -347,8 +410,10 @@ function buildFlatRecord(
     sourceBundleId: node.source.bundleId,
     sourceNode: node.item,
     sourceNodePath: node.source.nodePath,
+    sourcePriority: node.source.priority,
     sourceScope: node.source.scope,
     sourceStatus,
+    sourceTagId: node.source.tagId,
     stickyMode: node.item.stickyMode,
     voiceAliases: node.item.voiceAliases,
     voiceId: node.item.voiceId,
@@ -375,48 +440,212 @@ function flattenTree(
   return records;
 }
 
+function sourceForDescriptor(
+  descriptor: DiscoveredConfigFile,
+  priority: number,
+  sourceStatus: InternalSource["sourceStatus"],
+): InternalSource {
+  return {
+    bundleId: descriptor.bundleId,
+    configDisplayName: descriptor.displayName,
+    configPath: descriptor.filePath,
+    nodePath: [],
+    priority,
+    scope: descriptor.scope,
+    sourceStatus,
+    tagId: descriptor.tagId,
+  };
+}
+
+function descriptorMapByScopeAndTag(
+  configs: DiscoveredConfigFile[],
+  scope: "normalTag" | "tag",
+): Map<string, DiscoveredConfigFile> {
+  const result = new Map<string, DiscoveredConfigFile>();
+  for (const config of configs) {
+    if (config.scope === scope && config.tagId) {
+      result.set(config.tagId, config);
+    }
+  }
+  return result;
+}
+
+function shadowDiagnostics(records: FlatIndexRecord[]): ConfigDiagnostic[] {
+  const grouped = new Map<string, {
+    affectedBundleIds: Set<string>;
+    hiddenSource: SourceSummary;
+    keySequence: string;
+    winnerSource: SourceSummary;
+  }>();
+
+  for (const record of records) {
+    for (const hiddenSource of record.hiddenSources ?? []) {
+      const winnerSource: SourceSummary = {
+        bundleId: record.sourceBundleId,
+        configDisplayName: record.sourceConfigDisplayName,
+        configPath: record.sourceConfigPath,
+        keySequence: record.keySequence,
+        priority: record.sourcePriority,
+        scope: record.sourceScope,
+        sourceStatus: record.sourceStatus,
+        tagId: record.sourceTagId,
+      };
+      const key = [
+        record.effectiveScope,
+        record.keySequence,
+        winnerSource.configPath,
+        hiddenSource.configPath,
+      ].join("\u0000");
+      const existing = grouped.get(key);
+      if (existing) {
+        if (record.effectiveBundleId) {
+          existing.affectedBundleIds.add(record.effectiveBundleId);
+        }
+        continue;
+      }
+
+      grouped.set(key, {
+        affectedBundleIds: new Set(record.effectiveBundleId ? [record.effectiveBundleId] : []),
+        hiddenSource,
+        keySequence: record.keySequence,
+        winnerSource,
+      });
+    }
+  }
+
+  return Array.from(grouped.values()).map((entry) => {
+    const affectedBundleIds = Array.from(entry.affectedBundleIds).sort();
+    const affectedText = affectedBundleIds.length > 0
+      ? ` for ${affectedBundleIds.join(", ")}`
+      : "";
+    return {
+      affectedBundleIds,
+      hiddenSource: entry.hiddenSource,
+      id: stableHash([
+        "shadowedSource",
+        entry.keySequence,
+        entry.winnerSource.configPath,
+        entry.hiddenSource.configPath,
+        affectedBundleIds.join("|"),
+      ]),
+      keySequence: entry.keySequence,
+      kind: "shadowedSource",
+      message: `${entry.winnerSource.configDisplayName} overrides ${entry.hiddenSource.configDisplayName} at ${entry.keySequence}${affectedText}.`,
+      severity: "warning",
+      tagId: entry.hiddenSource.tagId ?? entry.winnerSource.tagId,
+      winnerSource: entry.winnerSource,
+    };
+  });
+}
+
 export async function buildCachePayload(configDirectory: string): Promise<CachePayload> {
+  const registryResult = await loadTagsRegistry(configDirectory);
+  const registry = registryResult.registry;
+  const registryTags = tagDefinitionById(registry);
   const configs = await discoverLiveConfigs(configDirectory);
-  const fingerprint = configFingerprint(configs);
+  const fingerprint = configFingerprint(configs, registryResult.mtimeMs);
   const fallbackDescriptor = configs.find((config) => config.scope === "fallback");
   const fallbackGroup = fallbackDescriptor ? await loadGroupFromFile(fallbackDescriptor.filePath) : undefined;
   const normalFallbackDescriptor = configs.find((config) => config.scope === "normalFallback");
   const normalFallbackGroup = normalFallbackDescriptor
     ? await loadGroupFromFile(normalFallbackDescriptor.filePath)
     : undefined;
+  const tagDescriptors = descriptorMapByScopeAndTag(configs, "tag");
+  const normalTagDescriptors = descriptorMapByScopeAndTag(configs, "normalTag");
+  const groupCache = new Map<string, Promise<GroupNode>>();
+  const diagnostics: ConfigDiagnostic[] = [];
   const records: FlatIndexRecord[] = [];
 
+  function loadGroupCached(filePath: string): Promise<GroupNode> {
+    let cached = groupCache.get(filePath);
+    if (!cached) {
+      cached = loadGroupFromFile(filePath);
+      groupCache.set(filePath, cached);
+    }
+    return cached;
+  }
+
+  async function sourceContainersForApp(
+    descriptor: DiscoveredConfigFile,
+    sourceGroup: GroupNode,
+  ): Promise<SourceContainer[]> {
+    const assignmentScope: TagAssignmentScope = descriptor.scope === "normalApp" ? "normalApp" : "app";
+    const tagScope = descriptor.scope === "normalApp" ? "normalTag" : "tag";
+    const activeTagDescriptors = descriptor.scope === "normalApp" ? normalTagDescriptors : tagDescriptors;
+    const tagIds = assignedTagIds(registry, assignmentScope, descriptor.bundleId);
+
+    const sources: SourceContainer[] = [{
+      group: sourceGroup,
+      inherited: false,
+      source: sourceForDescriptor(descriptor, 0, "local"),
+    }];
+
+    for (const [index, tagId] of tagIds.entries()) {
+      if (!registryTags.has(tagId)) {
+        diagnostics.push({
+          id: stableHash(["missingTagDefinition", assignmentScope, descriptor.bundleId, tagId]),
+          kind: "missingTagDefinition",
+          message: `${descriptor.displayName} references missing tag '${tagId}'.`,
+          severity: "warning",
+          tagId,
+        });
+      }
+
+      const tagDescriptor = activeTagDescriptors.get(tagId);
+      if (!tagDescriptor || tagDescriptor.virtual) {
+        diagnostics.push({
+          id: stableHash(["missingTagConfig", assignmentScope, descriptor.bundleId, tagId, tagScope]),
+          kind: "missingTagConfig",
+          message: `${descriptor.displayName} references ${tagScope === "normalTag" ? "normal " : ""}tag '${tagId}', but its config file is missing.`,
+          severity: "warning",
+          tagId,
+        });
+        continue;
+      }
+
+      sources.push({
+        group: await loadGroupCached(tagDescriptor.filePath),
+        inherited: true,
+        source: sourceForDescriptor(tagDescriptor, index + 1, "tag"),
+      });
+    }
+
+    const fallbackPriority = tagIds.length + 1;
+    if (descriptor.scope === "normalApp") {
+      if (normalFallbackDescriptor && normalFallbackGroup) {
+        sources.push({
+          group: normalFallbackGroup,
+          inherited: true,
+          source: sourceForDescriptor(normalFallbackDescriptor, fallbackPriority, "fallback"),
+        });
+      }
+    } else if (fallbackDescriptor && fallbackGroup) {
+      sources.push({
+        group: fallbackGroup,
+        inherited: true,
+        source: sourceForDescriptor(fallbackDescriptor, fallbackPriority, "fallback"),
+      });
+    }
+
+    return sources;
+  }
+
   for (const descriptor of configs) {
-    const sourceGroup = await loadGroupFromFile(descriptor.filePath);
+    const sourceGroup = await loadGroupCached(descriptor.filePath);
     const localSource: InternalSource = {
       bundleId: descriptor.bundleId,
       configDisplayName: descriptor.displayName,
       configPath: descriptor.filePath,
       nodePath: [],
+      priority: 0,
       scope: descriptor.scope,
+      sourceStatus: "local",
+      tagId: descriptor.tagId,
     };
 
     let mergedRoot: InternalContainerNode;
-    const inheritedDescriptor = descriptor.scope === "app"
-      ? fallbackDescriptor
-      : descriptor.scope === "normalApp"
-        ? normalFallbackDescriptor
-        : undefined;
-    const inheritedGroup = descriptor.scope === "app"
-      ? fallbackGroup
-      : descriptor.scope === "normalApp"
-        ? normalFallbackGroup
-        : undefined;
-
-    if ((descriptor.scope === "app" || descriptor.scope === "normalApp") && inheritedGroup && inheritedDescriptor) {
-      const fallbackSource: InternalSource = {
-        bundleId: inheritedDescriptor.bundleId,
-        configDisplayName: inheritedDescriptor.displayName,
-        configPath: inheritedDescriptor.filePath,
-        nodePath: [],
-        scope: inheritedDescriptor.scope,
-      };
-      mergedRoot = mergeGroups(descriptor, sourceGroup, localSource, inheritedGroup, fallbackSource);
+    if (descriptor.scope === "app" || descriptor.scope === "normalApp") {
+      mergedRoot = mergeSourceContainers(await sourceContainersForApp(descriptor, sourceGroup));
     } else {
       mergedRoot = createInternalNode(sourceGroup, localSource, [], false) as InternalGroupNode;
     }
@@ -427,9 +656,11 @@ export async function buildCachePayload(configDirectory: string): Promise<CacheP
   return {
     configDirectory,
     configs: toConfigSummaries(configs),
+    diagnostics: [...diagnostics, ...shadowDiagnostics(records)],
     fingerprint,
     generatedAt: new Date().toISOString(),
     records,
+    tagsRegistry: registry,
     version: CACHE_VERSION,
   };
 }

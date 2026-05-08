@@ -39,6 +39,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formStateToActionNode, isModeControlActionType, validateActionNode } from "./action-form.js";
 import { ActionValueFieldActions, ActionValueFields, knownMenuAppNamesFor } from "./action-value-fields.js";
 import { getMemoryCachedPayload, readCachedPayloadSync, rebuildIndex } from "./cache.js";
+import { overrideWarningText } from "./conflict-formatting.js";
 import {
   emptyFormState,
   formatFullPath,
@@ -783,7 +784,7 @@ export function RecordEditorForm(props: RecordEditorFormProps) {
           ? `Missing parent groups will be created automatically: ${formatFullPath(autoCreateGroupKeys)}.`
           : undefined,
         overrideRecord
-          ? `This will create a local override for inherited ${overrideRecord.displayLabel}.`
+          ? overrideWarningText(overrideRecord, validationPayload)
           : undefined,
       ].filter(Boolean).join("\n")
     : fixedPathInfo;

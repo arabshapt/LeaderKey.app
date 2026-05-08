@@ -1,5 +1,6 @@
 import { parseIntellijActionValue, parseMenuActionValue, type FlatIndexRecord } from "@leaderkey/config-core";
 
+import { sourceDisplayText } from "./conflict-formatting.js";
 import { fullPathText } from "./record-formatting.js";
 
 export interface DetailMetadataRow {
@@ -248,11 +249,25 @@ function descriptionSection(record: FlatIndexRecord): string[] {
   return sections;
 }
 
+function sourceChainSection(record: FlatIndexRecord): string[] {
+  const hiddenSources = record.hiddenSources ?? [];
+  if (hiddenSources.length === 0) {
+    return [];
+  }
+
+  return [
+    "**Source Chain**",
+    "",
+    `- Winning ${record.sourceStatus}: ${record.sourceConfigDisplayName} at ${record.keySequence}`,
+    ...hiddenSources.map((source) => `- Shadowed ${source.sourceStatus}: ${sourceDisplayText(source)}`),
+  ];
+}
+
 function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
   const rows: DetailMetadataRow[] = [
     { title: "Type", text: record.actionType },
     { title: "Config", text: record.effectiveConfigDisplayName },
-    { title: "Source Status", text: record.inherited ? "fallback" : "local" },
+    { title: "Source Status", text: record.sourceStatus },
     { title: "Source Config", text: record.sourceConfigDisplayName },
     { title: "File", text: record.sourceConfigPath },
   ];
@@ -281,6 +296,10 @@ function metadataRows(record: FlatIndexRecord): DetailMetadataRow[] {
     rows.push({ title: "Fallback Menu Paths", text: record.menuFallbackPaths.join(" | ") });
   }
 
+  if (record.hiddenSources && record.hiddenSources.length > 0) {
+    rows.push({ title: "Overrides", text: record.hiddenSources.map(sourceDisplayText).join(" | ") });
+  }
+
   if (record.description) {
     rows.push({ title: "Description", text: record.description });
   }
@@ -297,6 +316,7 @@ export function buildRecordDetailPresentation(record: FlatIndexRecord): RecordDe
   const descriptions = descriptionSection(record);
   const value = valueSection(record);
   const extra = extraSection(record);
+  const sourceChain = sourceChainSection(record);
   const markdown = [
     `## ${title}`,
     "",
@@ -311,6 +331,8 @@ export function buildRecordDetailPresentation(record: FlatIndexRecord): RecordDe
     ...value,
     ...(value.length > 0 ? [""] : []),
     ...extra,
+    ...(extra.length > 0 ? [""] : []),
+    ...sourceChain,
   ]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
     .join("\n")

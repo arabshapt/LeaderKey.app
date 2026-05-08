@@ -22,6 +22,8 @@ declare namespace Preferences {
   export type SearchShortcuts = ExtensionPreferences & {}
   /** Preferences accessible in the `browse-configs` command */
   export type BrowseConfigs = ExtensionPreferences & {}
+  /** Preferences accessible in the `manage-tags` command */
+  export type ManageTags = ExtensionPreferences & {}
   /** Preferences accessible in the `add-edit-by-path` command */
   export type AddEditByPath = ExtensionPreferences & {}
   /** Preferences accessible in the `rebuild-index` command */
@@ -37,6 +39,8 @@ declare namespace Arguments {
   export type SearchShortcuts = {}
   /** Arguments passed to the `browse-configs` command */
   export type BrowseConfigs = {}
+  /** Arguments passed to the `manage-tags` command */
+  export type ManageTags = {}
   /** Arguments passed to the `add-edit-by-path` command */
   export type AddEditByPath = {}
   /** Arguments passed to the `rebuild-index` command */

@@ -302,6 +302,7 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
     config.scope === "fallback" ||
     config.scope === "normalFallback"
   ));
+  const tagConfigs = visibleConfigs.filter((config) => config.scope === "tag" || config.scope === "normalTag");
   const appConfigs = visibleConfigs.filter((config) => config.scope === "app" || config.scope === "normalApp");
 
   return (
@@ -457,6 +458,14 @@ export default function BrowseConfigsCommand(props: BrowseConfigsProps) {
 
       <List.Section title="Global And Fallback">
         {globalAndFallbackConfigs.map((config) => renderConfigItem(config, Icon.Book))}
+      </List.Section>
+
+      <List.Section title="Tags">
+        {tagConfigs.map((config) => renderConfigItem(
+          config,
+          Icon.Tag,
+          config.scope === "normalTag" ? "normal tag" : "tag",
+        ))}
       </List.Section>
 
       <List.Section title="App Configs">

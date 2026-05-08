@@ -39,7 +39,7 @@ extension UserConfig {
     switch configKind {
     case .app, .normalApp:
       isAppSpecificConfig = true
-    case .global, .appFallback, .normalFallback, .unknown:
+    case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
       isAppSpecificConfig = false
     }
 

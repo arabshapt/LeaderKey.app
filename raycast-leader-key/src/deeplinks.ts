@@ -21,6 +21,14 @@ export function configTargetForSummary(config: ConfigSummary): string {
     return `normal-app:${config.bundleId}`;
   }
 
+  if (config.scope === "normalTag" && config.tagId) {
+    return `normal-tag:${config.tagId}`;
+  }
+
+  if (config.scope === "tag" && config.tagId) {
+    return `tag:${config.tagId}`;
+  }
+
   if (config.bundleId) {
     return `app:${config.bundleId}`;
   }
@@ -94,6 +102,24 @@ export function normalAppBundleIdForConfigTarget(configTarget: string | undefine
   return bundleId || undefined;
 }
 
+export function tagIdForConfigTarget(configTarget: string | undefined): string | undefined {
+  if (!configTarget || !configTarget.startsWith("tag:")) {
+    return undefined;
+  }
+
+  const tagId = configTarget.slice("tag:".length).trim();
+  return tagId || undefined;
+}
+
+export function normalTagIdForConfigTarget(configTarget: string | undefined): string | undefined {
+  if (!configTarget || !configTarget.startsWith("normal-tag:")) {
+    return undefined;
+  }
+
+  const tagId = configTarget.slice("normal-tag:".length).trim();
+  return tagId || undefined;
+}
+
 export function resolveConfigTarget(
   configs: ConfigSummary[],
   configTarget: string | undefined,
@@ -117,6 +143,16 @@ export function resolveConfigTarget(
   const normalBundleId = normalAppBundleIdForConfigTarget(configTarget);
   if (normalBundleId) {
     return configs.find((config) => config.scope === "normalApp" && config.bundleId === normalBundleId);
+  }
+
+  const normalTagId = normalTagIdForConfigTarget(configTarget);
+  if (normalTagId) {
+    return configs.find((config) => config.scope === "normalTag" && config.tagId === normalTagId);
+  }
+
+  const tagId = tagIdForConfigTarget(configTarget);
+  if (tagId) {
+    return configs.find((config) => config.scope === "tag" && config.tagId === tagId);
   }
 
   const bundleId = appBundleIdForConfigTarget(configTarget);

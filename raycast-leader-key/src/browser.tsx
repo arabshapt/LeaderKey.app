@@ -126,6 +126,7 @@ function currentContextGroupRecord(
     sourceConfigPath: configSummary.filePath,
     sourceNodePath: [],
     sourceScope: configSummary.scope,
+    sourcePriority: 0,
     sourceStatus: "local",
     stickyMode: undefined,
     valuePreview: "Contains 0 items",

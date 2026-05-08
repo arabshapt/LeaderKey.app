@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import test from "node:test";
 import path from "node:path";
 
@@ -9,7 +10,7 @@ import {
   type GroupNode,
   type LayerNode,
 } from "../src/index.js";
-import { createTempConfigDirectory, expectRecord, writeConfigFile } from "./helpers.js";
+import { createTempConfigDirectory, expectRecord, writeConfigFile, writeTagsRegistry } from "./helpers.js";
 
 test("discovers live configs, respects custom names, and indexes merged fallback items", async () => {
   const configDirectory = await createTempConfigDirectory();
@@ -162,6 +163,236 @@ test("discovers live configs, respects custom names, and indexes merged fallback
   assert.equal(inheritedNormalChromeRecord.sourceScope, "normalFallback");
   assert.equal(inheritedNormalChromeRecord.sourceConfigDisplayName, "Normal Fallback Config");
   assert.equal(inheritedNormalChromeRecord.normalModeAfter, "input");
+});
+
+test("applies ordered tag assignments without creating empty app configs", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeTagsRegistry(configDirectory, {
+    assignments: {
+      app: {
+        "com.google.Chrome": ["browser", "web"],
+      },
+      normalApp: {},
+    },
+    tags: [
+      { id: "browser", name: "Browser" },
+      { id: "web", name: "Web" },
+    ],
+    version: 1,
+  });
+
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "app-fallback-config.json", {
+    actions: [
+      {
+        actions: [
+          { key: "d", type: "command", value: "echo fallback duplicate" },
+          { key: "f", type: "command", value: "echo fallback only" },
+        ],
+        key: "w",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+  await writeConfigFile(configDirectory, "tag.browser.json", {
+    actions: [
+      {
+        actions: [
+          { key: "d", type: "command", value: "echo browser wins" },
+          { key: "b", type: "command", value: "echo browser only" },
+        ],
+        key: "w",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+  await writeConfigFile(configDirectory, "tag.web.json", {
+    actions: [
+      {
+        actions: [
+          { key: "d", type: "command", value: "echo web shadowed" },
+          { key: "x", type: "command", value: "echo web only" },
+        ],
+        key: "w",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const chromeSummary = expectRecord(
+    payload.configs.find((config) => config.scope === "app" && config.bundleId === "com.google.Chrome"),
+    "expected virtual Chrome app config from tag assignment",
+  );
+  assert.equal(chromeSummary.virtual, true);
+  await assert.rejects(fs.stat(path.join(configDirectory, "app.com.google.Chrome.json")));
+
+  const winningRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "App: com.google.Chrome" && record.keySequence === "w -> d"
+    ),
+    "expected winning tag record",
+  );
+  assert.equal(winningRecord.sourceStatus, "tag");
+  assert.equal(winningRecord.sourceTagId, "browser");
+  assert.equal(winningRecord.sourcePriority, 1);
+  assert.equal(winningRecord.sourceConfigDisplayName, "Tag: Browser");
+  assert.deepEqual(
+    winningRecord.hiddenSources?.map((source) => source.configDisplayName),
+    ["Tag: Web", "Fallback App Config"],
+  );
+
+  const lowerTagRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "App: com.google.Chrome" && record.keySequence === "w -> x"
+    ),
+    "expected lower-priority tag item to remain when not shadowed",
+  );
+  assert.equal(lowerTagRecord.sourceTagId, "web");
+  assert.equal(lowerTagRecord.sourcePriority, 2);
+
+  const fallbackRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "App: com.google.Chrome" && record.keySequence === "w -> f"
+    ),
+    "expected fallback item below tags",
+  );
+  assert.equal(fallbackRecord.sourceStatus, "fallback");
+
+  assert.ok(
+    payload.diagnostics.some((diagnostic) =>
+      diagnostic.kind === "shadowedSource" &&
+      diagnostic.keySequence === "w -> d" &&
+      diagnostic.message.includes("Tag: Browser overrides Tag: Web")
+    ),
+    "expected aggregate shadow diagnostic for tag collision",
+  );
+});
+
+test("applies tag assignments even when fallback config is missing", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeTagsRegistry(configDirectory, {
+    assignments: {
+      app: {
+        "com.google.Chrome": ["browser"],
+      },
+      normalApp: {},
+    },
+    tags: [{ id: "browser", name: "Browser" }],
+    version: 1,
+  });
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "tag.browser.json", {
+    actions: [{ key: "b", type: "command", value: "echo browser" }],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const tagRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "App: com.google.Chrome" && record.keySequence === "b"
+    ),
+    "expected tag record without fallback config",
+  );
+  assert.equal(tagRecord.sourceStatus, "tag");
+  assert.equal(tagRecord.sourceTagId, "browser");
+});
+
+test("indexes normal tag assignments separately from regular tags", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeTagsRegistry(configDirectory, {
+    assignments: {
+      app: {},
+      normalApp: {
+        "com.google.Chrome": ["browser"],
+      },
+    },
+    tags: [{ id: "browser", name: "Browser" }],
+    version: 1,
+  });
+
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "normal-fallback-config.json", {
+    actions: [
+      {
+        actions: [{ key: "f", type: "shortcut", value: "Cf" }],
+        key: "e",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+  await writeConfigFile(configDirectory, "normal-tag.browser.json", {
+    actions: [
+      {
+        actions: [{ key: "s", normalModeAfter: "input", type: "shortcut", value: "Cs" }],
+        key: "e",
+        type: "group",
+      },
+    ],
+    type: "group",
+  });
+
+  const payload = await buildCachePayload(configDirectory);
+  const normalChromeSummary = expectRecord(
+    payload.configs.find((config) => config.scope === "normalApp" && config.bundleId === "com.google.Chrome"),
+    "expected virtual normal Chrome app config from tag assignment",
+  );
+  assert.equal(normalChromeSummary.virtual, true);
+
+  const tagRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "Normal: com.google.Chrome" && record.keySequence === "e -> s"
+    ),
+    "expected inherited normal tag record",
+  );
+  assert.equal(tagRecord.effectiveScope, "normalApp");
+  assert.equal(tagRecord.sourceScope, "normalTag");
+  assert.equal(tagRecord.sourceStatus, "tag");
+  assert.equal(tagRecord.sourceTagId, "browser");
+  assert.equal(tagRecord.normalModeAfter, "input");
+
+  const fallbackRecord = expectRecord(
+    payload.records.find((record) =>
+      record.effectiveConfigDisplayName === "Normal: com.google.Chrome" && record.keySequence === "e -> f"
+    ),
+    "expected normal fallback below normal tag",
+  );
+  assert.equal(fallbackRecord.sourceScope, "normalFallback");
+});
+
+test("warns when assignments reference missing tag definitions or config files", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  await writeTagsRegistry(configDirectory, {
+    assignments: {
+      app: {
+        "com.google.Chrome": ["missing"],
+      },
+      normalApp: {},
+    },
+    tags: [],
+    version: 1,
+  });
+
+  await writeConfigFile(configDirectory, "global-config.json", { actions: [], type: "group" });
+  await writeConfigFile(configDirectory, "app-fallback-config.json", { actions: [], type: "group" });
+
+  const payload = await buildCachePayload(configDirectory);
+  assert.ok(
+    payload.diagnostics.some((diagnostic) =>
+      diagnostic.kind === "missingTagDefinition" && diagnostic.tagId === "missing"
+    ),
+    "expected missing tag definition warning",
+  );
+  assert.ok(
+    payload.diagnostics.some((diagnostic) =>
+      diagnostic.kind === "missingTagConfig" && diagnostic.tagId === "missing"
+    ),
+    "expected missing tag config warning",
+  );
 });
 
 test("indexes layers as group-like containers and merges normal fallback layer children", async () => {

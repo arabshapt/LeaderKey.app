@@ -140,6 +140,9 @@ final class Karabiner2InputMethod: InputMethod {
     let configDir = Defaults[.configDir]
     var appConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
     var normalAppConfigs: [(bundleId: String, config: UserConfig, customName: String?)] = []
+    let tagsRegistry = userConfig.loadTagsRegistry()
+    var discoveredAppBundleIds = Set<String>()
+    var discoveredNormalAppBundleIds = Set<String>()
     
     do {
       let files = try FileManager.default.contentsOfDirectory(atPath: configDir)
@@ -180,6 +183,7 @@ final class Karabiner2InputMethod: InputMethod {
           ) {
             debugLog("[Karabiner2InputMethod] Adding to appConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
             appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: customName))
+            discoveredAppBundleIds.insert(bundleId)
           }
         } else if file.hasPrefix("normal-app.") && file.hasSuffix(".json") && !file.hasSuffix(".meta.json") {
           let bundleId = String(file.dropFirst("normal-app.".count).dropLast(5))
@@ -212,12 +216,40 @@ final class Karabiner2InputMethod: InputMethod {
           ) {
             debugLog("[Karabiner2InputMethod] Adding to normalAppConfigs: bundleId=\(bundleId), customName=\(customName ?? "nil")")
             normalAppConfigs.append((bundleId: bundleId, config: normalConfig, customName: customName))
+            discoveredNormalAppBundleIds.insert(bundleId)
           }
         }
       }
     } catch {
       debugLog("[Karabiner2InputMethod] Failed to list config directory: \(error)")
     }
+
+    for (bundleId, tagIds) in tagsRegistry.assignments.app where !tagIds.isEmpty && !discoveredAppBundleIds.contains(bundleId) {
+      if let appSpecificConfig = loadAndMergeAppConfig(
+        bundleId: bundleId,
+        configPath: "",
+        globalConfig: globalConfig
+      ) {
+        debugLog("[Karabiner2InputMethod] Adding virtual tag-assigned app config: bundleId=\(bundleId)")
+        appConfigs.append((bundleId: bundleId, config: appSpecificConfig, customName: nil))
+        discoveredAppBundleIds.insert(bundleId)
+      }
+    }
+
+    for (bundleId, tagIds) in tagsRegistry.assignments.normalApp where !tagIds.isEmpty && !discoveredNormalAppBundleIds.contains(bundleId) {
+      if let normalConfig = loadAndMergeNormalAppConfig(
+        bundleId: bundleId,
+        configPath: "",
+        globalConfig: globalConfig
+      ) {
+        debugLog("[Karabiner2InputMethod] Adding virtual tag-assigned normal app config: bundleId=\(bundleId)")
+        normalAppConfigs.append((bundleId: bundleId, config: normalConfig, customName: nil))
+        discoveredNormalAppBundleIds.insert(bundleId)
+      }
+    }
+
+    appConfigs.sort { $0.bundleId < $1.bundleId }
+    normalAppConfigs.sort { $0.bundleId < $1.bundleId }
     
     let discoveryElapsed = CFAbsoluteTimeGetCurrent() - pipelineStart
     debugLog("[Karabiner2InputMethod] Found \(appConfigs.count) app-specific configs and \(normalAppConfigs.count) normal app configs")

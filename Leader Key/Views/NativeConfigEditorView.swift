@@ -200,9 +200,9 @@ final class ConfigEditorSession: ObservableObject {
     }
 
     switch userConfig.configFileKind(forDisplayKey: selectedConfigKey) {
-    case .normalFallback, .normalApp:
+    case .normalFallback, .normalApp, .normalTag:
       return true
-    case .global, .appFallback, .app, .unknown:
+    case .global, .appFallback, .app, .tag, .unknown:
       return false
     }
   }

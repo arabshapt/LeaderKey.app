@@ -13,6 +13,7 @@ extension UserConfig {
     let configDir = Defaults[.configDir]
     let configDirUrl = URL(fileURLWithPath: configDir)
     let customNames = Defaults[.configFileCustomNames]  // Get custom names (for fallback)
+    let tagsRegistry = loadTagsRegistry()
 
     // Helper function to get display name
     func getDisplayName(for path: String, defaultName: String) -> String {
@@ -70,6 +71,17 @@ extension UserConfig {
           let displayName = getDisplayName(for: filePath, defaultName: defaultNormalDisplayName)
           discovered[displayName] = filePath
 
+        case .tag(let tagId):
+          let defaultTagDisplayName = "\(tagConfigDisplayPrefix)\(tagDisplayName(for: tagId, registry: tagsRegistry))"
+          let displayName = getDisplayName(for: filePath, defaultName: defaultTagDisplayName)
+          discovered[displayName] = filePath
+
+        case .normalTag(let tagId):
+          let defaultTagDisplayName =
+            "\(normalTagConfigDisplayPrefix)\(tagDisplayName(for: tagId, registry: tagsRegistry))"
+          let displayName = getDisplayName(for: filePath, defaultName: defaultTagDisplayName)
+          discovered[displayName] = filePath
+
         case .global, .unknown:
           break
         }
@@ -79,6 +91,23 @@ extension UserConfig {
       handleError(
         NSError(domain: "UserConfig", code: 5, userInfo: [NSLocalizedDescriptionKey: errorMessage]),
         critical: false)
+    }
+
+    func appendVirtualAssignedConfig(bundleId: String, normalMode: Bool) {
+      let fileName = "\(normalMode ? normalAppConfigPrefix : appConfigPrefix)\(bundleId).json"
+      let filePath = (configDir as NSString).appendingPathComponent(fileName)
+      guard discovered.values.contains(filePath) == false else { return }
+
+      let defaultDisplayName = normalMode ? "Normal: \(bundleId)" : "App: \(bundleId)"
+      let displayName = getDisplayName(for: filePath, defaultName: defaultDisplayName)
+      discovered[displayName] = filePath
+    }
+
+    for (bundleId, tagIds) in tagsRegistry.assignments.app where !tagIds.isEmpty {
+      appendVirtualAssignedConfig(bundleId: bundleId, normalMode: false)
+    }
+    for (bundleId, tagIds) in tagsRegistry.assignments.normalApp where !tagIds.isEmpty {
+      appendVirtualAssignedConfig(bundleId: bundleId, normalMode: true)
     }
 
     // Sort the discovered files by display name for consistent UI presentation
@@ -93,6 +122,18 @@ extension UserConfig {
       if name2 == defaultAppConfigDisplayName { return false }
       if name1 == normalFallbackConfigDisplayName { return true }
       if name2 == normalFallbackConfigDisplayName { return false }
+      if name1.hasPrefix(tagConfigDisplayPrefix) && !name2.hasPrefix(tagConfigDisplayPrefix) {
+        return true
+      }
+      if name2.hasPrefix(tagConfigDisplayPrefix) && !name1.hasPrefix(tagConfigDisplayPrefix) {
+        return false
+      }
+      if name1.hasPrefix(normalTagConfigDisplayPrefix) && !name2.hasPrefix(normalTagConfigDisplayPrefix) {
+        return true
+      }
+      if name2.hasPrefix(normalTagConfigDisplayPrefix) && !name1.hasPrefix(normalTagConfigDisplayPrefix) {
+        return false
+      }
       return name1.localizedCompare(name2) == .orderedAscending
     }.reduce(into: [String: String]()) { (dict, pair) in
       dict[pair.key] = pair.value

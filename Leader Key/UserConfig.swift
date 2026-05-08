@@ -69,6 +69,8 @@ let emptyRoot = Group(key: "🚫", label: "Config error", stickyMode: nil, actio
 let globalDefaultDisplayName = "Global"
 let defaultAppConfigDisplayName = "Fallback App Config"
 let normalFallbackConfigDisplayName = "Normal Fallback Config"
+let tagConfigDisplayPrefix = "Tag: "
+let normalTagConfigDisplayPrefix = "Normal Tag: "
 
 enum UserConfigFileKind: Equatable {
   case global
@@ -76,15 +78,59 @@ enum UserConfigFileKind: Equatable {
   case app(bundleId: String)
   case normalFallback
   case normalApp(bundleId: String)
+  case tag(id: String)
+  case normalTag(id: String)
   case unknown
 
   var allowsLayers: Bool {
     switch self {
-    case .normalFallback, .normalApp:
+    case .normalFallback, .normalApp, .normalTag:
       return true
-    case .global, .appFallback, .app, .unknown:
+    case .global, .appFallback, .app, .tag, .unknown:
       return false
     }
+  }
+}
+
+struct TagDefinition: Codable, Equatable {
+  var id: String
+  var name: String
+  var createdAt: Double?
+  var lastModified: Double?
+}
+
+struct TagAssignments: Codable, Equatable {
+  var app: [String: [String]]
+  var normalApp: [String: [String]]
+
+  init(app: [String: [String]] = [:], normalApp: [String: [String]] = [:]) {
+    self.app = app
+    self.normalApp = normalApp
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    app = try container.decodeIfPresent([String: [String]].self, forKey: .app) ?? [:]
+    normalApp = try container.decodeIfPresent([String: [String]].self, forKey: .normalApp) ?? [:]
+  }
+}
+
+struct TagsRegistry: Codable, Equatable {
+  var version: Int
+  var tags: [TagDefinition]
+  var assignments: TagAssignments
+
+  init(version: Int = 1, tags: [TagDefinition] = [], assignments: TagAssignments = TagAssignments()) {
+    self.version = version
+    self.tags = tags
+    self.assignments = assignments
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    tags = try container.decodeIfPresent([TagDefinition].self, forKey: .tags) ?? []
+    assignments = try container.decodeIfPresent(TagAssignments.self, forKey: .assignments) ?? TagAssignments()
   }
 }
 
@@ -104,6 +150,9 @@ class UserConfig: ObservableObject {
   let defaultAppConfigFileName = "app-fallback-config.json"  // Added default app config filename
   let normalAppConfigPrefix = "normal-app."
   let normalFallbackConfigFileName = "normal-fallback-config.json"
+  let tagConfigPrefix = "tag."
+  let normalTagConfigPrefix = "normal-tag."
+  let tagsRegistryFileName = "tags-registry.json"
   var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
   let alertHandler: AlertHandler
   let fileManager: FileManager
@@ -146,10 +195,20 @@ class UserConfig: ObservableObject {
       return bundleId.isEmpty ? .unknown : .normalApp(bundleId: bundleId)
     }
 
+    if fileName.hasPrefix(normalTagConfigPrefix) && fileName.hasSuffix(".json") {
+      let tagId = String(fileName.dropFirst(normalTagConfigPrefix.count).dropLast(".json".count))
+      return tagId.isEmpty ? .unknown : .normalTag(id: tagId)
+    }
+
     if fileName.hasPrefix(appConfigPrefix) && fileName.hasSuffix(".json") {
       let bundleId = String(fileName.dropFirst(appConfigPrefix.count).dropLast(".json".count))
       guard !bundleId.isEmpty && bundleId != "fallback-config" else { return .unknown }
       return .app(bundleId: bundleId)
+    }
+
+    if fileName.hasPrefix(tagConfigPrefix) && fileName.hasSuffix(".json") {
+      let tagId = String(fileName.dropFirst(tagConfigPrefix.count).dropLast(".json".count))
+      return tagId.isEmpty ? .unknown : .tag(id: tagId)
     }
 
     return .unknown
@@ -182,6 +241,14 @@ class UserConfig: ObservableObject {
       let bundleId = String(displayName.dropFirst("Normal: ".count))
       return bundleId.isEmpty ? .unknown : .normalApp(bundleId: bundleId)
     }
+    if displayName.hasPrefix(tagConfigDisplayPrefix) {
+      let tagId = String(displayName.dropFirst(tagConfigDisplayPrefix.count))
+      return tagId.isEmpty ? .unknown : .tag(id: tagId)
+    }
+    if displayName.hasPrefix(normalTagConfigDisplayPrefix) {
+      let tagId = String(displayName.dropFirst(normalTagConfigDisplayPrefix.count))
+      return tagId.isEmpty ? .unknown : .normalTag(id: tagId)
+    }
 
     return .unknown
   }
@@ -190,7 +257,7 @@ class UserConfig: ObservableObject {
     switch configFileKind(forDisplayKey: displayKey) {
     case .global, .appFallback, .normalFallback:
       return true
-    case .app, .normalApp, .unknown:
+    case .app, .normalApp, .tag, .normalTag, .unknown:
       return false
     }
   }
@@ -200,7 +267,7 @@ class UserConfig: ObservableObject {
     switch configFileKind(forDisplayKey: displayName) {
     case .app(let bundleId), .normalApp(let bundleId):
       return bundleId
-    case .global, .appFallback, .normalFallback, .unknown:
+    case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
       return nil
     }
   }
@@ -783,15 +850,16 @@ extension UserConfig {
           continue
         }
 
-        // Apply the same merging logic as loadConfigForEditing
-        if configPath.contains(appConfigPrefix) && !configPath.contains(defaultAppConfigFileName) {
-          // This is an app-specific config, merge with fallback
-          let bundleId = extractBundleIdFromSearchKey(key: configName)
+        switch configFileKind(forPath: configPath) {
+        case .app(let bundleId):
           let rawMergedGroup = mergeConfigWithFallback(
             appSpecificConfig: loadedGroup, bundleId: bundleId)
           groupToSearch = sortGroupRecursively(group: rawMergedGroup)
-        } else {
-          // This is the fallback app config or other config, use as-is
+        case .normalApp(let bundleId):
+          let rawMergedGroup = mergeNormalConfigWithFallback(
+            appSpecificConfig: loadedGroup, bundleId: bundleId)
+          groupToSearch = sortGroupRecursively(group: rawMergedGroup)
+        case .global, .appFallback, .normalFallback, .tag, .normalTag, .unknown:
           groupToSearch = loadedGroup
         }
       }

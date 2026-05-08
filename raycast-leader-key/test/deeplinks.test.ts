@@ -10,7 +10,9 @@ import {
   buildBrowseConfigsDeeplink,
   configTargetForSummary,
   normalAppBundleIdForConfigTarget,
+  normalTagIdForConfigTarget,
   resolveConfigTarget,
+  tagIdForConfigTarget,
 } from "../src/deeplinks.js";
 
 const configs: ConfigSummary[] = [
@@ -41,6 +43,18 @@ const configs: ConfigSummary[] = [
     filePath: "/tmp/normal-app.com.google.Chrome.json",
     scope: "normalApp",
   },
+  {
+    displayName: "Tag: Browser",
+    filePath: "/tmp/tag.browser.json",
+    scope: "tag",
+    tagId: "browser",
+  },
+  {
+    displayName: "Normal Tag: Browser",
+    filePath: "/tmp/normal-tag.browser.json",
+    scope: "normalTag",
+    tagId: "browser",
+  },
 ];
 
 test("configTargetForSummary produces stable browse targets", () => {
@@ -49,6 +63,8 @@ test("configTargetForSummary produces stable browse targets", () => {
   assert.equal(configTargetForSummary(configs[2]!), "app:com.google.Chrome");
   assert.equal(configTargetForSummary(configs[3]!), "normal-fallback");
   assert.equal(configTargetForSummary(configs[4]!), "normal-app:com.google.Chrome");
+  assert.equal(configTargetForSummary(configs[5]!), "tag:browser");
+  assert.equal(configTargetForSummary(configs[6]!), "normal-tag:browser");
 });
 
 test("resolveConfigTarget resolves explicit targets", () => {
@@ -57,6 +73,8 @@ test("resolveConfigTarget resolves explicit targets", () => {
   assert.equal(resolveConfigTarget(configs, "app:com.google.Chrome")?.displayName, "Chrome");
   assert.equal(resolveConfigTarget(configs, "normal-fallback")?.displayName, "Normal Fallback Config");
   assert.equal(resolveConfigTarget(configs, "normal-app:com.google.Chrome")?.displayName, "Chrome Normal");
+  assert.equal(resolveConfigTarget(configs, "tag:browser")?.displayName, "Tag: Browser");
+  assert.equal(resolveConfigTarget(configs, "normal-tag:browser")?.displayName, "Normal Tag: Browser");
 });
 
 test("buildBrowseConfigsDeeplink encodes both arguments and context for browse targets", () => {
@@ -75,6 +93,13 @@ test("appBundleIdForConfigTarget extracts bundle ids from app targets", () => {
 test("normalAppBundleIdForConfigTarget extracts bundle ids from normal app targets", () => {
   assert.equal(normalAppBundleIdForConfigTarget("normal-app:com.apple.dt.Xcode"), "com.apple.dt.Xcode");
   assert.equal(normalAppBundleIdForConfigTarget("app:com.apple.dt.Xcode"), undefined);
+});
+
+test("tag target helpers extract tag ids from tag targets", () => {
+  assert.equal(tagIdForConfigTarget("tag:browser"), "browser");
+  assert.equal(tagIdForConfigTarget("normal-tag:browser"), undefined);
+  assert.equal(normalTagIdForConfigTarget("normal-tag:browser"), "browser");
+  assert.equal(normalTagIdForConfigTarget("tag:browser"), undefined);
 });
 
 test("buildBrowseConfigsDeeplink preserves the current-app placeholder for Leader Key expansion", () => {

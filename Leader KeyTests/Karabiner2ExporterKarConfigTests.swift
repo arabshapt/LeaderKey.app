@@ -1094,6 +1094,58 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }
   }
 
+  func testGenerateKarabinerTSExportIncludesTagAssignedVirtualApps() throws {
+    let tagRoot = Group(
+      key: nil,
+      label: "Browser",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [
+        .action(makeShortcutAction(key: "t", label: "Tag Tab", value: "Ct")),
+      ]
+    )
+    let registry = TagsRegistry(
+      tags: [TagDefinition(id: "browser", name: "Browser")],
+      assignments: TagAssignments(app: ["com.example.TaggedBrowser": ["browser"]])
+    )
+
+    try withTemporaryConfigDirectory {
+      let configDir = URL(fileURLWithPath: Defaults[.configDir])
+      try JSONEncoder().encode(registry).write(
+        to: configDir.appendingPathComponent("tags-registry.json"),
+        options: .atomic
+      )
+      try JSONEncoder().encode(tagRoot).write(
+        to: configDir.appendingPathComponent("tag.browser.json"),
+        options: .atomic
+      )
+
+      let globalConfig = UserConfig()
+      let appConfig = UserConfig()
+      appConfig.root = globalConfig.getConfig(for: "com.example.TaggedBrowser")
+
+      let result = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: globalConfig,
+        appConfigs: [
+          (bundleId: "com.example.TaggedBrowser", config: appConfig, customName: "Tagged Browser"),
+        ]
+      )
+
+      let appRule = try XCTUnwrap(
+        result.managedRules.first(where: {
+          (($0["description"] as? String)?.hasPrefix("LeaderKeyManaged/AppMode/") ?? false)
+            && flattenManipulators(from: [$0]).contains(where: { fromKeyCode(in: $0) == "t" })
+        })
+      )
+      let appManipulators = flattenManipulators(from: [appRule])
+
+      XCTAssertTrue(appManipulators.contains(where: { fromKeyCode(in: $0) == "t" }))
+      XCTAssertTrue(appManipulators.contains(where: {
+        fromKeyCode(in: $0) == "t" && hasConditionType($0, type: "frontmost_application_if")
+      }))
+    }
+  }
+
   func testGenerateKarabinerTSExportEmitsNormalAppOverrideDeltas() throws {
     let normalFallbackRoot = Group(
       key: nil,

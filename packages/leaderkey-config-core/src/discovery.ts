@@ -11,10 +11,16 @@ import {
   NORMAL_APP_CONFIG_PREFIX,
   NORMAL_FALLBACK_CONFIG_DISPLAY_NAME,
   NORMAL_FALLBACK_CONFIG_FILE_NAME,
+  NORMAL_TAG_CONFIG_DISPLAY_PREFIX,
+  NORMAL_TAG_CONFIG_PREFIX,
+  TAGS_REGISTRY_FILE_NAME,
+  TAG_CONFIG_DISPLAY_PREFIX,
+  TAG_CONFIG_PREFIX,
   defaultConfigDirectory,
 } from "./constants.js";
+import { loadTagsRegistry, tagConfigPath, tagDisplayName } from "./tags.js";
 import { cocoaAbsoluteTime, stringifyConfig } from "./utils.js";
-import type { ConfigMetadata, ConfigSummary, DiscoveredConfigFile, GroupNode } from "./types.js";
+import type { ConfigMetadata, ConfigSummary, DiscoveredConfigFile, GroupNode, TagAssignmentScope } from "./types.js";
 
 function buildMetaPath(filePath: string): string {
   return filePath.replace(/\.json$/i, `${META_FILE_SUFFIX}`);
@@ -73,13 +79,20 @@ export async function writeGroupToFile(filePath: string, group: GroupNode): Prom
 export async function discoverLiveConfigs(
   configDirectory = defaultConfigDirectory(),
 ): Promise<DiscoveredConfigFile[]> {
+  const registryResult = await loadTagsRegistry(configDirectory);
+  const registry = registryResult.registry;
   const entries = await fs.readdir(configDirectory, { withFileTypes: true });
   const discovered: DiscoveredConfigFile[] = [];
 
   const globalFilePath = path.join(configDirectory, GLOBAL_CONFIG_FILE_NAME);
   const fallbackFilePath = path.join(configDirectory, FALLBACK_CONFIG_FILE_NAME);
   const normalFallbackFilePath = path.join(configDirectory, NORMAL_FALLBACK_CONFIG_FILE_NAME);
-  const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json") && !entry.name.endsWith(META_FILE_SUFFIX));
+  const files = entries.filter((entry) =>
+    entry.isFile() &&
+    entry.name.endsWith(".json") &&
+    !entry.name.endsWith(META_FILE_SUFFIX) &&
+    entry.name !== TAGS_REGISTRY_FILE_NAME
+  );
 
   for (const entry of files) {
     const filePath = path.join(configDirectory, entry.name);
@@ -91,6 +104,7 @@ export async function discoverLiveConfigs(
     let scope: DiscoveredConfigFile["scope"] | undefined;
     let defaultDisplayName: string | undefined;
     let bundleId: string | undefined;
+    let tagId: string | undefined;
 
     if (filePath === globalFilePath) {
       scope = "global";
@@ -105,10 +119,18 @@ export async function discoverLiveConfigs(
       scope = "normalApp";
       bundleId = entry.name.slice(NORMAL_APP_CONFIG_PREFIX.length, -".json".length);
       defaultDisplayName = `Normal: ${bundleId}`;
+    } else if (entry.name.startsWith(NORMAL_TAG_CONFIG_PREFIX)) {
+      scope = "normalTag";
+      tagId = entry.name.slice(NORMAL_TAG_CONFIG_PREFIX.length, -".json".length);
+      defaultDisplayName = `${NORMAL_TAG_CONFIG_DISPLAY_PREFIX}${tagDisplayName(registry, tagId)}`;
     } else if (entry.name.startsWith(APP_CONFIG_PREFIX)) {
       scope = "app";
       bundleId = entry.name.slice(APP_CONFIG_PREFIX.length, -".json".length);
       defaultDisplayName = `App: ${bundleId}`;
+    } else if (entry.name.startsWith(TAG_CONFIG_PREFIX)) {
+      scope = "tag";
+      tagId = entry.name.slice(TAG_CONFIG_PREFIX.length, -".json".length);
+      defaultDisplayName = `${TAG_CONFIG_DISPLAY_PREFIX}${tagDisplayName(registry, tagId)}`;
     }
 
     if (!scope || !defaultDisplayName) {
@@ -126,15 +148,88 @@ export async function discoverLiveConfigs(
       metaMtimeMs: metaStat?.mtimeMs,
       metaPath,
       scope,
+      tagId,
     });
+  }
+
+  const discoveredPaths = new Set(discovered.map((config) => config.filePath));
+
+  async function appendVirtualAssignedAppConfig(scope: TagAssignmentScope, bundleId: string): Promise<void> {
+    const normalMode = scope === "normalApp";
+    const fileName = `${normalMode ? NORMAL_APP_CONFIG_PREFIX : APP_CONFIG_PREFIX}${bundleId}.json`;
+    const filePath = path.join(configDirectory, fileName);
+    if (discoveredPaths.has(filePath)) {
+      return;
+    }
+
+    const metaPath = buildMetaPath(filePath);
+    const metadata = await loadMetadata(metaPath);
+    const metaStat = await fs.stat(metaPath).catch(() => undefined);
+    const defaultDisplayName = normalMode ? `Normal: ${bundleId}` : `App: ${bundleId}`;
+
+    discovered.push({
+      bundleId,
+      customName: metadata?.customName,
+      defaultDisplayName,
+      displayName: metadata?.customName?.trim() || defaultDisplayName,
+      fileMtimeMs: 0,
+      fileName,
+      filePath,
+      metaMtimeMs: metaStat?.mtimeMs,
+      metaPath,
+      scope,
+      virtual: true,
+    });
+    discoveredPaths.add(filePath);
+  }
+
+  for (const [bundleId, tagIds] of Object.entries(registry.assignments.app)) {
+    if (tagIds.length > 0) {
+      await appendVirtualAssignedAppConfig("app", bundleId);
+    }
+  }
+  for (const [bundleId, tagIds] of Object.entries(registry.assignments.normalApp)) {
+    if (tagIds.length > 0) {
+      await appendVirtualAssignedAppConfig("normalApp", bundleId);
+    }
+  }
+
+  const virtualTagRequests: Array<{ normalMode: boolean; tagId: string }> = [
+    ...Object.values(registry.assignments.app).flat().map((tagId) => ({ normalMode: false, tagId })),
+    ...Object.values(registry.assignments.normalApp).flat().map((tagId) => ({ normalMode: true, tagId })),
+  ];
+  for (const { normalMode, tagId } of virtualTagRequests) {
+    const scope: DiscoveredConfigFile["scope"] = normalMode ? "normalTag" : "tag";
+    const filePath = tagConfigPath(configDirectory, tagId, normalMode);
+    if (discoveredPaths.has(filePath)) {
+      continue;
+    }
+
+    const fileName = path.basename(filePath);
+    const defaultDisplayName =
+      `${normalMode ? NORMAL_TAG_CONFIG_DISPLAY_PREFIX : TAG_CONFIG_DISPLAY_PREFIX}${tagDisplayName(registry, tagId)}`;
+    discovered.push({
+      defaultDisplayName,
+      displayName: defaultDisplayName,
+      fileMtimeMs: 0,
+      fileName,
+      filePath,
+      metaPath: buildMetaPath(filePath),
+      scope,
+      tagId,
+      virtual: true,
+    });
+    discoveredPaths.add(filePath);
   }
 
   const scopeRank: Record<DiscoveredConfigFile["scope"], number> = {
     global: 0,
     fallback: 1,
-    normalFallback: 2,
-    app: 3,
-    normalApp: 4,
+    tag: 2,
+    normalFallback: 3,
+    normalTag: 4,
+    app: 5,
+    normalApp: 6,
   };
 
   return discovered.sort((left, right) => {
@@ -146,17 +241,20 @@ export async function discoverLiveConfigs(
   });
 }
 
-export function configFingerprint(configs: DiscoveredConfigFile[]): string {
-  return configs
-    .map((config) =>
-      [
-        config.filePath,
-        config.fileMtimeMs.toFixed(0),
-        (config.metaMtimeMs ?? 0).toFixed(0),
-        config.displayName,
-      ].join(":"),
-    )
-    .join("|");
+export function configFingerprint(configs: DiscoveredConfigFile[], registryMtimeMs?: number): string {
+  return [
+    `registry:${registryMtimeMs?.toFixed(0) ?? 0}`,
+    ...configs
+      .map((config) =>
+        [
+          config.filePath,
+          config.fileMtimeMs.toFixed(0),
+          (config.metaMtimeMs ?? 0).toFixed(0),
+          config.displayName,
+          config.virtual ? "virtual" : "file",
+        ].join(":"),
+      ),
+  ].join("|");
 }
 
 export function toConfigSummaries(configs: DiscoveredConfigFile[]): ConfigSummary[] {
@@ -165,5 +263,7 @@ export function toConfigSummaries(configs: DiscoveredConfigFile[]): ConfigSummar
     displayName: config.displayName,
     filePath: config.filePath,
     scope: config.scope,
+    tagId: config.tagId,
+    virtual: config.virtual,
   }));
 }

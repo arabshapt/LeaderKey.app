@@ -100,6 +100,192 @@ final class UserConfigTests: XCTestCase {
     }))
   }
 
+  func testTagAssignmentsCreateVirtualAppConfigAndMergeInOrder() throws {
+    let registry = TagsRegistry(
+      tags: [
+        TagDefinition(id: "browser", name: "Browser"),
+        TagDefinition(id: "web", name: "Web"),
+      ],
+      assignments: TagAssignments(
+        app: ["com.google.Chrome": ["browser", "web"]],
+        normalApp: [:]
+      )
+    )
+    let fallback = Group(
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            stickyMode: nil,
+            actions: [
+              .action(Action(key: "d", type: .command, value: "echo fallback duplicate")),
+              .action(Action(key: "f", type: .command, value: "echo fallback only")),
+            ]
+          )
+        )
+      ]
+    )
+    let browserTag = Group(
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            stickyMode: nil,
+            actions: [
+              .action(Action(key: "d", type: .command, value: "echo browser wins")),
+              .action(Action(key: "b", type: .command, value: "echo browser only")),
+            ]
+          )
+        )
+      ]
+    )
+    let webTag = Group(
+      actions: [
+        .group(
+          Group(
+            key: "w",
+            label: "Window",
+            stickyMode: nil,
+            actions: [
+              .action(Action(key: "d", type: .command, value: "echo web shadowed")),
+              .action(Action(key: "x", type: .command, value: "echo web only")),
+            ]
+          )
+        )
+      ]
+    )
+
+    let encoder = JSONEncoder()
+    try encoder.encode(registry).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("tags-registry.json"))
+    )
+    try encoder.encode(fallback).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("app-fallback-config.json"))
+    )
+    try encoder.encode(browserTag).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("tag.browser.json"))
+    )
+    try encoder.encode(webTag).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("tag.web.json"))
+    )
+
+    subject.ensureAndLoad()
+
+    XCTAssertNotNil(subject.discoveredConfigFiles["App: com.google.Chrome"])
+    XCTAssertFalse(
+      FileManager.default.fileExists(
+        atPath: (tempBaseDir as NSString).appendingPathComponent("app.com.google.Chrome.json")
+      )
+    )
+
+    let merged = subject.getConfig(for: "com.google.Chrome")
+    guard case .group(let windowGroup) = merged.actions.first(where: { $0.item.key == "w" }) else {
+      return XCTFail("Expected merged window group")
+    }
+
+    let duplicate = windowGroup.actions.compactMap { item -> Action? in
+      guard case .action(let action) = item, action.key == "d" else { return nil }
+      return action
+    }.first
+    XCTAssertEqual(duplicate?.value, "echo browser wins")
+    XCTAssertEqual(duplicate?.fallbackSource, "\(tagConfigDisplayPrefix)Browser")
+
+    let webOnly = windowGroup.actions.compactMap { item -> Action? in
+      guard case .action(let action) = item, action.key == "x" else { return nil }
+      return action
+    }.first
+    XCTAssertEqual(webOnly?.value, "echo web only")
+    XCTAssertEqual(webOnly?.fallbackSource, "\(tagConfigDisplayPrefix)Web")
+
+    let fallbackOnly = windowGroup.actions.compactMap { item -> Action? in
+      guard case .action(let action) = item, action.key == "f" else { return nil }
+      return action
+    }.first
+    XCTAssertEqual(fallbackOnly?.value, "echo fallback only")
+    XCTAssertEqual(fallbackOnly?.fallbackSource, defaultAppConfigDisplayName)
+  }
+
+  func testTagAssignmentsMergeWhenFallbackConfigIsMissing() throws {
+    let registry = TagsRegistry(
+      tags: [TagDefinition(id: "browser", name: "Browser")],
+      assignments: TagAssignments(
+        app: ["com.google.Chrome": ["browser"]],
+        normalApp: [:]
+      )
+    )
+    let browserTag = Group(
+      actions: [
+        .action(Action(key: "b", type: .command, value: "echo browser"))
+      ]
+    )
+
+    let encoder = JSONEncoder()
+    try encoder.encode(registry).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("tags-registry.json"))
+    )
+    try encoder.encode(browserTag).write(
+      to: URL(fileURLWithPath: (tempBaseDir as NSString).appendingPathComponent("tag.browser.json"))
+    )
+
+    let merged = subject.getConfig(for: "com.google.Chrome")
+    let inheritedTagAction = merged.actions.compactMap { item -> Action? in
+      guard case .action(let action) = item, action.key == "b" else { return nil }
+      return action
+    }.first
+    XCTAssertEqual(inheritedTagAction?.value, "echo browser")
+    XCTAssertEqual(inheritedTagAction?.fallbackSource, "\(tagConfigDisplayPrefix)Browser")
+  }
+
+  func testTagCrudAssignmentReorderAndDeletionSemantics() throws {
+    let browser = subject.createTag(name: "Browser Tools")
+    XCTAssertEqual(browser?.id, "browser-tools")
+    XCTAssertTrue(
+      FileManager.default.fileExists(
+        atPath: (tempBaseDir as NSString).appendingPathComponent("tag.browser-tools.json")
+      )
+    )
+
+    let duplicate = subject.createTag(name: "Browser Tools", createRegularConfig: false)
+    XCTAssertEqual(duplicate?.id, "browser-tools-2")
+
+    let renamed = subject.renameTag(id: "browser-tools", name: "Web Browsers")
+    XCTAssertEqual(renamed?.id, "browser-tools")
+    XCTAssertEqual(renamed?.name, "Web Browsers")
+
+    _ = subject.updateTagAssignments(
+      bundleId: "com.google.Chrome",
+      normalMode: false,
+      tagIds: ["browser-tools", "browser-tools-2"]
+    )
+    _ = subject.moveAssignedTag(
+      bundleId: "com.google.Chrome",
+      normalMode: false,
+      tagId: "browser-tools-2",
+      direction: -1
+    )
+    var registry = subject.loadTagsRegistry()
+    XCTAssertEqual(registry.assignments.app["com.google.Chrome"], ["browser-tools-2", "browser-tools"])
+
+    XCTAssertFalse(subject.deleteTag(id: "browser-tools"))
+    XCTAssertTrue(
+      testAlertManager.shownAlerts.contains {
+        $0.message.contains("assigned")
+      }
+    )
+
+    XCTAssertTrue(subject.deleteTag(id: "browser-tools", removeAssignments: true))
+    registry = subject.loadTagsRegistry()
+    XCTAssertFalse(registry.tags.contains(where: { $0.id == "browser-tools" }))
+    XCTAssertEqual(registry.assignments.app["com.google.Chrome"], ["browser-tools-2"])
+    XCTAssertFalse(
+      FileManager.default.fileExists(
+        atPath: (tempBaseDir as NSString).appendingPathComponent("tag.browser-tools.json")
+      )
+    )
+  }
+
   func testSavePrunesEmptyDraftActionsBeforeValidation() throws {
     let chromeConfigPath = (tempBaseDir as NSString).appendingPathComponent(
       "app.com.google.Chrome.json")

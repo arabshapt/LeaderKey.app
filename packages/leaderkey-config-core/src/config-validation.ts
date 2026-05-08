@@ -6,6 +6,8 @@ import {
   GLOBAL_CONFIG_FILE_NAME,
   NORMAL_APP_CONFIG_PREFIX,
   NORMAL_FALLBACK_CONFIG_FILE_NAME,
+  NORMAL_TAG_CONFIG_PREFIX,
+  TAG_CONFIG_PREFIX,
 } from "./constants.js";
 import { parseIntellijActionValue, parseMenuActionValue } from "./action-values.js";
 import type { ActionNode, CachePayload, ConfigItem, FlatIndexRecord, ScopeType } from "./types.js";
@@ -169,12 +171,14 @@ function isSameEditableRecord(currentRecord: FlatIndexRecord | undefined, candid
 }
 
 export function isNormalScope(scope: ScopeType | undefined): boolean {
-  return scope === "normalApp" || scope === "normalFallback";
+  return scope === "normalApp" || scope === "normalFallback" || scope === "normalTag";
 }
 
 export function isNormalConfigPath(filePath: string): boolean {
   const fileName = path.basename(filePath);
-  return fileName === NORMAL_FALLBACK_CONFIG_FILE_NAME || fileName.startsWith(NORMAL_APP_CONFIG_PREFIX);
+  return fileName === NORMAL_FALLBACK_CONFIG_FILE_NAME ||
+    fileName.startsWith(NORMAL_APP_CONFIG_PREFIX) ||
+    fileName.startsWith(NORMAL_TAG_CONFIG_PREFIX);
 }
 
 export function normalizeConfigKeyReference(value: string): string {
@@ -219,8 +223,14 @@ export function scopeForConfigPath(filePath: string): ScopeType | undefined {
   if (fileName.startsWith(NORMAL_APP_CONFIG_PREFIX)) {
     return "normalApp";
   }
+  if (fileName.startsWith(NORMAL_TAG_CONFIG_PREFIX)) {
+    return "normalTag";
+  }
   if (fileName.startsWith(APP_CONFIG_PREFIX)) {
     return "app";
+  }
+  if (fileName.startsWith(TAG_CONFIG_PREFIX)) {
+    return "tag";
   }
   return undefined;
 }

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { ConfigMetadata, GroupNode } from "../src/index.js";
+import type { ConfigMetadata, GroupNode, TagsRegistry } from "../src/index.js";
 
 export async function createTempConfigDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "leaderkey-config-core-"));
@@ -29,8 +29,13 @@ export async function readJsonFile<T>(filePath: string): Promise<T> {
   return JSON.parse(rawText) as T;
 }
 
+export async function writeTagsRegistry(directory: string, registry: TagsRegistry): Promise<string> {
+  const filePath = path.join(directory, "tags-registry.json");
+  await fs.writeFile(filePath, `${JSON.stringify(registry, null, 2)}\n`);
+  return filePath;
+}
+
 export function expectRecord<T>(value: T | undefined, message: string): T {
   assert.ok(value, message);
   return value;
 }
-
