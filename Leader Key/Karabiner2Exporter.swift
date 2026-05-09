@@ -1247,10 +1247,6 @@ final class Karabiner2Exporter {
     return conditions
   }
 
-  private static func bundleRegex(for bundleId: String) -> String {
-    "^\(NSRegularExpression.escapedPattern(for: bundleId))$"
-  }
-
   private static func resolveActivationShortcut(
     name: KeyboardShortcuts.Name,
     fallbackKeyCode: String,

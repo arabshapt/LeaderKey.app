@@ -1181,6 +1181,95 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }))
   }
 
+  func testGeneratedFrontmostAppConditionsUseAnchoredEscapedRegex() throws {
+    let globalConfig = UserConfig()
+    let chromeConfig = UserConfig()
+    chromeConfig.root.actions = [
+      .action(makeTextAction(key: "c", label: "Chrome", value: "chrome"))
+    ]
+    let chromePwaConfig = UserConfig()
+    chromePwaConfig.root.actions = [
+      .action(makeTextAction(key: "p", label: "Chrome PWA", value: "pwa"))
+    ]
+    let raycastConfig = UserConfig()
+    raycastConfig.root.actions = [
+      .action(makeTextAction(key: "r", label: "Raycast", value: "raycast"))
+    ]
+    let normalIntellijConfig = UserConfig()
+    normalIntellijConfig.root.actions = [
+      .action(makeTextAction(key: "i", label: "IntelliJ", value: "intellij"))
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
+      globalConfig: globalConfig,
+      appConfigs: [
+        (bundleId: "com.google.Chrome", config: chromeConfig, customName: "Chrome"),
+        (
+          bundleId: "com.google.Chrome.app.gdfainmijkhfnkclnpcjbdgpdjfpmbde",
+          config: chromePwaConfig,
+          customName: "Gemini Chrome"
+        ),
+        (bundleId: "com.raycast.macos", config: raycastConfig, customName: "Raycast"),
+      ],
+      normalAppConfigs: [
+        (bundleId: "com.jetbrains.intellij", config: normalIntellijConfig, customName: "IntelliJ")
+      ]
+    )
+
+    let patterns = flattenManipulators(from: result.managedRules)
+      .flatMap { frontmostBundleIdentifiers(in: $0) }
+
+    XCTAssertFalse(patterns.isEmpty)
+    XCTAssertFalse(patterns.contains("com.google.Chrome"))
+    for pattern in patterns {
+      XCTAssertTrue(pattern.hasPrefix("^"), "Expected anchored app regex: \(pattern)")
+      XCTAssertTrue(pattern.hasSuffix("$"), "Expected anchored app regex: \(pattern)")
+      XCTAssertFalse(containsUnescapedDot(in: pattern), "Expected escaped bundle dots: \(pattern)")
+    }
+  }
+
+  func testChromeBaseBundleRegexDoesNotMatchChromePWA() throws {
+    let globalConfig = UserConfig()
+    let baseChromeBundle = "com.google.Chrome"
+    let pwaBundle = "com.google.Chrome.app.gdfainmijkhfnkclnpcjbdgpdjfpmbde"
+
+    let chromeConfig = UserConfig()
+    chromeConfig.root.actions = [
+      .action(makeTextAction(key: "c", label: "Chrome", value: "chrome"))
+    ]
+    let chromePwaConfig = UserConfig()
+    chromePwaConfig.root.actions = [
+      .action(makeTextAction(key: "p", label: "Gemini", value: "gemini"))
+    ]
+
+    let result = try Karabiner2Exporter.generateKarabinerTSExport(
+      globalConfig: globalConfig,
+      appConfigs: [
+        (bundleId: baseChromeBundle, config: chromeConfig, customName: "Chrome"),
+        (bundleId: pwaBundle, config: chromePwaConfig, customName: "Gemini Chrome"),
+      ]
+    )
+    let manipulators = flattenManipulators(from: result.managedRules)
+    let baseChromeAction = try XCTUnwrap(manipulators.first(where: {
+      fromKeyCode(in: $0) == "c" && sendUserCommandPayloads(manipulator: $0).contains(where: {
+        stateIdPayloadBundleId($0) == baseChromeBundle
+      })
+    }))
+    let pwaAction = try XCTUnwrap(manipulators.first(where: {
+      fromKeyCode(in: $0) == "p" && sendUserCommandPayloads(manipulator: $0).contains(where: {
+        stateIdPayloadBundleId($0) == pwaBundle
+      })
+    }))
+
+    let basePatterns = frontmostBundleIdentifiers(in: baseChromeAction)
+    XCTAssertTrue(basePatterns.contains(where: { regex($0, matches: baseChromeBundle) }))
+    XCTAssertFalse(basePatterns.contains(where: { regex($0, matches: pwaBundle) }))
+
+    let pwaPatterns = frontmostBundleIdentifiers(in: pwaAction)
+    XCTAssertTrue(pwaPatterns.contains(where: { regex($0, matches: pwaBundle) }))
+    XCTAssertFalse(pwaPatterns.contains(where: { regex($0, matches: baseChromeBundle) }))
+  }
+
   func testOverlayBundleResolvesToBaseAppConfigWhenBaseExists() throws {
     let raycastRoot = Group(
       key: nil,
@@ -2274,6 +2363,41 @@ final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
     }.first ?? []
   }
 
+  private func containsUnescapedDot(in pattern: String) -> Bool {
+    var backslashCount = 0
+    for character in pattern {
+      if character == "\\" {
+        backslashCount += 1
+        continue
+      }
+
+      if character == "." && backslashCount % 2 == 0 {
+        return true
+      }
+      backslashCount = 0
+    }
+    return false
+  }
+
+  private func regex(_ pattern: String, matches value: String) -> Bool {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+      XCTFail("Invalid regex pattern: \(pattern)")
+      return false
+    }
+    let range = NSRange(value.startIndex..<value.endIndex, in: value)
+    return regex.firstMatch(in: value, range: range) != nil
+  }
+
+  private func stateIdPayloadBundleId(_ payload: String) -> String? {
+    let parts = payload.split(separator: " ").map(String.init)
+    guard let bundleIndex = parts.firstIndex(of: "bundle"),
+          bundleIndex + 1 < parts.count
+    else {
+      return nil
+    }
+    return parts[bundleIndex + 1]
+  }
+
   private func hasKeyCodeEvent(_ manipulator: [String: Any], keyCode: String) -> Bool {
     let events = (manipulator["to"] as? [Any]) ?? []
     return events.contains { event in
@@ -2378,6 +2502,21 @@ final class Karabiner2ExporterEDNInjectionTests: XCTestCase {
 
     XCTAssertLessThan(longChromeRange.lowerBound, shortChromeRange.lowerBound)
     XCTAssertLessThan(aaaRange.lowerBound, bbbRange.lowerBound)
+  }
+
+  func testUnifiedGokuApplicationsEscapeBundleRegexPatterns() throws {
+    let result = try Karabiner2Exporter.generateUnifiedGokuEDNHierarchical(
+      globalConfig: UserConfig(),
+      appConfigs: [
+        (bundleId: "com.google.Chrome", config: UserConfig(), customName: "Chrome")
+      ]
+    )
+
+    XCTAssertTrue(
+      result.edn.contains(":chrome [\"^com\\\\.google\\\\.Chrome$\" \"^com\\\\.google\\\\.Chrome\\\\.overlay$\"]")
+    )
+    XCTAssertFalse(result.edn.contains(":chrome [\"com.google.Chrome\""))
+    XCTAssertTrue(result.edn.contains(":payload \"activate com.google.Chrome\""))
   }
 
   func testGenerateCanonicalSpecificConfigRulesAppendsTerminalRulesInFixedOrder() throws {
