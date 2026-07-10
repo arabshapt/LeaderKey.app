@@ -83,22 +83,43 @@ final class VoiceCoordinator {
 
   private let statusItem: StatusItem
   private let config: UserConfig
-  private let audioCapture = VoiceAudioCapture()
+  private let audioCapture: VoiceAudioCapturing
   private let dispatchBridge = VoiceDispatchBridge()
-  private let transcriber = OpenAICompatibleSpeechToTextClient()
+  private let transcriber: SpeechTranscribing
+  private let micAuthorizationStatus: () -> AVAuthorizationStatus
+  private let requestMicAccess: (@escaping (Bool) -> Void) -> Void
   private var settingsObserver: NSObjectProtocol?
   private var recentSuccessfulCommands: [VoiceDispatchRecentCommandContext] = []
   private var captureMode: CaptureMode = .command
-  private var state: State = .idle {
+  private(set) var state: State = .idle {
     didSet {
       statusItem.voiceStatus = state.statusItemStatus
       debugLog("[VoiceCoordinator] State: \(state.displayName)")
     }
   }
 
-  init(statusItem: StatusItem, config: UserConfig) {
+  init(
+    statusItem: StatusItem,
+    config: UserConfig,
+    audioCapture: VoiceAudioCapturing = VoiceAudioCapture(),
+    transcriber: SpeechTranscribing = OpenAICompatibleSpeechToTextClient(),
+    micAuthorizationStatus: @escaping () -> AVAuthorizationStatus = {
+      AVCaptureDevice.authorizationStatus(for: .audio)
+    },
+    requestMicAccess: @escaping (@escaping (Bool) -> Void) -> Void = { completion in
+      AVCaptureDevice.requestAccess(for: .audio) { granted in
+        DispatchQueue.main.async {
+          completion(granted)
+        }
+      }
+    }
+  ) {
     self.statusItem = statusItem
     self.config = config
+    self.audioCapture = audioCapture
+    self.transcriber = transcriber
+    self.micAuthorizationStatus = micAuthorizationStatus
+    self.requestMicAccess = requestMicAccess
   }
 
   func start() {
@@ -158,7 +179,7 @@ final class VoiceCoordinator {
     state = .idle
   }
 
-  private func handleToggleKeyDown() {
+  func handleToggleKeyDown() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -175,7 +196,7 @@ final class VoiceCoordinator {
     }
   }
 
-  private func handleHoldKeyDown() {
+  func handleHoldKeyDown() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -190,7 +211,7 @@ final class VoiceCoordinator {
     }
   }
 
-  private func handleHoldKeyUp() {
+  func handleHoldKeyUp() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -201,7 +222,7 @@ final class VoiceCoordinator {
     }
   }
 
-  private func handleDictateToggleKeyDown() {
+  func handleDictateToggleKeyDown() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -218,7 +239,7 @@ final class VoiceCoordinator {
     }
   }
 
-  private func handleDictateHoldKeyDown() {
+  func handleDictateHoldKeyDown() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -233,7 +254,7 @@ final class VoiceCoordinator {
     }
   }
 
-  private func handleDictateHoldKeyUp() {
+  func handleDictateHoldKeyUp() {
     guard voiceEnabled else {
       state = .idle
       return
@@ -613,15 +634,11 @@ final class VoiceCoordinator {
   }
 
   private func ensureMicrophoneAccess(_ completion: @escaping (Bool) -> Void) {
-    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    switch micAuthorizationStatus() {
     case .authorized:
       completion(true)
     case .notDetermined:
-      AVCaptureDevice.requestAccess(for: .audio) { granted in
-        DispatchQueue.main.async {
-          completion(granted)
-        }
-      }
+      requestMicAccess(completion)
     case .denied, .restricted:
       completion(false)
     @unknown default:
@@ -648,7 +665,7 @@ final class VoiceCoordinator {
     let shouldPrewarm =
       Defaults[.voiceDispatcherEnabled]
       && Defaults[.voicePrewarmMicrophone]
-      && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+      && micAuthorizationStatus() == .authorized
 
     audioCapture.setPrewarmingEnabled(shouldPrewarm)
 

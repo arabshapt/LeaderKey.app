@@ -419,6 +419,9 @@ class Controller {
 
   private func showCheatsheet() {
     if !window.hasCheatsheet { return }
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "Controller.showCheatsheet", signpostID: spid)
+    defer { os_signpost(.end, log: signpostLog, name: "Controller.showCheatsheet", signpostID: spid) }
     if cheatsheetWindow == nil {
       cheatsheetWindow = Cheatsheet.createWindow(for: userState)
     }
@@ -450,6 +453,11 @@ class Controller {
   }
 
   func runAction(_ action: Action) {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(
+      .begin, log: signpostLog, name: "Controller.runAction", signpostID: spid, "%{public}s",
+      action.type.rawValue)
+    defer { os_signpost(.end, log: signpostLog, name: "Controller.runAction", signpostID: spid) }
     switch action.type {
     case .application:
       KarabinerUserCommandReceiver.openAppDirectly(action.value)

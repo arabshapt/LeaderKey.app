@@ -1,58 +1,65 @@
-# Refactor Raw JSON Rules to Idiomatic karabiner.ts Builder API
+# Todo — Perf/Stability + Shortcut Viz + Command Scout + Rock-Solid STT
 
-## Tasks
-- [x] Batch 1: Refactor 5 tiny rules (1 manipulator each)
-- [x] Batch 2: Refactor ~12 small rules (2-6 manipulators)
-- [x] Batch 3: Refactor ~15 medium rules (7-30 manipulators)
-- [x] Batch 4: Refactor large mode/device rules (escape-mode, tilde-mode, arc/dia/zen/intellij-kinesis, global-kinesis-shortcuts, appswitcher-kinesis, tab-mode, backslash-mode)
-- [x] Batch 5: Refactor LeaderKey infrastructure (modifier-passthrough, activation)
-- [x] Run final full parity test — all 7 tests pass
+Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.md`
 
-## Kept as raw JSON (intentional)
-- `quote-mode.ts`, `d-mode.ts`, `o-mode.ts`, `a-mode.ts`, `f-mode.ts`, `slash-mode.ts`, `spacebar-mode.ts` — use `simultaneous` from events not supported by `map()` builder
-- `global-all-keyboards.ts` — uses `pointing_button`, `consumer_key_code`, `parameters`
-- `global-mode.ts`, `fallback-mode.ts` — generated state machines (148/193 manipulators), no hand-editing benefit
+## Stage 0 — Baseline
+- [x] Snapshot-commit pre-existing dirty voice files + untracked LKExceptionCatcher shim (NOT kar / karabiner.ts generated files)
+
+## Stage A — Safety nets
+- [x] T1.0 Fix ControllerTests init + add to test target; run it green
+- [x] T1.0 Add missing signposts (Controller.runAction, cheatsheet show)
+- [x] T4.0 VoiceAudioCapturing + SpeechTranscribing protocol seams, injected via init defaults
+- [x] T4.0 VoiceCoordinatorTests with mocks (happy path, toggle, stuck-recording race repro as XCTExpectFailure)
+
+## Stage B — Voice correctness (T4.1)
+- [ ] Race fix: synchronous begin when .authorized + pendingKeyUpWhileArming
+- [ ] Watchdog timer on .transcribing/.planning (~35s)
+- [ ] VoiceTranscriber cancel() + coordinator cancels stale tasks
+- [ ] Device-change onRecordingInterrupted surfacing
+
+## Stage C — appConfigs race fix (T1.1)
+- [ ] Locked accessors for appConfigs; route all accesses
+- [ ] root snapshot for off-main getConfig callers (after reverse-sync grep check)
+- [ ] Concurrency hammer test; run with TSan
+
+## Stage D — Voice latency/delivery/streaming
+- [ ] T4.2 Voice signposts (baseline)
+- [ ] T4.2 Trailing delay 0.3s → 0 (fallback 100ms if clipping)
+- [ ] T4.2 afconvert → in-process AVAudioConverter (+ fixture WAV test)
+- [ ] T4.2 Cache mic auth; stop per-press updateAudioWarmState
+- [ ] T4.3 Clipboard save/restore around paste (changeCount guard)
+- [ ] T4.3 Focus check before paste
+- [ ] T4.3 Optional trailing-period strip toggle
+- [ ] T4.4A Chunked pre-transcription while recording (local-provider gated)
+
+## Stage E — Main-thread & hot-path (T1.2/T1.3)
+- [ ] T1.2 Offload .menu AX traversal to background (mirror v1 path)
+- [ ] T1.3 Associated objects → stored properties (one per commit)
+
+## Stage F — Shortcut visualization (T2)
+- [ ] T2.1 ShortcutsOverviewModel + tests
+- [ ] T2.2 ShortcutsOverviewView (keyboard grid + flattened list)
+- [ ] T2.3a Settings pane (.shortcuts)
+- [ ] T2.3b Standalone window + socket command `shortcut-map open`
+- [ ] T2.3c HTML export
+
+## Stage G — Command Scout (T3)
+- [ ] T3.1 AX key-equivalents on menu scan + UI chip + merge normalization
+- [ ] T3.2 Widen sequence namespace (uppercase, punctuation last resort)
+- [ ] T3.3 Free-slot integration + embedded compact grid
+- [ ] T3.4 AI-only mode for non-running apps
+- [ ] T3.5 UsageStats (default-off) + Scout/viz consumers
+- [ ] T3.6 Global/fallback scouting
+
+## Stage H — Cheatsheet + low cleanups (T1.4/T1.5)
+- [ ] T1.4 Cheatsheet window reuse for .always
+- [ ] T1.5 Delete dead CGEvent-tap machinery
+- [ ] T1.5 Delete ThreadOptimization.debounce
+- [ ] T1.5 Karabiner2InputMethod.isActive returns bool directly
+- [ ] T1.5 Cheatsheet sort hoist + stable ForEach ids
+- [ ] T1.5 Theme-change: close old window
+- [ ] T1.5 Document/fix main.sync on socket queue
+- [ ] T1.5 (optional) FileMonitor watches config dir
 
 ## Review
-
-**What changed**: Converted ~30 rule files from raw `JSON.parse(String.raw\`...\`)` blocks to idiomatic karabiner.ts builder API (`map()`, `.to()`, `.condition()`, `.build()`). Total ~600+ manipulators refactored.
-
-**Files refactored** (all in `karabiner.ts/configs/arabshapt/src/`):
-- `modes/`: escape-mode.ts (39), tilde-mode.ts (34), tab-mode.ts (21), backslash-mode.ts (18)
-- `app-rules/`: safari.ts (7), chrome.ts (8), emacs.ts (9), codecursor.ts (13), code.ts (20), chrome-kinesis.ts (22), warp-apple.ts (5), warp-kinesis.ts (6), arc-apple.ts (6), arc-kinesis.ts (41), dia-kinesis.ts (41), zen-kinesis.ts (41), intellij-kinesis.ts (86), appswitcher-kinesis.ts (12)
-- `device-rules/`: terminal-rcmd.ts, kinesis.ts, global-kinesis-end.ts (6), global-end-apple.ts (2), global-apple-shortcuts.ts (26), global-kinesis-shortcuts.ts (124)
-- `leaderkey/`: modifier-passthrough.ts (8), activation.ts (56), leader-local-to-apps.ts
-- Infrastructure: auto-layers.ts, global-start.ts, caps-layer.ts, test-rule.ts
-
-**Key patterns used**:
-- `...map(key, mandatory, optional).to(key, mods).condition(cond).build()` — spread into array
-- `ifVar(name, value)` / `ifVar(name, value).unless()` for variable conditions
-- `ifApp(bundleId)` for app conditions
-- `ifDevice([...])` for device conditions (shared `kinesis`, `apple_built_in` from devices.ts)
-- `.toVar()`, `.toSendUserCommand()`, `.toConsumerKey()`, `.toNotificationMessage()` for complex to events
-- `mapPointingButton()` for pointing_button from events
-- Exact modifier string preservation (e.g., `'command'` vs `'left_command'`)
-
-**Parity verification**: SHA-256 hash comparison of canonicalized JSON output. All 76 rules match the snapshot exactly.
-
----
-
-# Fix Raycast commands showing "No Results" during async data load
-
-## Tasks
-- [x] Add `List.EmptyView` to `search-shortcuts.tsx` — shows "Loading shortcuts…" while payload loads
-- [x] Add `List.EmptyView` to `add-edit-by-path.tsx` — shows "Loading configs…" while payload loads
-- [x] Add `List.EmptyView` to `browse-configs.tsx` — shows "Loading configs…" while payload loads
-
-## Review
-
-**Root cause**: All three Raycast commands load config data asynchronously via `loadIndex()`. During this async gap, `payload` is `undefined`, so the list renders with zero items. Raycast displays "No Results" for empty lists even when `isLoading={true}`.
-
-**Why it's inconsistent**: When the cache file is valid and the fingerprint matches, `loadIndex()` returns fast enough that the UI never paints the empty state. When the cache is stale or missing, `buildCachePayload()` runs (heavier I/O), creating a visible gap where "No Results" appears.
-
-**Fix**: Added `<List.EmptyView title="Loading …" />` conditionally rendered when data is still loading and no payload exists yet. This replaces the default "No Results" empty state with an appropriate loading message. Once `payload` is set, the `EmptyView` is no longer rendered and normal list items appear.
-
-**Files changed**:
-- `raycast-leader-key/src/search-shortcuts.tsx` — 3 lines added
-- `raycast-leader-key/src/add-edit-by-path.tsx` — 3 lines added
-- `raycast-leader-key/src/browse-configs.tsx` — 3 lines added
+(filled in at the end)

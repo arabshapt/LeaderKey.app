@@ -5,7 +5,17 @@ extension Notification.Name {
   static let voiceSettingsDidChange = Notification.Name("VoiceSettingsDidChange")
 }
 
-final class VoiceAudioCapture {
+/// Seam for VoiceCoordinator so tests can substitute a mock capture backend.
+protocol VoiceAudioCapturing: AnyObject {
+  var isRecording: Bool { get }
+  func setPrewarmingEnabled(_ enabled: Bool)
+  func startRecording() throws
+  func stopRecording() -> VoiceAudioCapture.CaptureResult?
+  func stopCompletely()
+  func cleanupTempFiles()
+}
+
+final class VoiceAudioCapture: VoiceAudioCapturing {
   struct CaptureResult {
     let url: URL
     let duration: TimeInterval

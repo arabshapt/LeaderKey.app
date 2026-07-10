@@ -69,7 +69,18 @@ enum VoiceTranscriptionError: LocalizedError {
   }
 }
 
-final class OpenAICompatibleSpeechToTextClient {
+/// Seam for VoiceCoordinator so tests can substitute a mock transcription backend.
+protocol SpeechTranscribing: AnyObject {
+  func transcribe(
+    audioURL: URL,
+    model: String,
+    baseURL: String,
+    bearerToken: String?,
+    prompt: String?
+  ) async throws -> VoiceTranscriptionResult
+}
+
+final class OpenAICompatibleSpeechToTextClient: SpeechTranscribing {
   private static let maxPromptCharacters = 840
 
   private struct TranscriptionResponse: Decodable {
