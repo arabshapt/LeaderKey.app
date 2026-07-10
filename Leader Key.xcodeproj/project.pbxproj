@@ -50,6 +50,7 @@
 		AA1000022EB0000100000002 /* VoiceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000012EB0000100000001 /* VoiceCoordinator.swift */; };
 		AA1000042EB0000100000004 /* VoicePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000032EB0000100000003 /* VoicePane.swift */; };
 		AA1000062EB0000100000006 /* VoiceAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000052EB0000100000005 /* VoiceAudioCapture.swift */; };
+		AA20000C2EB000020000000C /* LKExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = AA20000B2EB000020000000B /* LKExceptionCatcher.m */; };
 		AA1000082EB0000100000008 /* VoiceTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000072EB0000100000007 /* VoiceTranscriber.swift */; };
 		AA10000A2EB000010000000A /* VoicePromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000092EB0000100000009 /* VoicePromptBuilder.swift */; };
 		AA10000C2EB000010000000C /* VoiceDispatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000B2EB000010000000B /* VoiceDispatchBridge.swift */; };
@@ -159,6 +160,9 @@
 		AA1000012EB0000100000001 /* VoiceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCoordinator.swift; sourceTree = "<group>"; };
 		AA1000032EB0000100000003 /* VoicePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePane.swift; sourceTree = "<group>"; };
 		AA1000052EB0000100000005 /* VoiceAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioCapture.swift; sourceTree = "<group>"; };
+		AA20000A2EB000020000000A /* LKExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LKExceptionCatcher.h; sourceTree = "<group>"; };
+		AA20000B2EB000020000000B /* LKExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LKExceptionCatcher.m; sourceTree = "<group>"; };
+		AA20000D2EB000020000000D /* Leader Key-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Leader Key-Bridging-Header.h"; sourceTree = "<group>"; };
 		AA1000072EB0000100000007 /* VoiceTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTranscriber.swift; sourceTree = "<group>"; };
 		AA1000092EB0000100000009 /* VoicePromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePromptBuilder.swift; sourceTree = "<group>"; };
 		AA10000B2EB000010000000B /* VoiceDispatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDispatchBridge.swift; sourceTree = "<group>"; };
@@ -297,6 +301,9 @@
 				AA0000032EA0000100000003 /* CommandScoutService.swift */,
 				AA00000D2EA0000100000013 /* SignpostLog.swift */,
 				AA1000052EB0000100000005 /* VoiceAudioCapture.swift */,
+				AA20000A2EB000020000000A /* LKExceptionCatcher.h */,
+				AA20000B2EB000020000000B /* LKExceptionCatcher.m */,
+				AA20000D2EB000020000000D /* Leader Key-Bridging-Header.h */,
 				AA1000012EB0000100000001 /* VoiceCoordinator.swift */,
 				AA10000B2EB000010000000B /* VoiceDispatchBridge.swift */,
 				AA1000092EB0000100000009 /* VoicePromptBuilder.swift */,
@@ -413,7 +420,6 @@
 			buildConfigurationList = 427C180C2BD311B500955B98 /* Build configuration list for PBXNativeTarget "Leader Key" */;
 			buildPhases = (
 				42D6FF682DA513A400C8257C /* Format */,
-				42D6FF692DA513A400C8257D /* Reset Accessibility Permissions */,
 				427C17E32BD311B400955B98 /* Sources */,
 				427C17E42BD311B400955B98 /* Frameworks */,
 				427C17E52BD311B400955B98 /* Resources */,
@@ -545,25 +551,6 @@
 			shellPath = /bin/sh;
 			shellScript = "# Type a script or drag a script file from your workspace to insert its path.\n/usr/bin/swift format -r -i \"Leader Key\" \"Leader KeyTests\"\n";
 		};
-		42D6FF692DA513A400C8257D /* Reset Accessibility Permissions */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Reset Accessibility Permissions";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Reset accessibility permissions for development builds\n# This helps avoid confusion when rebuilding the app\n\n# Only run in Debug configuration\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n    echo \"Resetting accessibility permissions for ${PRODUCT_BUNDLE_IDENTIFIER}...\"\n    /usr/bin/tccutil reset Accessibility \"${PRODUCT_BUNDLE_IDENTIFIER}\"\n    echo \"Accessibility permissions reset. You'll need to re-grant them when the app launches.\"\nelse\n    echo \"Skipping accessibility reset for ${CONFIGURATION} configuration\"\nfi\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -588,6 +575,7 @@
 				AA0000042EA0000100000004 /* CommandScoutService.swift in Sources */,
 				AA00000E2EA0000100000014 /* SignpostLog.swift in Sources */,
 				AA1000062EB0000100000006 /* VoiceAudioCapture.swift in Sources */,
+				AA20000C2EB000020000000C /* LKExceptionCatcher.m in Sources */,
 				AA1000022EB0000100000002 /* VoiceCoordinator.swift in Sources */,
 				AA10000C2EB000010000000C /* VoiceDispatchBridge.swift in Sources */,
 				AA10000A2EB000010000000A /* VoicePromptBuilder.swift in Sources */,
@@ -835,6 +823,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.brnbw.Leader-Key";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Leader Key/Leader Key-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -872,6 +861,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.brnbw.Leader-Key";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Leader Key/Leader Key-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

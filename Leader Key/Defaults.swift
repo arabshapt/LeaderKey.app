@@ -130,9 +130,18 @@ extension Defaults.Keys {
   /// Planner routing preference for voice dispatch.
   static let voicePlannerMode = Key<VoicePlannerMode>(
     "voicePlannerMode", default: .fastOnly, suite: defaultsSuite)
+  /// Speech-to-text provider (Groq Cloud or local Parakeet server).
+  static let voiceSTTProvider = Key<VoiceSTTProvider>(
+    "voiceSTTProvider", default: .groq, suite: defaultsSuite)
   /// Groq speech-to-text model.
   static let voiceSTTModel = Key<VoiceSTTModel>(
     "voiceSTTModel", default: .whisperLargeV3Turbo, suite: defaultsSuite)
+  /// Base URL for the local Parakeet OpenAI-compatible ASR server.
+  static let voiceParakeetBaseURL = Key<String>(
+    "voiceParakeetBaseURL", default: "http://192.168.178.83:5092", suite: defaultsSuite)
+  /// Local Parakeet model name sent in the transcription request.
+  static let voiceParakeetModel = Key<String>(
+    "voiceParakeetModel", default: "parakeet-tdt-0.6b-v3", suite: defaultsSuite)
   /// Local inference server URL for planner tiers (llama-server or Ollama).
   static let voiceLlamaServerURL = Key<String>(
     "voiceLlamaServerURL", default: "http://localhost:11434", suite: defaultsSuite)
@@ -538,6 +547,31 @@ enum VoiceSTTModel: String, Defaults.Serializable, CaseIterable, Identifiable {
   }
 }
 
+enum VoiceSTTProvider: String, Defaults.Serializable, CaseIterable, Identifiable {
+  case groq
+  case parakeet
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .groq:
+      return "Groq Cloud"
+    case .parakeet:
+      return "Parakeet (Local)"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .groq:
+      return "Groq's hosted Whisper endpoint. Requires an API key."
+    case .parakeet:
+      return "Self-hosted OpenAI-compatible Parakeet ASR server. No API key needed."
+    }
+  }
+}
+
 enum InputMethodPreference: String, Defaults.Serializable, CaseIterable, Identifiable {
   case karabiner2 = "karabiner2"
 
@@ -632,6 +666,14 @@ extension KeyboardShortcuts.Name {
   )
   static let voiceHoldToTalk = KeyboardShortcuts.Name(
     "voiceHoldToTalk",
+    default: nil
+  )
+  static let voiceDictateToggle = KeyboardShortcuts.Name(
+    "voiceDictateToggle",
+    default: nil
+  )
+  static let voiceDictateHold = KeyboardShortcuts.Name(
+    "voiceDictateHold",
     default: nil
   )
 

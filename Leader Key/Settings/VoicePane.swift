@@ -11,7 +11,10 @@ struct VoicePane: View {
   @Default(.voicePrewarmMicrophone) private var voicePrewarmMicrophone
   @Default(.voiceDispatchMode) private var voiceDispatchMode
   @Default(.voicePlannerMode) private var voicePlannerMode
+  @Default(.voiceSTTProvider) private var voiceSTTProvider
   @Default(.voiceSTTModel) private var voiceSTTModel
+  @Default(.voiceParakeetBaseURL) private var voiceParakeetBaseURL
+  @Default(.voiceParakeetModel) private var voiceParakeetModel
   @Default(.voiceLlamaServerURL) private var voiceLlamaServerURL
   @Default(.voiceTier2Model) private var voiceTier2Model
   @Default(.voiceTier2ModelPath) private var voiceTier2ModelPath
@@ -72,8 +75,18 @@ struct VoicePane: View {
               name: .voiceHoldToTalk
             )
 
+            KeyboardShortcuts.Recorder(
+              "Toggle dictation (paste transcript)",
+              name: .voiceDictateToggle
+            )
+
+            KeyboardShortcuts.Recorder(
+              "Push and hold to dictate",
+              name: .voiceDictateHold
+            )
+
             Text(
-              "Hold-to-talk transcribes when the key is released. Voice dispatch mode (dry-run or execute) is controlled in the Dispatch section below."
+              "Hold-to-talk transcribes when the key is released. Voice dispatch mode (dry-run or execute) is controlled in the Dispatch section below. Dictation records speech, pastes the transcript into the active app, and falls back to the clipboard if paste is blocked."
             )
               .font(.callout)
               .foregroundColor(.secondary)
@@ -84,44 +97,69 @@ struct VoicePane: View {
         Settings.Section(title: "Speech to Text", bottomDivider: true) {
           VStack(alignment: .leading, spacing: 12) {
             HStack {
-              Text("Groq model")
+              Text("Provider")
               Spacer()
-              Picker("", selection: $voiceSTTModel) {
-                ForEach(VoiceSTTModel.allCases) { model in
-                  Text(model.displayName).tag(model)
+              Picker("", selection: $voiceSTTProvider) {
+                ForEach(VoiceSTTProvider.allCases) { provider in
+                  Text(provider.displayName).tag(provider)
                 }
               }
               .labelsHidden()
               .frame(width: 240)
             }
 
-            Text(voiceSTTModel.description)
+            Text(voiceSTTProvider.description)
               .font(.callout)
               .foregroundColor(.secondary)
 
-            HStack(spacing: 10) {
-              SecureField("Groq API key", text: $groqAPIKeyInput)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 360)
-
-              Button("Save") {
-                saveGroqAPIKey()
+            if voiceSTTProvider == .groq {
+              HStack {
+                Text("Groq model")
+                Spacer()
+                Picker("", selection: $voiceSTTModel) {
+                  ForEach(VoiceSTTModel.allCases) { model in
+                    Text(model.displayName).tag(model)
+                  }
+                }
+                .labelsHidden()
+                .frame(width: 240)
               }
-              .disabled(groqAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-              Button("Delete") {
-                deleteGroqAPIKey()
+              Text(voiceSTTModel.description)
+                .font(.callout)
+                .foregroundColor(.secondary)
+
+              HStack(spacing: 10) {
+                SecureField("Groq API key", text: $groqAPIKeyInput)
+                  .textFieldStyle(.roundedBorder)
+                  .frame(width: 360)
+
+                Button("Save") {
+                  saveGroqAPIKey()
+                }
+                .disabled(groqAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Delete") {
+                  deleteGroqAPIKey()
+                }
+                .disabled(!hasStoredGroqAPIKey)
               }
-              .disabled(!hasStoredGroqAPIKey)
-            }
 
-            HStack(spacing: 8) {
-              Image(
-                systemName: hasStoredGroqAPIKey
-                  ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-              )
-                .foregroundColor(hasStoredGroqAPIKey ? .green : .orange)
-              Text(hasStoredGroqAPIKey ? "Groq key stored in Keychain" : "No Groq key stored")
+              HStack(spacing: 8) {
+                Image(
+                  systemName: hasStoredGroqAPIKey
+                    ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                )
+                  .foregroundColor(hasStoredGroqAPIKey ? .green : .orange)
+                Text(hasStoredGroqAPIKey ? "Groq key stored in Keychain" : "No Groq key stored")
+                  .font(.callout)
+                  .foregroundColor(.secondary)
+              }
+            } else {
+              labeledTextField("Server URL", text: $voiceParakeetBaseURL)
+              labeledTextField("Model", text: $voiceParakeetModel)
+
+              Text("OpenAI-compatible endpoint POST {URL}/v1/audio/transcriptions. No API key required.")
                 .font(.callout)
                 .foregroundColor(.secondary)
             }

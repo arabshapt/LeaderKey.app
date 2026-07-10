@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 struct VoiceTranscriptionResult {
@@ -55,23 +56,23 @@ enum VoiceTranscriptionError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .missingAPIKey:
-      return "Groq API key is missing."
+      return "Transcription API key is missing."
     case .invalidEndpoint:
-      return "Groq transcription endpoint is invalid."
+      return "Transcription endpoint is invalid."
     case .invalidResponse:
-      return "Groq returned an invalid response."
+      return "Transcription server returned an invalid response."
     case .httpFailure(let statusCode, let body):
-      return "Groq transcription failed with HTTP \(statusCode): \(body)"
+      return "Transcription failed with HTTP \(statusCode): \(body)"
     case .emptyTranscript:
-      return "Groq returned an empty transcript."
+      return "Transcription returned an empty transcript."
     }
   }
 }
 
-final class GroqSpeechToTextClient {
+final class OpenAICompatibleSpeechToTextClient {
   private static let maxPromptCharacters = 840
 
-  private struct GroqTranscriptionResponse: Decodable {
+  private struct TranscriptionResponse: Decodable {
     struct RequestMetadata: Decodable {
       let id: String?
     }
@@ -99,36 +100,37 @@ final class GroqSpeechToTextClient {
     }
   }
 
-  private let endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
   private let requestTimeout: TimeInterval = 30
 
   func transcribe(
     audioURL: URL,
-    model: VoiceSTTModel,
-    apiKey: String,
+    model: String,
+    baseURL: String,
+    bearerToken: String?,
     prompt: String?
   ) async throws -> VoiceTranscriptionResult {
-    let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedKey.isEmpty else {
-      throw VoiceTranscriptionError.missingAPIKey
-    }
-
-    guard let url = URL(string: endpoint) else {
+    let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+      .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard let url = URL(string: "\(trimmedBase)/v1/audio/transcriptions") else {
       throw VoiceTranscriptionError.invalidEndpoint
     }
+
+    let trimmedKey = bearerToken?.trimmingCharacters(in: .whitespacesAndNewlines)
 
     let boundary = "leaderkey-\(UUID().uuidString)"
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.timeoutInterval = requestTimeout
-    request.setValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
+    if let trimmedKey, !trimmedKey.isEmpty {
+      request.setValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
+    }
     request.setValue(
       "multipart/form-data; boundary=\(boundary)",
       forHTTPHeaderField: "Content-Type"
     )
     request.httpBody = try multipartBody(
       audioURL: audioURL,
-      model: model.rawValue,
+      model: model,
       boundary: boundary,
       prompt: prompt
     )
@@ -143,7 +145,7 @@ final class GroqSpeechToTextClient {
       throw VoiceTranscriptionError.httpFailure(statusCode: httpResponse.statusCode, body: body)
     }
 
-    let decoded = try JSONDecoder().decode(GroqTranscriptionResponse.self, from: data)
+    let decoded = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
     let transcript = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !transcript.isEmpty else {
       throw VoiceTranscriptionError.emptyTranscript
@@ -151,7 +153,7 @@ final class GroqSpeechToTextClient {
 
     return VoiceTranscriptionResult(
       text: transcript,
-      model: model.rawValue,
+      model: model,
       requestID: decoded.xGroq?.id,
       quality: Self.quality(from: decoded.segments)
     )
@@ -164,8 +166,7 @@ final class GroqSpeechToTextClient {
     prompt: String?
   ) throws -> Data {
     var body = Data()
-    let fileData = try Data(contentsOf: audioURL)
-    let filename = audioURL.lastPathComponent
+    let (fileData, filename) = try Self.preparedAudioForUpload(audioURL: audioURL)
 
     body.appendMultipartField(name: "model", value: model, boundary: boundary)
     body.appendMultipartField(name: "response_format", value: "verbose_json", boundary: boundary)
@@ -184,8 +185,62 @@ final class GroqSpeechToTextClient {
     return body
   }
 
+  /// Re-encodes the captured WAV to 16 kHz Int16 mono before upload. Most ASR backends
+  /// (Parakeet/Whisper) are trained on this format and resampling on the server side can be
+  /// flaky for short clips. Uses /usr/bin/afconvert (a separate process) so any failure in the
+  /// system audio converter cannot crash Leader Key. Falls back to the original file on any error.
+  private static func preparedAudioForUpload(audioURL: URL) throws -> (Data, String) {
+    let originalData = try Data(contentsOf: audioURL)
+    let originalFilename = audioURL.lastPathComponent
+
+    let outputURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("leaderkey-voice-upload-\(UUID().uuidString)")
+      .appendingPathExtension("wav")
+    defer { try? FileManager.default.removeItem(at: outputURL) }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+    process.arguments = [
+      "-f", "WAVE",
+      "-d", "LEI16@16000",
+      "-c", "1",
+      audioURL.path,
+      outputURL.path,
+    ]
+    let stderrPipe = Pipe()
+    process.standardOutput = Pipe()
+    process.standardError = stderrPipe
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      debugLog("[VoiceTranscriber] afconvert spawn failed: \(error); sending original audio")
+      return (originalData, originalFilename)
+    }
+
+    guard process.terminationStatus == 0 else {
+      let errOutput =
+        String(
+          data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8
+        ) ?? ""
+      debugLog(
+        "[VoiceTranscriber] afconvert exited \(process.terminationStatus): \(errOutput); sending original audio"
+      )
+      return (originalData, originalFilename)
+    }
+
+    guard let convertedData = try? Data(contentsOf: outputURL), !convertedData.isEmpty else {
+      debugLog("[VoiceTranscriber] afconvert produced no output; sending original audio")
+      return (originalData, originalFilename)
+    }
+
+    let convertedFilename = (originalFilename as NSString).deletingPathExtension + "-16k.wav"
+    return (convertedData, convertedFilename)
+  }
+
   private static func quality(
-    from segments: [GroqTranscriptionResponse.Segment]?
+    from segments: [TranscriptionResponse.Segment]?
   ) -> VoiceTranscriptionQuality {
     guard let segments, !segments.isEmpty else {
       return .unavailable

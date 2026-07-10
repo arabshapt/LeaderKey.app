@@ -25,6 +25,7 @@ final class VoiceAudioCapture {
   private let tapBufferSize: AVAudioFrameCount = 2048
 
   private var hasInstalledTap = false
+  private var installedTapFormat: AVAudioFormat?
   private var prewarmingEnabled = false
   private var preRollBuffers: [StoredBuffer] = []
   private var preRollFrameCount: AVAudioFramePosition = 0
@@ -33,6 +34,23 @@ final class VoiceAudioCapture {
   private var activeFrameCount: AVAudioFramePosition = 0
   private var activePreRollFrameCount: AVAudioFramePosition = 0
   private var lastCaptureURL: URL?
+  private var configChangeObserver: NSObjectProtocol?
+
+  init() {
+    configChangeObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange,
+      object: engine,
+      queue: nil
+    ) { [weak self] _ in
+      self?.handleEngineConfigurationChange()
+    }
+  }
+
+  deinit {
+    if let configChangeObserver {
+      NotificationCenter.default.removeObserver(configChangeObserver)
+    }
+  }
 
   var isRecording: Bool {
     queue.sync {
@@ -50,7 +68,7 @@ final class VoiceAudioCapture {
           debugLog("[VoiceAudioCapture] Failed to prewarm audio engine: \(error)")
         }
       } else if activeFile == nil {
-        stopEngineLocked()
+        teardownEngineLocked()
       }
     }
   }
@@ -65,7 +83,11 @@ final class VoiceAudioCapture {
         self.lastCaptureURL = nil
       }
 
-      let format = engine.inputNode.outputFormat(forBus: 0)
+      guard let format = installedTapFormat else {
+        throw NSError(
+          domain: "VoiceAudioCapture", code: -1,
+          userInfo: [NSLocalizedDescriptionKey: "Audio tap format unavailable"])
+      }
       let url = Self.makeCaptureURL()
       let file = try AVAudioFile(forWriting: url, settings: format.settings)
 
@@ -87,7 +109,8 @@ final class VoiceAudioCapture {
     queue.sync {
       guard let url = activeURL else { return nil }
 
-      let format = engine.inputNode.outputFormat(forBus: 0)
+      let sampleRate = installedTapFormat?.sampleRate
+        ?? engine.inputNode.outputFormat(forBus: 0).sampleRate
       let frameCount = activeFrameCount
       let preRollFrames = activePreRollFrameCount
 
@@ -98,13 +121,13 @@ final class VoiceAudioCapture {
       lastCaptureURL = url
 
       if !prewarmingEnabled {
-        stopEngineLocked()
+        teardownEngineLocked()
       }
 
       return CaptureResult(
         url: url,
-        duration: Double(frameCount) / format.sampleRate,
-        sampleRate: format.sampleRate,
+        duration: Double(frameCount) / sampleRate,
+        sampleRate: sampleRate,
         frameCount: frameCount,
         preRollFrameCount: preRollFrames
       )
@@ -126,7 +149,7 @@ final class VoiceAudioCapture {
       preRollBuffers.removeAll()
       preRollFrameCount = 0
       lastCaptureURL = nil
-      stopEngineLocked()
+      teardownEngineLocked()
     }
   }
 
@@ -142,29 +165,89 @@ final class VoiceAudioCapture {
   }
 
   private func ensureEngineRunning() throws {
+    let currentFormat = engine.inputNode.outputFormat(forBus: 0)
+
+    if hasInstalledTap, !Self.formatsMatch(installedTapFormat, currentFormat) {
+      debugLog(
+        "[VoiceAudioCapture] Input format changed (tap=\(Self.describeFormat(installedTapFormat)) hw=\(Self.describeFormat(currentFormat))), rebuilding tap"
+      )
+      teardownEngineLocked()
+    }
+
     if !hasInstalledTap {
-      let input = engine.inputNode
-      let format = input.outputFormat(forBus: 0)
-
-      input.installTap(onBus: 0, bufferSize: tapBufferSize, format: format) {
-        [weak self] buffer, _ in
-        guard let self,
-          let copied = Self.copyBuffer(buffer)
-        else {
-          return
-        }
-        self.queue.async {
-          self.handleInputBuffer(copied)
-        }
-      }
-
-      hasInstalledTap = true
-      engine.prepare()
+      try installTapLocked()
     }
 
     if !engine.isRunning {
-      try engine.start()
+      do {
+        try engine.start()
+      } catch {
+        debugLog("[VoiceAudioCapture] engine.start failed (\(error)); rebuilding tap and retrying")
+        teardownEngineLocked()
+        try installTapLocked()
+        try engine.start()
+      }
     }
+  }
+
+  private func installTapLocked() throws {
+    let input = engine.inputNode
+    engine.prepare()
+
+    do {
+      try LKExceptionCatcher.perform {
+        input.installTap(onBus: 0, bufferSize: self.tapBufferSize, format: nil) {
+          [weak self] buffer, _ in
+          guard let self,
+            let copied = Self.copyBuffer(buffer)
+          else {
+            return
+          }
+          self.queue.async {
+            self.handleInputBuffer(copied)
+          }
+        }
+      }
+    } catch {
+      debugLog("[VoiceAudioCapture] installTap raised NSException: \(error)")
+      throw error
+    }
+
+    hasInstalledTap = true
+    installedTapFormat = input.outputFormat(forBus: 0)
+  }
+
+  private func handleEngineConfigurationChange() {
+    queue.async { [weak self] in
+      guard let self else { return }
+      debugLog("[VoiceAudioCapture] AVAudioEngine configuration changed")
+      let hadActiveFile = self.activeFile != nil
+      self.teardownEngineLocked()
+      if hadActiveFile {
+        debugLog("[VoiceAudioCapture] Active recording aborted by audio device change")
+      }
+    }
+    queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+      guard let self else { return }
+      guard self.prewarmingEnabled, self.activeFile == nil else { return }
+      do {
+        try self.ensureEngineRunning()
+      } catch {
+        debugLog("[VoiceAudioCapture] Failed to restart engine after config change: \(error)")
+      }
+    }
+  }
+
+  private static func formatsMatch(_ a: AVAudioFormat?, _ b: AVAudioFormat?) -> Bool {
+    guard let a, let b else { return false }
+    return a.sampleRate == b.sampleRate
+      && a.channelCount == b.channelCount
+      && a.commonFormat == b.commonFormat
+  }
+
+  private static func describeFormat(_ format: AVAudioFormat?) -> String {
+    guard let format else { return "nil" }
+    return "\(Int(format.sampleRate))Hz/\(format.channelCount)ch"
   }
 
   private func handleInputBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -197,10 +280,11 @@ final class VoiceAudioCapture {
     }
   }
 
-  private func stopEngineLocked() {
+  private func teardownEngineLocked() {
     if hasInstalledTap {
       engine.inputNode.removeTap(onBus: 0)
       hasInstalledTap = false
+      installedTapFormat = nil
     }
     if engine.isRunning {
       engine.stop()
@@ -316,6 +400,43 @@ final class VoiceAudioCapture {
     } catch {
       debugLog("[VoiceAudioCapture] Failed to trim silence: \(error)")
     }
+  }
+
+  /// Compute the overall RMS dB level of a WAV file. Useful for diagnosing silent recordings.
+  /// Returns -Float.infinity if the file is empty or unreadable.
+  static func overallRMSDb(url: URL) -> Float {
+    guard let file = try? AVAudioFile(forReading: url) else { return -.infinity }
+    let format = file.processingFormat
+    let totalFrames = AVAudioFrameCount(file.length)
+    guard totalFrames > 0 else { return -.infinity }
+
+    let chunkFrames = AVAudioFrameCount(min(UInt32(format.sampleRate), totalFrames))
+    var sumSquares: Double = 0
+    var totalSamples: Int = 0
+    var position: AVAudioFrameCount = 0
+    while position < totalFrames {
+      let remaining = totalFrames - position
+      let take = min(chunkFrames, remaining)
+      guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: take) else { break }
+      file.framePosition = AVAudioFramePosition(position)
+      do {
+        try file.read(into: buffer)
+      } catch {
+        break
+      }
+      guard let data = buffer.floatChannelData else { break }
+      let frames = Int(buffer.frameLength)
+      for i in 0..<frames {
+        let sample = Double(data[0][i])
+        sumSquares += sample * sample
+      }
+      totalSamples += frames
+      position += take
+    }
+
+    guard totalSamples > 0 else { return -.infinity }
+    let rms = sqrt(sumSquares / Double(totalSamples))
+    return rms > 0 ? Float(20 * log10(rms)) : -.infinity
   }
 
   private static func rmsLevel(buffer: AVAudioPCMBuffer) -> Float {

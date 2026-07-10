@@ -76,13 +76,19 @@ final class VoiceCoordinator {
     }
   }
 
+  private enum CaptureMode {
+    case command
+    case dictate
+  }
+
   private let statusItem: StatusItem
   private let config: UserConfig
   private let audioCapture = VoiceAudioCapture()
   private let dispatchBridge = VoiceDispatchBridge()
-  private let transcriber = GroqSpeechToTextClient()
+  private let transcriber = OpenAICompatibleSpeechToTextClient()
   private var settingsObserver: NSObjectProtocol?
   private var recentSuccessfulCommands: [VoiceDispatchRecentCommandContext] = []
+  private var captureMode: CaptureMode = .command
   private var state: State = .idle {
     didSet {
       statusItem.voiceStatus = state.statusItemStatus
@@ -122,6 +128,24 @@ final class VoiceCoordinator {
         self?.handleHoldKeyUp()
       }
     }
+
+    KeyboardShortcuts.onKeyDown(for: .voiceDictateToggle) { [weak self] in
+      DispatchQueue.main.async {
+        self?.handleDictateToggleKeyDown()
+      }
+    }
+
+    KeyboardShortcuts.onKeyDown(for: .voiceDictateHold) { [weak self] in
+      DispatchQueue.main.async {
+        self?.handleDictateHoldKeyDown()
+      }
+    }
+
+    KeyboardShortcuts.onKeyUp(for: .voiceDictateHold) { [weak self] in
+      DispatchQueue.main.async {
+        self?.handleDictateHoldKeyUp()
+      }
+    }
   }
 
   func stop() {
@@ -144,6 +168,7 @@ final class VoiceCoordinator {
     case .recordingToggle:
       finishRecording(trigger: "toggle")
     case .idle, .ready, .error:
+      captureMode = .command
       beginRecording(mode: .recordingToggle)
     case .recordingHold, .transcribing, .planning:
       break
@@ -158,6 +183,7 @@ final class VoiceCoordinator {
 
     switch state {
     case .idle, .ready, .error:
+      captureMode = .command
       beginRecording(mode: .recordingHold)
     case .recordingToggle, .recordingHold, .transcribing, .planning:
       break
@@ -171,7 +197,59 @@ final class VoiceCoordinator {
     }
 
     if state == .recordingHold {
-      finishRecording(trigger: "hold")
+      finishRecordingWithTrailingCapture(trigger: "hold", expectedMode: .command)
+    }
+  }
+
+  private func handleDictateToggleKeyDown() {
+    guard voiceEnabled else {
+      state = .idle
+      return
+    }
+
+    switch state {
+    case .recordingToggle where captureMode == .dictate:
+      finishRecording(trigger: "dictate")
+    case .idle, .ready, .error:
+      captureMode = .dictate
+      beginRecording(mode: .recordingToggle)
+    case .recordingToggle, .recordingHold, .transcribing, .planning:
+      break
+    }
+  }
+
+  private func handleDictateHoldKeyDown() {
+    guard voiceEnabled else {
+      state = .idle
+      return
+    }
+
+    switch state {
+    case .idle, .ready, .error:
+      captureMode = .dictate
+      beginRecording(mode: .recordingHold)
+    case .recordingToggle, .recordingHold, .transcribing, .planning:
+      break
+    }
+  }
+
+  private func handleDictateHoldKeyUp() {
+    guard voiceEnabled else {
+      state = .idle
+      return
+    }
+
+    if state == .recordingHold, captureMode == .dictate {
+      finishRecordingWithTrailingCapture(trigger: "dictate-hold", expectedMode: .dictate)
+    }
+  }
+
+  private func finishRecordingWithTrailingCapture(trigger: String, expectedMode: CaptureMode) {
+    let trailingDuration: TimeInterval = 0.3
+    DispatchQueue.main.asyncAfter(deadline: .now() + trailingDuration) { [weak self] in
+      guard let self else { return }
+      guard self.state == .recordingHold, self.captureMode == expectedMode else { return }
+      self.finishRecording(trigger: trigger)
     }
   }
 
@@ -196,6 +274,7 @@ final class VoiceCoordinator {
 
   private func finishRecording(trigger: String) {
     let result = audioCapture.stopRecording()
+    let mode = captureMode
 
     state = .transcribing
 
@@ -205,13 +284,18 @@ final class VoiceCoordinator {
       return
     }
 
+    let fileBytes =
+      (try? FileManager.default.attributesOfItem(atPath: result.url.path)[.size] as? Int) ?? 0
+    let rmsDB = VoiceAudioCapture.overallRMSDb(url: result.url)
     debugLog(
-      "[VoiceCoordinator] \(trigger) recording captured \(String(format: "%.2f", result.duration))s, preRollFrames=\(result.preRollFrameCount), url=\(result.url.path)"
+      "[VoiceCoordinator] \(trigger) recording captured \(String(format: "%.2f", result.duration))s, preRollFrames=\(result.preRollFrameCount), bytes=\(fileBytes), rms=\(String(format: "%.1f", rmsDB))dB, url=\(result.url.path)"
     )
 
-    VoiceAudioCapture.trimTrailingSilence(url: result.url)
+    if mode == .command {
+      VoiceAudioCapture.trimTrailingSilence(url: result.url)
+    }
 
-    let prompt = transcriptionPrompt()
+    let prompt = mode == .dictate ? nil : transcriptionPrompt()
     let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let dispatchOptions = voiceDispatchOptions(bundleId: targetBundleId)
 
@@ -223,8 +307,18 @@ final class VoiceCoordinator {
 
         await MainActor.run {
           debugLog(
-            "[VoiceCoordinator] Groq transcript model=\(transcript.model) requestID=\(transcript.requestID ?? "n/a") text=\"\(transcript.text)\""
+            "[VoiceCoordinator] STT transcript provider=\(Defaults[.voiceSTTProvider].rawValue) model=\(transcript.model) requestID=\(transcript.requestID ?? "n/a") text=\"\(transcript.text)\""
           )
+        }
+
+        if mode == .dictate {
+          await MainActor.run {
+            self.handleDictationTranscript(transcript.text)
+          }
+          return
+        }
+
+        await MainActor.run {
           self.state = .planning
         }
 
@@ -242,7 +336,7 @@ final class VoiceCoordinator {
           if self.shouldRetryTranscription(transcript: transcript, dispatch: dispatch) {
             do {
               await MainActor.run {
-                debugLog("[VoiceCoordinator] Retrying Groq STT with \(VoiceSTTModel.whisperLargeV3.rawValue)")
+                debugLog("[VoiceCoordinator] Retrying STT with \(VoiceSTTModel.whisperLargeV3.rawValue)")
               }
               let retriedTranscript = try await self.transcribe(
                 result: result,
@@ -257,7 +351,7 @@ final class VoiceCoordinator {
 
               await MainActor.run {
                 debugLog(
-                  "[VoiceCoordinator] Groq retry transcript model=\(retriedTranscript.model) requestID=\(retriedTranscript.requestID ?? "n/a") text=\"\(retriedTranscript.text)\""
+                  "[VoiceCoordinator] STT retry transcript model=\(retriedTranscript.model) requestID=\(retriedTranscript.requestID ?? "n/a") text=\"\(retriedTranscript.text)\""
                 )
                 debugLog("[VoiceCoordinator] Retry dispatch \(retriedDispatch.debugSummary)")
               }
@@ -271,7 +365,7 @@ final class VoiceCoordinator {
               }
             } catch {
               await MainActor.run {
-                debugLog("[VoiceCoordinator] Groq accuracy retry failed: \(error)")
+                debugLog("[VoiceCoordinator] STT accuracy retry failed: \(error)")
               }
             }
           }
@@ -339,12 +433,12 @@ final class VoiceCoordinator {
       } catch VoiceTranscriptionError.missingAPIKey {
         await MainActor.run {
           self.state = .error("Groq key missing")
-          debugLog("[VoiceCoordinator] Groq transcription skipped: API key missing")
+          debugLog("[VoiceCoordinator] STT transcription skipped: API key missing")
         }
       } catch {
         await MainActor.run {
           self.state = .error("Transcription failed")
-          debugLog("[VoiceCoordinator] Groq transcription failed: \(error)")
+          debugLog("[VoiceCoordinator] STT transcription failed: \(error)")
         }
       }
     }
@@ -355,22 +449,36 @@ final class VoiceCoordinator {
     prompt: String?,
     modelOverride: VoiceSTTModel? = nil
   ) async throws -> VoiceTranscriptionResult {
-    guard let apiKey = KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) else {
-      throw VoiceTranscriptionError.missingAPIKey
+    switch Defaults[.voiceSTTProvider] {
+    case .groq:
+      guard let apiKey = KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) else {
+        throw VoiceTranscriptionError.missingAPIKey
+      }
+      return try await transcriber.transcribe(
+        audioURL: result.url,
+        model: (modelOverride ?? Defaults[.voiceSTTModel]).rawValue,
+        baseURL: "https://api.groq.com/openai",
+        bearerToken: apiKey,
+        prompt: prompt
+      )
+    case .parakeet:
+      return try await transcriber.transcribe(
+        audioURL: result.url,
+        model: Defaults[.voiceParakeetModel],
+        baseURL: Defaults[.voiceParakeetBaseURL],
+        bearerToken: nil,
+        prompt: prompt
+      )
     }
-
-    return try await transcriber.transcribe(
-      audioURL: result.url,
-      model: modelOverride ?? Defaults[.voiceSTTModel],
-      apiKey: apiKey,
-      prompt: prompt
-    )
   }
 
   private func shouldRetryTranscription(
     transcript: VoiceTranscriptionResult,
     dispatch: VoiceDispatchResult
   ) -> Bool {
+    guard Defaults[.voiceSTTProvider] == .groq else {
+      return false
+    }
     guard transcript.model == VoiceSTTModel.whisperLargeV3Turbo.rawValue else {
       return false
     }
@@ -529,9 +637,9 @@ final class VoiceCoordinator {
     let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let prompt = VoicePromptBuilder.build(config: config, bundleId: bundleId)
     if let prompt {
-      debugLog("[VoiceCoordinator] Groq prompt primed with \(prompt.utf8.count) chars")
+      debugLog("[VoiceCoordinator] STT prompt primed with \(prompt.utf8.count) chars")
     } else {
-      debugLog("[VoiceCoordinator] Groq prompt disabled")
+      debugLog("[VoiceCoordinator] STT prompt disabled")
     }
     return prompt
   }
@@ -547,6 +655,43 @@ final class VoiceCoordinator {
     if !Defaults[.voiceDispatcherEnabled] {
       audioCapture.stopCompletely()
       state = .idle
+    }
+  }
+
+  @MainActor
+  private func handleDictationTranscript(_ transcript: String) {
+    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      state = .ready("No speech detected")
+      returnToIdleAfterReady()
+      return
+    }
+
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(trimmed, forType: .string)
+
+    Self.simulatePaste()
+
+    debugLog("[VoiceCoordinator] Dictation transcript pasted (\(trimmed.utf8.count) bytes)")
+    state = .ready(Self.readyMessage(for: trimmed))
+    returnToIdleAfterReady()
+  }
+
+  private static func simulatePaste() {
+    guard let source = CGEventSource(stateID: .hidSystemState) else {
+      debugLog("[VoiceCoordinator] Dictation paste skipped: failed to create CGEventSource")
+      return
+    }
+    let tap = CGEventTapLocation.cghidEventTap
+    let vKey: CGKeyCode = 0x09
+    if let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
+      down.flags = .maskCommand
+      down.post(tap: tap)
+    }
+    if let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
+      up.flags = .maskCommand
+      up.post(tap: tap)
     }
   }
 
