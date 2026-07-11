@@ -2,7 +2,6 @@
 import Cocoa
 import Combine
 import Defaults
-import KeyboardShortcuts
 import Kingfisher
 import os
 import Settings
@@ -12,30 +11,6 @@ import UserNotifications
 
 let updateLocationIdentifier = "UpdateCheck"
 
-// Define the same unique tag here
-private let leaderKeySyntheticEventTag: Int64 = 0xDEAD_BEEF
-
-// MARK: - Legacy Event Tap Callback (removed — Karabiner 2.0 is the only input method)
-
-// MARK: - Key Code Constants (Example)
-
-// Define key codes for easier reference
-struct KeyCodes {
-  static let keyK: UInt16 = 40
-  static let escape: UInt16 = 53
-  // Add other key codes as needed
-}
-
-// MARK: - Key Event Queue Structure
-private struct QueuedKeyEvent {
-  let cgEvent: CGEvent
-  let nsEvent: NSEvent  // Cache NSEvent to avoid re-conversion
-  let keyCode: UInt16
-  let modifiers: NSEvent.ModifierFlags
-}
-
-private let maxQueueSize = 3  // Reduced queue size to minimize latency
-
 // MARK: - Callback Optimization State
 // Consolidated state struct to reduce associated object lookups
 private struct CallbackOptimizationState {
@@ -44,109 +19,6 @@ private struct CallbackOptimizationState {
   var stickyModeKeycodes: Set<UInt16>? = nil  // Pre-computed for O(1) lookup
   // Note: Other state like currentSequenceGroup is kept separate as it's
   // accessed from many places and needs proper synchronization
-}
-
-// MARK: - Performance Monitoring
-
-// High-precision timing utilities using mach_absolute_time
-private struct MachTime {
-  private static var timebaseInfo: mach_timebase_info = {
-    var info = mach_timebase_info()
-    mach_timebase_info(&info)
-    return info
-  }()
-
-  static func now() -> UInt64 {
-    return mach_absolute_time()
-  }
-
-  static func toMilliseconds(_ machTime: UInt64) -> Double {
-    let nanos = machTime * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
-    return Double(nanos) / 1_000_000.0
-  }
-
-  static func toMicroseconds(_ machTime: UInt64) -> Double {
-    let nanos = machTime * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
-    return Double(nanos) / 1_000.0
-  }
-}
-
-// Statistics tracking for callback performance
-private struct CallbackStatistics {
-  var totalCallbacks: Int64 = 0
-  var totalDuration: Double = 0  // in milliseconds
-  var slowCallbacks: Int64 = 0  // callbacks > 1ms
-  var verySlowCallbacks: Int64 = 0  // callbacks > 5ms
-  var maxDuration: Double = 0
-  var minDuration: Double = Double.infinity
-  var lastDuration: Double = 0
-  var lastResetTime = Date()
-
-  // Histogram buckets for percentile calculation (in ms)
-  var histogram: [Double: Int64] = [
-    0.1: 0,  // < 0.1ms
-    0.5: 0,  // 0.1-0.5ms
-    1.0: 0,  // 0.5-1ms
-    5.0: 0,  // 1-5ms
-    10.0: 0,  // 5-10ms
-    Double.infinity: 0,  // > 10ms
-  ]
-
-  mutating func record(duration: Double) {
-    totalCallbacks += 1
-    totalDuration += duration
-    lastDuration = duration
-
-    if duration > maxDuration { maxDuration = duration }
-    if duration < minDuration { minDuration = duration }
-    if duration > 1.0 { slowCallbacks += 1 }
-    if duration > 5.0 {
-      verySlowCallbacks += 1
-      print("[PERF WARNING] Callback took \(String(format: "%.2f", duration))ms")
-    }
-
-    // Update histogram
-    for bucket in histogram.keys.sorted() {
-      if duration <= bucket {
-        histogram[bucket]! += 1
-        break
-      }
-    }
-  }
-
-  var averageDuration: Double {
-    totalCallbacks > 0 ? totalDuration / Double(totalCallbacks) : 0
-  }
-
-  var slowPercentage: Double {
-    totalCallbacks > 0 ? (Double(slowCallbacks) / Double(totalCallbacks)) * 100 : 0
-  }
-
-  mutating func reset() {
-    totalCallbacks = 0
-    totalDuration = 0
-    slowCallbacks = 0
-    verySlowCallbacks = 0
-    maxDuration = 0
-    minDuration = Double.infinity
-    lastDuration = 0
-    lastResetTime = Date()
-    histogram.keys.forEach { histogram[$0] = 0 }
-  }
-
-  var summary: String {
-    if totalCallbacks == 0 { return "No callbacks recorded" }
-
-    return """
-      Callback Performance Stats (since \(lastResetTime.formatted())):
-      - Total callbacks: \(totalCallbacks)
-      - Average: \(String(format: "%.3f", averageDuration))ms
-      - Min/Max: \(String(format: "%.3f", minDuration))ms / \(String(format: "%.3f", maxDuration))ms
-      - Last: \(String(format: "%.3f", lastDuration))ms
-      - Slow (>1ms): \(slowCallbacks) (\(String(format: "%.1f", slowPercentage))%)
-      - Very slow (>5ms): \(verySlowCallbacks)
-      """
-  }
 }
 
 // MARK: - Settings Panes
@@ -221,44 +93,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   private var currentInputMethod: InputMethod?
   private var voiceCoordinator: VoiceCoordinator?
 
-  // --- Event-handling state ---
-  // Formerly ObjC associated objects (they predate these being stored
-  // properties); every get/set went through the runtime's global
-  // associated-object table on the hot path.
-  private var eventTap: CFMachPort?
-  private var runLoopSource: CFRunLoopSource?
+  // --- Input and sequence state ---
   private var isMonitoring = false
   private var activeRootGroup: Group?
   private var currentSequenceGroup: Group?
-  private var isProcessingKey = false
-  private var keyEventQueue: [QueuedKeyEvent] = []
   private var didShowPermissionsAlertRecently = false
   private var stickyModeToggled = false {
     didSet {
       setStickyModeStatus(active: stickyModeToggled)
     }
   }
-  private var lastModifierFlags: NSEvent.ModifierFlags = []
-  private var activeActivationShortcut: KeyboardShortcuts.Shortcut?
   // Track if we're in Karabiner 2.0 sticky mode
   private var isKarabinerStickyMode = false
-  private var cpuMonitorTimer: Timer?
-  private var isHighCpuMode = false
-  private var lastNavigationTime: CFAbsoluteTime = 0
-  private var keyStringCache: [KeyCacheEntry: String] = [:]
-  // Cached activation shortcuts for O(1) lookup
-  private var cachedActivationKeyCodes: Set<UInt16> = []
-  private var cachedActivationShortcuts:
-    [UInt16: [(KeyboardShortcuts.Shortcut, Controller.ActivationType)]] = [:]
-  // Cache activation key modifiers (CGEventFlags instead of NSEvent.ModifierFlags)
-  private var cachedActivationModifiers: [UInt16: CGEventFlags] = [:]
   // Consolidated callback optimization state
   private var callbackState = CallbackOptimizationState()
-  // Config preprocessing for fast lookups
-  private var currentKeyLookupCache: KeyLookupCache?
   private var currentBundleId: String?
-  // Config reload tracking
-  private var isReloading = false
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -896,125 +745,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     }
   }
 
-  // MARK: - Command Key Release Handling Methods
-
-  private func handleCommandPressed(_ modifierFlags: NSEvent.ModifierFlags) {
-    // Command key press is tracked but no action needed on press
-    // We only act on release
-    debugLog("[AppDelegate] handleCommandPressed: Command key pressed")
-  }
-
-  private func handleCommandReleased(_ modifierFlags: NSEvent.ModifierFlags) {
-    // Only reset and close if the setting is enabled and we're in a sequence
-    guard Defaults[.resetOnCmdRelease] && currentSequenceGroup != nil else {
-      return
-    }
-
-    // Also check that we're in the correct modifier configuration (command used for sticky mode)
-    let config = Defaults[.modifierKeyConfiguration]
-    guard config == .controlGroupOptionSticky else {
-      return
-    }
-
-    // If we still have an active activation shortcut, this means the user hasn't
-    // started using Leader Key yet, so ignore this Cmd release (it's part of the activation)
-    if activeActivationShortcut != nil {
-      debugLog(
-        "[AppDelegate] handleCommandReleased: Still have active activation shortcut - user hasn't started using Leader Key yet. Ignoring."
-      )
-      return
-    }
-
-    debugLog(
-      "[AppDelegate] handleCommandReleased: Command key released with resetOnCmdRelease enabled. Hiding window (state resets after close)."
-    )
-    DispatchQueue.main.async {
-      debugLog("[AppDelegate] handleCommandReleased: Hiding window – state will reset after close.")
-      self.hide()
-    }
-  }
-
-  // --- Activation Logic (Called by Event Tap) ---
-  func handleActivation(
-    type: Controller.ActivationType, activationShortcut: KeyboardShortcuts.Shortcut? = nil
-  ) {
-    let spid = OSSignpostID(log: signpostLog)
-    os_signpost(.begin, log: signpostLog, name: "handleActivation", signpostID: spid, "type=%{public}s", String(describing: type))
-    defer { os_signpost(.end, log: signpostLog, name: "handleActivation", signpostID: spid) }
-    debugLog("[AppDelegate] handleActivation: Received activation request of type: \(type)")
-    // Track the activation shortcut to prevent immediate command release triggers
-    activeActivationShortcut = activationShortcut
-
-    // This function decides what to do when an activation shortcut is pressed.
-
-    if controller.window.isVisible {  // Check if the Leader Key window is already visible
-      debugLog("[AppDelegate] handleActivation: Window is already visible.")
-      switch Defaults[.reactivateBehavior] {  // Check user preference for reactivation
-      case .hide:
-        // Preference: Hide the window if activated again while visible.
-        debugLog(
-          "[AppDelegate] handleActivation: Reactivate behavior is 'hide'. Hiding window and resetting sequence."
-        )
-        hide()
-        return  // Stop processing here
-
-      case .reset:
-        // Preference: Reset the sequence if activated again while visible.
-        debugLog("[AppDelegate] handleActivation: Reactivate behavior is 'reset'. Resetting sequence.")
-        // Ensure window is visible and frontmost (but not key to avoid interfering with overlays)
-        if !controller.window.isVisible {
-          debugLog("[AppDelegate] handleActivation (Reset): Making window visible.")
-          controller.window.orderFront(nil)  // Just bring to front without making key
-        }
-        // Clear existing UI state and perform a lightweight in-place reset of internal trackers.
-        controller.userState.clear()
-        self.currentSequenceGroup = nil
-        self.activeRootGroup = nil
-        self.stickyModeToggled = false
-        self.lastModifierFlags = []
-        // Determine new active root based on the activation shortcut that was just pressed
-        do {
-          let newRoot: Group
-          switch type {
-          case .defaultOnly:
-            newRoot = self.config.root
-          case .appSpecificWithFallback:
-            newRoot = self.config.getConfig(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
-          case .fallbackOnly:
-            newRoot = self.config.getFallbackConfig()
-          }
-          self.controller.userState.activeRoot = newRoot
-        }
-        debugLog("[AppDelegate] handleActivation (Reset): Starting new sequence.")
-        controller.repositionWindowNearMouse()
-        startSequence(activationType: type)
-
-      case .nothing:
-        // Preference: Do nothing if activated again while visible, unless window lost focus.
-        debugLog("[AppDelegate] handleActivation: Reactivate behavior is 'nothing'.")
-        // Ensure window is visible (but not key to avoid interfering with overlays)
-        if !controller.window.isVisible {
-          debugLog("[AppDelegate] handleActivation (Nothing): Making window visible.")
-          controller.window.orderFront(nil)  // Just bring to front without making key
-        }
-        // Start a sequence only if one wasn't already active (e.g., if Escape was pressed before).
-        // This prevents restarting if the user just presses the shortcut again mid-sequence.
-        if currentSequenceGroup == nil {
-          debugLog(
-            "[AppDelegate] handleActivation (Nothing): No current sequence, starting new sequence.")
-          startSequence(activationType: type)
-        } else {
-          debugLog("[AppDelegate] handleActivation (Nothing): Sequence already active, doing nothing.")
-        }
-      }
-    } else {
-      // Show window invisibly; when ready, start sequence, then the window will reveal.
-      show(type: type) {
-        self.startSequence(activationType: type)
-      }
-    }
-  }
-
   // NOTE: All Event Tap methods (start/stop/handle/process...), Sparkle delegate methods,
   // UNUserNotificationCenter delegate methods, URL Scheme methods, and private helpers
   // (setupFileMonitor, setupStatusItem, isRunningTests) should be defined ONLY in extensions below.
@@ -1102,17 +832,15 @@ extension AppDelegate {
     case .willDeactivate:
       break
     case .willReload:
-      isReloading = true
       #if DEBUG
-        debugLog("[AppDelegate] Config reload started - pausing event processing")
+        debugLog("[AppDelegate] Config reload started")
       #endif
     case .didReload:
-      isReloading = false
       refreshStateMappings()
       refreshActiveSequenceAfterReload()
       statusItem.indicateReloadSuccess()
       #if DEBUG
-        debugLog("[AppDelegate] Config reload completed - resuming event processing")
+        debugLog("[AppDelegate] Config reload completed")
       #endif
     case .didSaveConfig:
       // Export is NOT triggered here — save already calls reloadConfig()
@@ -1598,14 +1326,6 @@ extension AppDelegate {
 // MARK: - Event Tap Handling
 extension AppDelegate {
 
-  // --- Key String Cache entry type ---
-  // (The event-handling state itself lives as stored properties in the main
-  // class body; extensions cannot declare stored properties.)
-  private struct KeyCacheEntry: Hashable {
-    let keyCode: UInt16
-    let modifierFlags: UInt  // Use UInt instead of NSEvent.ModifierFlags for simpler hashing
-  }
-
   // --- Event Tap Logic Methods ---
 
   func startEventTapMonitoring() {
@@ -1643,244 +1363,6 @@ extension AppDelegate {
     debugLog("[AppDelegate] stopEventTapMonitoring: Stopped.")
   }
 
-  // Performance monitoring methods removed — only needed for CGEventTap
-
-  // --- Optimized Event Processing ---
-
-  // Background queue for async event processing (static to avoid stored property in extension)
-  private static let eventProcessingQueue = DispatchQueue(
-    label: "com.leaderkey.eventprocessing", qos: .userInteractive)
-
-  // Quick check if we should consume an event (ultra-fast, no NSEvent creation)
-  func quickShouldConsumeEvent(_ event: CGEvent) -> Bool {
-    // Don't consume events during config reload
-    if isReloading { return false }
-
-    // Only check keyDown events
-    guard event.type == .keyDown else { return false }
-
-    // Get keycode directly from CGEvent
-    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-
-    // Single lookup of consolidated state
-    let currentState = callbackState
-
-    // Check if it's in our cached activation keys
-    var isActivationKey = false
-    if cachedActivationKeyCodes.contains(keyCode) {
-      // Check modifiers match
-      let flags = event.flags
-      if let expectedFlags = cachedActivationModifiers[keyCode] {
-        // Simple modifier check
-        let hasCommand = flags.contains(.maskCommand) == expectedFlags.contains(.maskCommand)
-        let hasShift = flags.contains(.maskShift) == expectedFlags.contains(.maskShift)
-        let hasOption = flags.contains(.maskAlternate) == expectedFlags.contains(.maskAlternate)
-        let hasControl = flags.contains(.maskControl) == expectedFlags.contains(.maskControl)
-
-        if hasCommand && hasShift && hasOption && hasControl {
-          isActivationKey = true
-          // Mark that we have a pending activation (single state update)
-          var newState = currentState
-          newState.hasPendingActivation = true
-          newState.lastActivationTime = CFAbsoluteTimeGetCurrent()
-          callbackState = newState
-          return true
-        }
-      }
-    }
-
-    // Check if we're in an active sequence
-    if isInActiveSequence {
-      // Get modifier flags
-      let flags = event.flags
-
-      // Special handling for CMD+, (Settings shortcut) - always consume
-      if keyCode == 43 && flags.contains(.maskCommand) {
-        return true  // Always consume CMD+, in sequences
-      }
-
-      // Check for sticky mode
-      let modifiers = cgFlagsToNSModifiers(flags)
-      let isStickyMode = isInStickyMode(modifiers)
-
-      // If in sticky mode, use pre-computed keycodes for O(1) lookup
-      if isStickyMode {
-        // First check if we have pre-computed keycodes
-        if let validKeycodes = currentState.stickyModeKeycodes {
-          // Direct O(1) keycode check - no string conversion needed!
-          return validKeycodes.contains(keyCode)
-        }
-
-        // Fallback: compute on-demand if not cached (shouldn't happen normally)
-        if let currentGroup = currentSequenceGroup,
-          let cache = currentKeyLookupCache
-        {
-          // Extract key string from the event for lookup
-          if let keyString = fastKeyStringForEvent(cgEvent: event, keyCode: keyCode, flags: flags) {
-            // O(1) lookup: only consume if this key exists in the current group
-            return cache.hasKey(keyString, inGroupId: currentGroup.id)
-          }
-          // If we can't determine the key string, don't consume (pass through)
-          return false
-        }
-      }
-
-      // Not in sticky mode or no cache - consume all keys in sequence
-      return true
-    }
-
-    // Consume if we have a pending activation being processed
-    if currentState.hasPendingActivation {
-      return true
-    }
-
-    // Consume if we recently activated (within 100ms window)
-    let timeSinceActivation = CFAbsoluteTimeGetCurrent() - currentState.lastActivationTime
-    if timeSinceActivation < 0.1 {  // 100ms window
-      return true
-    }
-
-    return false
-  }
-
-  // Check if we're currently in an active sequence
-  var isInActiveSequence: Bool {
-    return currentSequenceGroup != nil || activeActivationShortcut != nil
-  }
-
-  // Convert CGEventFlags to NSEvent.ModifierFlags properly
-  private func cgFlagsToNSModifiers(_ cgFlags: CGEventFlags) -> NSEvent.ModifierFlags {
-    var modifiers: NSEvent.ModifierFlags = []
-
-    if cgFlags.contains(.maskCommand) { modifiers.insert(.command) }
-    if cgFlags.contains(.maskShift) { modifiers.insert(.shift) }
-    if cgFlags.contains(.maskControl) { modifiers.insert(.control) }
-    if cgFlags.contains(.maskAlternate) { modifiers.insert(.option) }
-    if cgFlags.contains(.maskAlphaShift) { modifiers.insert(.capsLock) }
-    if cgFlags.contains(.maskSecondaryFn) { modifiers.insert(.function) }
-
-    return modifiers
-  }
-
-  // Helper function to identify letter key codes (a-z)
-  private func isLetterKeyCode(_ keyCode: UInt16) -> Bool {
-    return (keyCode >= 0x00 && keyCode <= 0x11)  // a-q range
-      || (keyCode >= 0x1F && keyCode <= 0x2E && keyCode != 0x2B && keyCode != 0x2C
-        && keyCode != 0x2D)  // o,p,r-z range (excluding punctuation)
-  }
-
-  // Fast key string extraction for O(1) lookups (without NSEvent creation)
-  private func fastKeyStringForEvent(cgEvent: CGEvent, keyCode: UInt16, flags: CGEventFlags)
-    -> String?
-  {
-    // Try forced English layout first (covers 95% of keys)
-    if Defaults[.forceEnglishKeyboardLayout] {
-      let hasShift = flags.contains(.maskShift)
-
-      // Check shifted keymap first for non-letter keys when shift is pressed
-      if hasShift, !isLetterKeyCode(keyCode), let shiftedMapping = englishShiftedKeymap[keyCode] {
-        return shiftedMapping
-      }
-
-      // Then check regular keymap
-      if let mapped = englishKeymap[keyCode] {
-        // Only uppercase letters when shift is pressed
-        if hasShift && isLetterKeyCode(keyCode) {
-          return mapped.uppercased()
-        }
-        return mapped
-      }
-    }
-
-    // Fallback: For system layout, we need to create NSEvent
-    // This is slower but ensures accuracy for non-English layouts
-    guard let nsEvent = NSEvent(cgEvent: cgEvent) else { return nil }
-    let modifiers = cgFlagsToNSModifiers(flags)
-
-    // Get the character respecting modifiers
-    if modifiers.contains(.control) || modifiers.contains(.option) {
-      return nsEvent.charactersIgnoringModifiers
-    } else {
-      return nsEvent.characters
-    }
-  }
-
-  // Enqueue event for async processing
-  func enqueueEventForProcessing(_ event: CGEvent) {
-    // Don't process events during reload
-    if isReloading { return }
-
-    // Copy the event to prevent it from being released
-    guard let eventCopy = event.copy() else { return }
-
-    // Check if this is an activation key
-    let keyCode = UInt16(eventCopy.getIntegerValueField(.keyboardEventKeycode))
-    let isActivationKey = cachedActivationKeyCodes.contains(keyCode)
-
-    // Process events serially to maintain order
-    // The serial queue ensures events are processed one at a time in FIFO order
-    AppDelegate.eventProcessingQueue.async { [weak self] in
-      guard let self = self else { return }
-
-      // Double-check we're not reloading and still monitoring
-      guard !self.isReloading && self.isMonitoring else { return }
-
-      // Create NSEvent with validation
-      // Sometimes CGEvent can become invalid, especially during config changes
-      guard let nsEvent = NSEvent(cgEvent: eventCopy) else {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] Warning: Failed to create NSEvent from CGEvent - event may be invalid")
-        #endif
-        return
-      }
-
-      // Use a semaphore to ensure main thread processing completes before next event
-      let semaphore = DispatchSemaphore(value: 0)
-
-      DispatchQueue.main.async {
-        // Only process if still monitoring and not reloading
-        if self.isMonitoring && !self.isReloading {
-          _ = self.processKeyEvent(
-            cgEvent: eventCopy,
-            keyCode: nsEvent.keyCode,
-            modifiers: nsEvent.modifierFlags
-          )
-        }
-
-        // Clear pending activation flag after processing an activation key
-        if isActivationKey {
-          self.hasPendingActivation = false
-        }
-
-        semaphore.signal()
-      }
-
-      // Wait for main thread processing to complete before allowing next event
-      semaphore.wait()
-    }
-  }
-
-  // Track if we have a pending activation being processed
-  private var hasPendingActivation: Bool {
-    get { callbackState.hasPendingActivation }
-    set {
-      var state = callbackState
-      state.hasPendingActivation = newValue
-      callbackState = state
-    }
-  }
-
-  // Track when we last started an activation
-  private var lastActivationTime: CFAbsoluteTime {
-    get { callbackState.lastActivationTime }
-    set {
-      var state = callbackState
-      state.lastActivationTime = newValue
-      callbackState = state
-    }
-  }
-
   // --- Force Reset Mechanism ---
 
   func forceResetState() {
@@ -1892,9 +1374,6 @@ extension AppDelegate {
     self.currentSequenceGroup = nil
     self.activeRootGroup = nil
     self.stickyModeToggled = false
-    self.lastModifierFlags = []
-    self.activeActivationShortcut = nil
-    self.hasPendingActivation = false
 
     // Force hide the window immediately if it's visible
     if controller.window.isVisible {
@@ -1920,463 +1399,6 @@ extension AppDelegate {
     }
 
     print("[AppDelegate] forceResetState: Nuclear reset completed.")
-  }
-
-  // CPU monitoring removed — only needed for CGEventTap input method
-
-  // This is the entry point called by the C callback `eventTapCallback`
-  // NOTE: This is now bypassed for keyDown events which are handled asynchronously
-  func handleCGEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-    // Update event tap activity tracking
-
-    // Handle different event types
-    switch event.type {
-    case .keyDown:
-      // KeyDown events are now handled asynchronously in the callback
-      // This path should not be reached anymore
-      return Unmanaged.passRetained(event)
-    case .keyUp:
-      return handleKeyUpEvent(event)
-    case .flagsChanged:
-      return handleFlagsChangedEvent(event)
-    default:
-      return Unmanaged.passRetained(event)
-    }
-  }
-
-  private func handleKeyDownEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-    // Synthetic event check removed - now handled in callback for early exit
-
-    // Prevent concurrent key processing to avoid race conditions
-    if isProcessingKey {
-      // Buffer the event for later processing instead of passing it through
-      guard let nsEvent = NSEvent(cgEvent: event) else {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] handleKeyDownEvent: Cannot convert CGEvent to NSEvent for buffering. Passing through."
-          )
-        #endif
-        return Unmanaged.passRetained(event)
-      }
-
-      // Check queue size limit to prevent memory issues
-      if keyEventQueue.count >= maxQueueSize {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] handleKeyDownEvent: Queue full (size: \(keyEventQueue.count)). Dropping oldest event to make space."
-          )
-        #endif
-        keyEventQueue.removeFirst()
-      }
-
-      let queuedEvent = QueuedKeyEvent(
-        cgEvent: event, nsEvent: nsEvent, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags
-      )
-      keyEventQueue.append(queuedEvent)
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] handleKeyDownEvent: Buffered keypress '\(keyStringForEvent(cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags) ?? "?")'. Queue size: \(keyEventQueue.count)"
-        )
-      #endif
-      return nil  // Consume the event (don't pass through)
-    }
-
-    isProcessingKey = true
-    defer {
-      isProcessingKey = false
-      processQueuedEvents()
-    }
-
-    // Try to convert CGEvent to NSEvent to easily access key code and modifiers
-    guard let nsEvent = NSEvent(cgEvent: event) else {
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] handleKeyDownEvent: Failed to convert CGEvent to NSEvent. Passing event through."
-        )
-      #endif
-      return Unmanaged.passRetained(event)
-    }
-    // Process the key event using our main logic function
-    #if DEBUG
-      // Get the mapped key string here for better logging (only in debug builds)
-      let mappedKeyString =
-        keyStringForEvent(
-          cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
-        ?? "[?Unmapped?]"
-      let modsDescription = describeModifiers(nsEvent.modifierFlags)
-      debugLog(
-        "[AppDelegate] handleKeyDownEvent: keyCode=\(nsEvent.keyCode) ('\(mappedKeyString)') mods=\(modsDescription) – processing…"
-      )
-    #endif
-    let handled = processKeyEvent(
-      cgEvent: event, keyCode: nsEvent.keyCode, modifiers: nsEvent.modifierFlags)
-
-    // If 'handled' is true, consume the event (return nil). Otherwise, pass it through (return retained event).
-    #if DEBUG
-      debugLog(
-        "[AppDelegate] handleKeyDownEvent: Event handled = \(handled). Returning \(handled ? "nil (consume)" : "event (pass through)")."
-      )
-    #endif
-    return handled ? nil : Unmanaged.passRetained(event)
-  }
-
-  private func processQueuedEvents() {
-    // Process ALL queued events in a single pass (no recursion)
-    while !keyEventQueue.isEmpty && !isProcessingKey {
-      let queuedEvent = keyEventQueue.removeFirst()
-
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] processQueuedEvents: Processing queued keypress '\(keyStringForEvent(cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers) ?? "?")'. Remaining in queue: \(keyEventQueue.count)"
-        )
-      #endif
-
-      // Set processing flag to prevent new events from being processed
-      isProcessingKey = true
-
-      // Process the queued event using the same logic as handleKeyDownEvent
-      let handled = processKeyEvent(
-        cgEvent: queuedEvent.cgEvent, keyCode: queuedEvent.keyCode, modifiers: queuedEvent.modifiers
-      )
-
-      #if DEBUG
-        debugLog("[AppDelegate] processQueuedEvents: Queued event handled = \(handled)")
-      #endif
-
-      // Clear flag and continue to next event without recursion
-      isProcessingKey = false
-    }
-  }
-
-  private func clearKeyEventQueue() {
-    if !keyEventQueue.isEmpty {
-      #if DEBUG
-        debugLog("[AppDelegate] clearKeyEventQueue: Clearing \(keyEventQueue.count) queued events")
-      #endif
-      keyEventQueue.removeAll()
-    }
-  }
-
-  private func handleKeyUpEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-    if currentSequenceGroup != nil {
-      guard let nsEvent = NSEvent(cgEvent: event) else {
-        return Unmanaged.passRetained(event)
-      }
-
-      // Skip opacity changes while an activation shortcut is still in effect to avoid starting
-      // the sequence with sticky-mode transparency.
-      if self.activeActivationShortcut == nil {
-        let isStickyModeActive = isInStickyMode(nsEvent.modifierFlags)
-        DispatchQueue.main.async {
-          self.controller.window.alphaValue =
-            isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
-        }
-      }
-    }
-
-    // Always pass through key up events
-    return Unmanaged.passRetained(event)
-  }
-
-  private func handleFlagsChangedEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-    // Handle modifier key changes (Command, Option, Control, Shift)
-    if currentSequenceGroup != nil {
-      guard let nsEvent = NSEvent(cgEvent: event) else {
-        return Unmanaged.passRetained(event)
-      }
-
-      let currentFlags = nsEvent.modifierFlags
-      let previousFlags = lastModifierFlags
-
-      // Detect command press/release
-      let commandPressed = currentFlags.contains(.command) && !previousFlags.contains(.command)
-      let commandReleased = !currentFlags.contains(.command) && previousFlags.contains(.command)
-
-      if commandPressed {
-        handleCommandPressed(currentFlags)
-      } else if commandReleased {
-        handleCommandReleased(currentFlags)
-      }
-
-      // Update stored modifier flags
-      lastModifierFlags = currentFlags
-
-      // Skip opacity changes while an activation shortcut is still being held to avoid a visible flicker.
-      if self.activeActivationShortcut == nil {
-        let isStickyModeActive = isInStickyMode(currentFlags)
-        DispatchQueue.main.async {
-          self.controller.window.alphaValue =
-            isStickyModeActive ? Defaults[.stickyModeOpacity] : Defaults[.normalModeOpacity]
-        }
-      }
-      let stickyState = isInStickyMode(currentFlags)
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] handleFlagsChangedEvent: cmdPressed=\(commandPressed) cmdReleased=\(commandReleased) sticky=\(stickyState)"
-        )
-      #endif
-    }
-
-    // Always pass through modifier changes
-    return Unmanaged.passRetained(event)
-  }
-
-  private func processKeyEvent(cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags)
-    -> Bool
-  {
-    // OPTIMIZATION: Early exit if keycode is not in our cached activation set
-    if !cachedActivationKeyCodes.contains(keyCode) && keyCode != KeyCodes.escape && keyCode != 43 {
-      // Not an activation key or escape - check if we're in a sequence
-      if currentSequenceGroup != nil {
-        // We're in a sequence, so process this key
-        #if DEBUG
-          debugLog("[AppDelegate] processKeyEvent: Non-activation key in sequence, processing...")
-        #endif
-        // Clear activation shortcut since user is actively using Leader Key
-        if activeActivationShortcut != nil {
-          activeActivationShortcut = nil
-        }
-        return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
-      }
-      // Not in sequence and not an activation key - pass through immediately
-      return false
-    }
-
-    // Check cached shortcuts if this keycode matches any activation
-    if let shortcuts = cachedActivationShortcuts[keyCode] {
-      // Check each shortcut with this keycode
-      for (shortcut, activationType) in shortcuts {
-        if matchesShortcut(keyCode: keyCode, modifiers: modifiers, shortcut: shortcut) {
-          // Handle activation
-          #if DEBUG
-            debugLog("[AppDelegate] processKeyEvent: Matched \(activationType) shortcut.")
-          #endif
-          handleActivation(type: activationType, activationShortcut: shortcut)
-          return true
-        }
-      }
-    }
-
-    // 4. If NOT an activation shortcut, check for Escape
-    if keyCode == KeyCodes.escape {
-      let isWindowVisible = self.controller.window.isVisible
-      let windowAlpha = self.controller.window.alphaValue
-      let hasActiveSequence = (currentSequenceGroup != nil || activeRootGroup != nil)
-
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] Escape pressed. Window isVisible: \(isWindowVisible), alpha: \(windowAlpha), hasActiveSequence: \(hasActiveSequence)"
-        )
-      #endif
-
-      // Check multiple conditions to determine if we should hide the window
-      if isWindowVisible || windowAlpha > 0 || hasActiveSequence {
-        // Window is visible OR has opacity OR we have an active sequence - hide it
-        #if DEBUG
-          debugLog("[AppDelegate] Escape: Hiding window and resetting state.")
-        #endif
-        hide()
-        resetSequenceState()
-        return true  // Consume the Escape press
-      } else {
-        // Window is truly hidden, no active sequence - pass through
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] Escape: Window is hidden, no active sequence. Passing event through.")
-        #endif
-        return false  // Pass through the Escape press
-      }
-    }
-
-    // 5. If NOT activation, Escape, or Cmd+, check if we are in a sequence
-    if currentSequenceGroup != nil {
-      // --- SPECIAL CHECK WITHIN ACTIVE SEQUENCE ---
-      // Check for Cmd+, specifically *before* normal sequence processing
-      if modifiers.contains(.command),
-        let nsEvent = NSEvent(cgEvent: cgEvent),
-        nsEvent.charactersIgnoringModifiers == ","
-      {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyEvent: Cmd+, detected while sequence active. Opening settings."
-          )
-        #endif
-        NSApp.sendAction(
-          #selector(AppDelegate.settingsMenuItemActionHandler(_:)), to: nil, from: nil)
-        // Reset sequence state and hide the panel
-        hide()
-        return true  // Consume the Cmd+, press
-      }
-      // --- END SPECIAL CHECK ---
-
-      // If not Cmd+, process the key normally within the sequence
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] processKeyEvent: Active sequence detected (and not Cmd+). Processing key within sequence..."
-        )
-      #endif
-
-      // Clear the activation shortcut since the user is now actively using Leader Key
-      // This enables the Cmd-release reset feature after activation
-      if activeActivationShortcut != nil {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyEvent: Clearing activeActivationShortcut - user is now actively using Leader Key."
-          )
-        #endif
-        activeActivationShortcut = nil
-      }
-
-      return processKeyInSequence(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
-    }
-
-    // 5. If NOT activation, Escape, or in a sequence, let the event pass through
-    #if DEBUG
-      debugLog(
-        "[AppDelegate] processKeyEvent: No activation shortcut, Escape, or active sequence matched. Passing event through."
-      )
-    #endif
-    return false
-  }
-
-  private func processKeyInSequence(
-    cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags
-  ) -> Bool {
-    #if DEBUG
-      debugLog(
-        "[AppDelegate] processKeyInSequence: Processing keyCode: \(keyCode), mods: \(describeModifiers(modifiers))"
-      )
-    #endif
-
-    // Get the single character string representation for the key event
-    guard
-      let keyString = keyStringForEvent(cgEvent: cgEvent, keyCode: keyCode, modifiers: modifiers)
-    else {
-      // If we can't map the key event to a string, decide based on sticky mode.
-      let isStickyModeActive = isInStickyMode(modifiers)
-      if isStickyModeActive {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Could not map event to keyString, but sticky mode ACTIVE – passing event through."
-          )
-        #endif
-        return false  // Event NOT handled – let it propagate
-      } else {
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Could not map event to keyString. Shaking window.")
-        #endif
-        DispatchQueue.main.async { self.controller.window.shake() }
-        return true  // Event handled (by shaking)
-      }
-    }
-
-    #if DEBUG
-      debugLog("[AppDelegate] processKeyInSequence: Mapped keyString: '\(keyString)'")
-    #endif
-
-    // Check if the keyString matches an action or group within the currently active group
-    if let currentGroup = currentSequenceGroup,
-      let hit = currentGroup.actions.first(where: { $0.item.key == keyString })
-    {
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] processKeyInSequence: Found match for '\(keyString)' in group '\(currentGroup.displayName).'"
-        )
-      #endif
-      switch hit {
-      case .action(let action):
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Matched ACTION: '\\(action.displayName)' (\\(action.value))."
-          )
-        #endif
-        // Run the action
-        controller.runAction(action)
-
-        // Original Behavior: Check Sticky Mode for ALL action types
-        let isStickyModeActive = isInStickyMode(modifiers)
-        if !isStickyModeActive {
-          #if DEBUG
-            debugLog(
-              "[AppDelegate] processKeyInSequence: Sticky mode NOT active. Hiding window and resetting sequence."
-            )
-          #endif
-          hide()
-        } else {
-          #if DEBUG
-            debugLog(
-              "[AppDelegate] processKeyInSequence: Sticky mode ACTIVE. Keeping window open and preserving sequence state."
-            )
-          #endif
-        }
-        return true  // Event handled
-
-      case .group(let subgroup):
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Matched GROUP: '\(subgroup.displayName). Navigating into subgroup."
-          )
-        #endif
-
-        // Update sequence state immediately to prevent race conditions
-        currentSequenceGroup = subgroup
-
-        // Update pre-computed keycodes for the new group
-        if let cache = currentKeyLookupCache {
-          var state = callbackState
-          state.stickyModeKeycodes = cache.getValidKeycodes(forGroupId: subgroup.id)
-          callbackState = state
-        }
-
-        // Update UI state first to ensure correct display
-        DispatchQueue.main.async {
-          self.controller.userState.navigateToGroup(subgroup)
-        }
-
-        // Check if the group has sticky mode enabled
-        if subgroup.stickyMode == true {
-          #if DEBUG
-            debugLog(
-              "[AppDelegate] processKeyInSequence: Group has stickyMode enabled. Activating sticky mode."
-            )
-          #endif
-          activateStickyMode()
-        }
-
-        return true  // Event handled
-      case .layer(let layer):
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Ignoring normal-mode layer '\(layer.displayName)' in Leader Key overlay."
-          )
-        #endif
-        DispatchQueue.main.async { self.controller.window.shake() }
-        return true
-      }
-    } else {
-      // Key not found in the current group.
-      let groupName = currentSequenceGroup?.displayName ?? "(nil)"
-      #if DEBUG
-        debugLog(
-          "[AppDelegate] processKeyInSequence: Key '\(keyString)' not found in current group '\(groupName)'."
-        )
-      #endif
-
-      let isStickyModeActive = isInStickyMode(modifiers)
-      if isStickyModeActive {
-        // In sticky mode: pass the event through so the underlying app receives the key/shortcut.
-        #if DEBUG
-          debugLog(
-            "[AppDelegate] processKeyInSequence: Sticky mode ACTIVE -> passing event through.")
-        #endif
-        return false  // Event NOT handled – let it propagate
-      } else {
-        // Not in sticky mode: indicate error by shaking the window and consuming the event.
-        DispatchQueue.main.async { self.controller.window.shake() }
-        return true  // Event handled (by shaking)
-      }
-    }
   }
 
   // This function is called when an activation shortcut is pressed or a socket/user command arrives.
@@ -2441,7 +1463,6 @@ extension AppDelegate {
     // Preprocess and cache the config for O(1) lookups
     let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(
       rootGroup, for: cacheId)
-    self.currentKeyLookupCache = keyLookupCache
     self.controller.keyLookupCache = keyLookupCache
 
     debugLog(
@@ -2485,11 +1506,7 @@ extension AppDelegate {
       self.currentSequenceGroup = nil
       self.activeRootGroup = nil
 
-      // Clear any queued key events when sequence ends
-      clearKeyEventQueue()
-
-      // Clear pending activation flag and pre-computed keycodes when sequence resets
-      self.hasPendingActivation = false
+      // Clear pre-computed sticky-mode keycodes when sequence resets
       var state = callbackState
       state.stickyModeKeycodes = nil
       callbackState = state
@@ -2499,12 +1516,6 @@ extension AppDelegate {
         debugLog("[AppDelegate] resetSequenceState: Resetting sticky mode toggle state.")
         self.stickyModeToggled = false
       }
-
-      // Reset modifier flags tracking
-      self.lastModifierFlags = []
-
-      // Clear activation shortcut tracking
-      self.activeActivationShortcut = nil
 
       // Also tell the UserState to clear its navigation path etc. on the main thread
       DispatchQueue.main.async {
@@ -2536,109 +1547,6 @@ extension AppDelegate {
       )
     #endif
     return isSticky
-  }
-
-  // Converts a key event into a single character string suitable for matching against config keys.
-  // Handles forced English layout if enabled. Now with caching for performance.
-  private func keyStringForEvent(
-    cgEvent: CGEvent, keyCode: UInt16, modifiers: NSEvent.ModifierFlags
-  ) -> String? {
-    // Create cache key - use relevant modifiers only
-    let relevantModifiers = modifiers.intersection([.shift, .control, .option, .command])
-    let cacheKey = KeyCacheEntry(keyCode: keyCode, modifierFlags: relevantModifiers.rawValue)
-
-    // Check cache first
-    if let cached = keyStringCache[cacheKey] {
-      return cached.isEmpty ? nil : cached
-    }
-
-    // Cache miss - calculate the key string
-    var result: String?
-
-    // --- Option 1: Forced English Layout ---
-    if Defaults[.forceEnglishKeyboardLayout] {
-      // Check shifted keymap first for non-letter keys when shift is pressed
-      if modifiers.contains(.shift), !isLetterKeyCode(keyCode),
-        let shiftedMapping = englishShiftedKeymap[keyCode]
-      {
-        result = shiftedMapping
-      } else if let mapped = englishKeymap[keyCode] {
-        // Only uppercase letters when shift is pressed
-        if modifiers.contains(.shift) && isLetterKeyCode(keyCode) {
-          result = mapped.uppercased()
-        } else {
-          result = mapped
-        }
-      }
-      #if DEBUG
-        if result != nil {
-          print(
-            "[AppDelegate] keyStringForEvent (Forced English): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result!)' (Case Sensitive)"
-          )
-        }
-      #endif
-    } else {
-      // --- Option 2: System Layout (Case Sensitive, Ignore Ctrl/Opt Effect) ---
-
-      // Handle specific non-character keys FIRST by keycode
-      switch keyCode {
-      case 36: result = "\u{21B5}"  // Enter
-      case 48: result = "\t"  // Tab
-      case 49: result = " "  // Space
-      case 51: result = "\u{0008}"  // Backspace
-      case KeyCodes.escape: result = "\u{001B}"  // Escape
-      case 126: result = "↑"  // Up Arrow
-      case 125: result = "↓"  // Down Arrow
-      case 123: result = "←"  // Left Arrow
-      case 124: result = "→"  // Right Arrow
-      default:
-        // For remaining keys, determine character based on modifiers
-        let nsEvent = NSEvent(cgEvent: cgEvent)
-
-        // If Control or Option are involved, get the base character *ignoring* those modifiers,
-        // BUT respecting Shift for case sensitivity lookup.
-        if modifiers.contains(.control) || modifiers.contains(.option) {
-          // Get characters ignoring Ctrl/Opt, which might still include Shift effect
-          result = nsEvent?.charactersIgnoringModifiers
-          #if DEBUG
-            print(
-              "[AppDelegate] keyStringForEvent (System Layout - Ctrl/Opt): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")' (Ignoring Ctrl/Opt effect)"
-            )
-          #endif
-        } else {
-          // No Ctrl/Opt involved. Get the character directly, which includes Shift effect.
-          result = nsEvent?.characters
-          #if DEBUG
-            print(
-              "[AppDelegate] keyStringForEvent (System Layout - Shift/Base): keyCode \(keyCode), mods \(describeModifiers(modifiers)) -> '\(result ?? "nil")' (Respecting Shift)"
-            )
-          #endif
-        }
-      }
-    }
-
-    // Store in cache (including empty strings to avoid recalculation)
-    if let result = result {
-      keyStringCache[cacheKey] = result
-      // Limit cache size to prevent unbounded growth
-      if keyStringCache.count > 500 {
-        // Clear cache when it gets too large
-        #if DEBUG
-          print("[AppDelegate] keyStringForEvent: Cache size exceeded 500, clearing cache")
-        #endif
-        keyStringCache.removeAll(keepingCapacity: true)
-      }
-    }
-
-    // Final check: return nil if the resulting string is empty.
-    if result?.isEmpty ?? true {
-      #if DEBUG
-        print("[AppDelegate] keyStringForEvent: Result is empty or nil, returning nil.")
-      #endif
-      return nil
-    } else {
-      return result
-    }
   }
 
   // Helper function to create a readable string for modifier flags
@@ -2737,22 +1645,6 @@ extension AppDelegate {
     }
   }
 
-  // Add the missing helper function back
-  private func matchesShortcut(
-    keyCode: UInt16, modifiers: NSEvent.ModifierFlags, shortcut: KeyboardShortcuts.Shortcut
-  ) -> Bool {
-    // Compare the key code
-    guard keyCode == shortcut.carbonKeyCode else { return false }
-
-    // Compare the modifiers - ensuring ONLY the required modifiers are present
-    // (NSEvent.ModifierFlags includes flags for key state like Caps Lock, which we usually want to ignore)
-    let requiredModifiers = shortcut.modifiers
-    let relevantFlags: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
-    let incomingRelevantModifiers = modifiers.intersection(relevantFlags)
-
-    return incomingRelevantModifiers == requiredModifiers
-  }
-
   private func ensureControllerReady() {
     if state == nil {
       state = UserState(userConfig: config)
@@ -2840,7 +1732,6 @@ extension AppDelegate {
           self.currentSequenceGroup = nil
           self.activeRootGroup = nil
           self.stickyModeToggled = false
-          self.lastModifierFlags = []
 
           // Determine new active root based on activation type
           let newRoot: Group
@@ -3183,7 +2074,6 @@ extension AppDelegate {
     }
 
     let keyLookupCache = ConfigPreprocessor.shared.getOrCreateProcessedConfig(refreshedRoot, for: cacheId)
-    currentKeyLookupCache = keyLookupCache
     controller.keyLookupCache = keyLookupCache
 
     var refreshedNavigationPath: [Group] = [refreshedRoot]
@@ -3362,7 +2252,6 @@ extension AppDelegate {
     currentBundleId = cacheId
     karabinerActivationContext = activationContext
 
-    currentKeyLookupCache = cache
     controller.keyLookupCache = cache
 
     var callback = callbackState
