@@ -299,6 +299,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
     inputMethodHealthTimer?.invalidate()  // Stop input method health timer
     permissionPollingTimer?.invalidate()  // Stop permission polling timer
     voiceCoordinator?.stop()
+    UsageStatsStore.shared.flush()
     configDirObserverTask?.cancel()
     menuBarIconObserverTask?.cancel()
     autoUpdateObserverTask?.cancel()
@@ -769,6 +770,7 @@ extension AppDelegate {
       // Observe changes to the config directory path stored in Defaults
       for await newDir in Defaults.updates(.configDir) {
         print("[AppDelegate] Config directory changed to: \(newDir). Restarting file monitor.")
+        UsageStatsStore.shared.switchConfigDirectory(to: newDir)
         self.fileMonitor?.stopMonitoring()  // Stop previous monitor if any
         self.fileMonitor = FileMonitor(fileURL: config.url) { [weak self] in  // Create new monitor for the current config URL
           print("[AppDelegate] FileMonitor detected change in config file. Reloading...")

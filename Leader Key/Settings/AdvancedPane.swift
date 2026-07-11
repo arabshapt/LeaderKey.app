@@ -9,6 +9,7 @@ struct AdvancedPane: View {
   private let contentWidth = SettingsConfig.contentWidth
 
   @EnvironmentObject private var config: UserConfig
+  @ObservedObject private var usageStore = UsageStatsStore.shared
 
   @Default(.configDir) var configDir
   @Default(.modifierKeyConfiguration) var modifierKeyConfiguration
@@ -39,6 +40,7 @@ struct AdvancedPane: View {
   @State private var gokuProfileSyncSucceeded: Bool?
   @State private var gokuValidationMessage: String?
   @State private var gokuValidationSucceeded: Bool?
+  @State private var usageHistoryMessage: String?
 
   var body: some View {
     ScrollView {
@@ -532,6 +534,31 @@ struct AdvancedPane: View {
           // Defaults.Toggle("Use Stealth Mode", key: .useStealthMode)
         }
 
+        Settings.Section(title: "Local Usage History", bottomDivider: true) {
+          Defaults.Toggle("Track shortcut usage locally", key: .usageTrackingEnabled)
+          Text(
+            "Default off. When enabled, Leader Key stores only config context, exact key paths, counts, and observation dates in the config directory. Action values are never recorded. Disabling tracking keeps existing history until you clear it."
+          )
+          .font(.callout)
+          .foregroundColor(.secondary)
+
+          HStack {
+            Text("\(usageStore.snapshot.totalExecutions) recorded invocation(s)")
+              .foregroundColor(.secondary)
+            Spacer()
+            Button("Clear History", role: .destructive) {
+              usageStore.clearHistory()
+              usageHistoryMessage = "Local usage history cleared."
+            }
+          }
+
+          if let usageHistoryMessage {
+            Text(usageHistoryMessage)
+              .font(.caption)
+              .foregroundColor(.secondary)
+          }
+        }
+
         // --- Add Reset Section Here --- START ---
         Settings.Section(title: "Configuration Names") {
           HStack {
@@ -561,6 +588,7 @@ struct AdvancedPane: View {
       AlternativeMappingsView()
     }
     .onAppear {
+      _ = usageStore.currentSnapshot()
       let normalizedBackend = karabiner2Backend.normalized
       if karabiner2Backend != normalizedBackend {
         karabiner2Backend = normalizedBackend

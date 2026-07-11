@@ -89,7 +89,9 @@
 		750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */; };
 		7D8DD72588EA198557510801 /* ShortcutsOverviewHTMLExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */; };
 		7FDB1FCD1908EF321F80682E /* NativeConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */; };
+		855476E555CBA4484B2DFA51 /* UsageStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53F05C549B752447E8786B6B /* UsageStats.swift */; };
 		9253885043F54C408AE8E556 /* KarCompilerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81C56852E87F62B725200981 /* KarCompilerService.swift */; };
+		9351D5BE09B7F1039AD4F0CC /* UsageStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 047C15F5BD230F12E8C1FF08 /* UsageStatsTests.swift */; };
 		9988B913EEF6F026B160CFA5 /* KarabinerCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */; };
 		A0E527BE504D1E823832C517 /* KarabinerUserCommandReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD575A024DD1637B61404740 /* KarabinerUserCommandReceiver.swift */; };
 		A3D1E5F6B7C8D9E0F1A2B3C4 /* GokuCompilerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5D6E7F8A9B0C1D2E3F4A5 /* GokuCompilerService.swift */; };
@@ -124,6 +126,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		047C15F5BD230F12E8C1FF08 /* UsageStatsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageStatsTests.swift; sourceTree = "<group>"; };
 		058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarCompilerServiceTests.swift; sourceTree = "<group>"; };
 		0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerCommandRouter.swift; sourceTree = "<group>"; };
 		0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerExporterTests.swift; sourceTree = "<group>"; };
@@ -196,6 +199,7 @@
 		42F4CDCE2D46E2B300D0DD76 /* Cheatsheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheatsheet.swift; sourceTree = "<group>"; };
 		42F4CDD02D48C51F00D0DD76 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		42FDC3192D51687B004F5C5C /* AdvancedPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AdvancedPane.swift; sourceTree = "<group>"; };
+		53F05C549B752447E8786B6B /* UsageStats.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageStats.swift; sourceTree = "<group>"; };
 		5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModel.swift; sourceTree = "<group>"; };
 		605385A22D523CAD00BEDB4B /* Pulsate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pulsate.swift; sourceTree = "<group>"; };
 		606C56EE2DAB875A00198B9F /* Cheater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheater.swift; sourceTree = "<group>"; };
@@ -370,6 +374,7 @@
 				B4C5D6E7F8A9B0C1D2E3F4A5 /* GokuCompilerService.swift */,
 				68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */,
 				94DDF8F760B1AF06C16FD791 /* CommandScoutTree.swift */,
+				53F05C549B752447E8786B6B /* UsageStats.swift */,
 			);
 			path = "Leader Key";
 			sourceTree = "<group>";
@@ -398,6 +403,7 @@
 				EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */,
 				6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */,
 				FB3BD5519F0B1D7F830A0805 /* ShortcutsOverviewHTMLExporterTests.swift */,
+				047C15F5BD230F12E8C1FF08 /* UsageStatsTests.swift */,
 			);
 			path = "Leader KeyTests";
 			sourceTree = "<group>";
@@ -662,6 +668,7 @@
 				CD16D256FBA80A159CAFEC37 /* ShortcutsOverviewView.swift in Sources */,
 				7D8DD72588EA198557510801 /* ShortcutsOverviewHTMLExporter.swift in Sources */,
 				16DEDECED699A6073C49D3DC /* CommandScoutTree.swift in Sources */,
+				855476E555CBA4484B2DFA51 /* UsageStats.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -682,6 +689,7 @@
 				750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */,
 				62B678F50D31B911D994A129 /* ShortcutsOverviewModelTests.swift in Sources */,
 				205A4671860DF341FA0775F6 /* ShortcutsOverviewHTMLExporterTests.swift in Sources */,
+				9351D5BE09B7F1039AD4F0CC /* UsageStatsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

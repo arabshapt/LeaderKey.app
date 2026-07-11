@@ -59,6 +59,8 @@ extension Defaults.Keys {
   // Enable or disable verbose diagnostic logging at runtime (safe default: off)
   static let enableVerboseLogging = Key<Bool>(
     "enableVerboseLogging", default: false, suite: defaultsSuite)
+  static let usageTrackingEnabled = Key<Bool>(
+    "usageTrackingEnabled", default: false, suite: defaultsSuite)
   static let reactivateBehavior = Key<ReactivateBehavior>(
     "reactivateBehavior", default: .reset, suite: defaultsSuite)
   static let resetOnCmdRelease = Key<Bool>(
