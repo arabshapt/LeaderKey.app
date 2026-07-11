@@ -5,6 +5,57 @@ import SwiftUI
 enum Cheatsheet {
   private static let iconSize = NSSize(width: 24, height: 24)
 
+  struct PreparedRow: Identifiable {
+    let item: ActionOrGroup
+    let children: [PreparedRow]
+
+    var id: UUID { item.id }
+  }
+
+  static func preparedRows(
+    from actions: [ActionOrGroup],
+    showFallbackItems: Bool,
+    includeDescendants: Bool = true
+  ) -> [PreparedRow] {
+    actions
+      .filter { showFallbackItems || !isFromFallback($0) }
+      .sortedAlphabetically()
+      .map { item in
+        let childActions: [ActionOrGroup]
+        if includeDescendants {
+          switch item {
+          case .action:
+            childActions = []
+          case .group(let group):
+            childActions = group.actions
+          case .layer(let layer):
+            childActions = layer.actions
+          }
+        } else {
+          childActions = []
+        }
+        return PreparedRow(
+          item: item,
+          children: preparedRows(
+            from: childActions,
+            showFallbackItems: showFallbackItems,
+            includeDescendants: includeDescendants
+          )
+        )
+      }
+  }
+
+  private static func isFromFallback(_ item: ActionOrGroup) -> Bool {
+    switch item {
+    case .action(let action):
+      return action.isFromFallback
+    case .group(let group):
+      return group.isFromFallback
+    case .layer(let layer):
+      return layer.isFromFallback
+    }
+  }
+
   struct KeyBadge: SwiftUI.View {
     let key: String
     let showFallbackIndicator: Bool
@@ -40,7 +91,6 @@ enum Cheatsheet {
     let indent: Int
     @Default(.showDetailsInCheatsheet) var showDetails
     @Default(.showAppIconsInCheatsheet) var showIcons
-    @Default(.showFallbackItems) var showFallbackItems
 
     var body: some SwiftUI.View {
       HStack {
@@ -92,29 +142,10 @@ enum Cheatsheet {
     @Default(.expandGroupsInCheatsheet) var expand
     @Default(.showDetailsInCheatsheet) var showDetails
     @Default(.showAppIconsInCheatsheet) var showIcons
-    @Default(.showFallbackItems) var showFallbackItems
 
     let group: Group
+    let children: [PreparedRow]
     let indent: Int
-
-    // Sort group actions alphabetically and conditionally show/hide fallback items
-    var visibleGroupActions: [ActionOrGroup] {
-      let sortedActions = group.actions.sortedAlphabetically()
-      if showFallbackItems {
-        return sortedActions
-      } else {
-        return sortedActions.filter { item in
-          switch item {
-          case .action(let action):
-            return !action.isFromFallback
-          case .group(let subgroup):
-            return !subgroup.isFromFallback
-          case .layer(let layer):
-            return !layer.isFromFallback
-          }
-        }
-      }
-    }
 
     var body: some SwiftUI.View {
       VStack(alignment: .leading, spacing: 4) {
@@ -145,15 +176,8 @@ enum Cheatsheet {
           }
         }
         if expand {
-          ForEach(Array(visibleGroupActions.enumerated()), id: \.offset) { _, item in
-            switch item {
-            case .action(let action):
-              Cheatsheet.ActionRow(action: action, indent: indent + 1)
-            case .group(let group):
-              Cheatsheet.GroupRow(group: group, indent: indent + 1)
-            case .layer(let layer):
-              Cheatsheet.LayerRow(layer: layer, indent: indent + 1)
-            }
+          ForEach(children) { child in
+            Cheatsheet.ItemRow(row: child, indent: indent + 1)
           }
         }
       }
@@ -164,28 +188,10 @@ enum Cheatsheet {
     @Default(.expandGroupsInCheatsheet) var expand
     @Default(.showDetailsInCheatsheet) var showDetails
     @Default(.showAppIconsInCheatsheet) var showIcons
-    @Default(.showFallbackItems) var showFallbackItems
 
     let layer: Layer
+    let children: [PreparedRow]
     let indent: Int
-
-    var visibleLayerActions: [ActionOrGroup] {
-      let sortedActions = layer.actions.sortedAlphabetically()
-      if showFallbackItems {
-        return sortedActions
-      } else {
-        return sortedActions.filter { item in
-          switch item {
-          case .action(let action):
-            return !action.isFromFallback
-          case .group(let subgroup):
-            return !subgroup.isFromFallback
-          case .layer(let nestedLayer):
-            return !nestedLayer.isFromFallback
-          }
-        }
-      }
-    }
 
     var body: some SwiftUI.View {
       VStack(alignment: .leading, spacing: 4) {
@@ -216,17 +222,27 @@ enum Cheatsheet {
           }
         }
         if expand {
-          ForEach(Array(visibleLayerActions.enumerated()), id: \.offset) { _, item in
-            switch item {
-            case .action(let action):
-              Cheatsheet.ActionRow(action: action, indent: indent + 1)
-            case .group(let group):
-              Cheatsheet.GroupRow(group: group, indent: indent + 1)
-            case .layer(let layer):
-              Cheatsheet.LayerRow(layer: layer, indent: indent + 1)
-            }
+          ForEach(children) { child in
+            Cheatsheet.ItemRow(row: child, indent: indent + 1)
           }
         }
+      }
+    }
+  }
+
+  struct ItemRow: SwiftUI.View {
+    let row: PreparedRow
+    let indent: Int
+
+    @ViewBuilder
+    var body: some SwiftUI.View {
+      switch row.item {
+      case .action(let action):
+        Cheatsheet.ActionRow(action: action, indent: indent)
+      case .group(let group):
+        Cheatsheet.GroupRow(group: group, children: row.children, indent: indent)
+      case .layer(let layer):
+        Cheatsheet.LayerRow(layer: layer, children: row.children, indent: indent)
       }
     }
   }
@@ -235,6 +251,7 @@ enum Cheatsheet {
     @EnvironmentObject var userState: UserState
     @State private var contentHeight: CGFloat = 0
     @Default(.showFallbackItems) var showFallbackItems
+    @Default(.expandGroupsInCheatsheet) var expandGroups
 
     var maxHeight: CGFloat {
       if let screen = NSScreen.main {
@@ -256,26 +273,17 @@ enum Cheatsheet {
 
     var actions: [ActionOrGroup] {
       let baseActions = userState.activeRoot?.actions ?? []
-      let currentActions =
+      return
         (userState.currentGroup != nil)
         ? userState.currentGroup!.actions : baseActions
+    }
 
-      // Sort actions alphabetically and conditionally show/hide fallback items
-      let sortedActions = currentActions.sortedAlphabetically()
-      if showFallbackItems {
-        return sortedActions
-      } else {
-        return sortedActions.filter { item in
-          switch item {
-          case .action(let action):
-            return !action.isFromFallback
-          case .group(let group):
-            return !group.isFromFallback
-          case .layer(let layer):
-            return !layer.isFromFallback
-          }
-        }
-      }
+    var rows: [PreparedRow] {
+      preparedRows(
+        from: actions,
+        showFallbackItems: showFallbackItems,
+        includeDescendants: expandGroups
+      )
     }
 
     var body: some SwiftUI.View {
@@ -291,15 +299,8 @@ enum Cheatsheet {
           Divider()
             .padding(.bottom, 8)
 
-          ForEach(Array(actions.enumerated()), id: \.offset) { _, item in
-            switch item {
-            case .action(let action):
-              Cheatsheet.ActionRow(action: action, indent: 0)
-            case .group(let group):
-              Cheatsheet.GroupRow(group: group, indent: 0)
-            case .layer(let layer):
-              Cheatsheet.LayerRow(layer: layer, indent: 0)
-            }
+          ForEach(rows) { row in
+            Cheatsheet.ItemRow(row: row, indent: 0)
           }
         }
         .padding()
