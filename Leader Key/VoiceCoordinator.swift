@@ -91,10 +91,19 @@ final class VoiceCoordinator {
   private var settingsObserver: NSObjectProtocol?
   private var recentSuccessfulCommands: [VoiceDispatchRecentCommandContext] = []
   private var captureMode: CaptureMode = .command
+  private var isArmingRecording = false
+  private var pendingKeyUpWhileArming = false
+  private var processingTask: Task<Void, Never>?
+  private var processingWatchdog: DispatchWorkItem?
+  // Watchdog ceilings above the worst legitimate stage duration (URLSession
+  // timeout is 30s; planning can chain transcribe retries + a confirmation dialog).
+  var transcribingWatchdogTimeout: TimeInterval = 35
+  var planningWatchdogTimeout: TimeInterval = 90
   private(set) var state: State = .idle {
     didSet {
       statusItem.voiceStatus = state.statusItemStatus
       debugLog("[VoiceCoordinator] State: \(state.displayName)")
+      updateProcessingWatchdog()
     }
   }
 
@@ -120,6 +129,17 @@ final class VoiceCoordinator {
     self.transcriber = transcriber
     self.micAuthorizationStatus = micAuthorizationStatus
     self.requestMicAccess = requestMicAccess
+
+    audioCapture.onRecordingInterrupted = { [weak self] in
+      guard let self else { return }
+      switch self.state {
+      case .recordingHold, .recordingToggle:
+        debugLog("[VoiceCoordinator] Recording interrupted by audio device change")
+        self.state = .error("Audio device changed")
+      default:
+        break
+      }
+    }
   }
 
   func start() {
@@ -174,9 +194,42 @@ final class VoiceCoordinator {
       NotificationCenter.default.removeObserver(settingsObserver)
       self.settingsObserver = nil
     }
+    processingTask?.cancel()
+    processingTask = nil
     audioCapture.stopCompletely()
     audioCapture.cleanupTempFiles()
     state = .idle
+  }
+
+  /// Arms a one-shot timeout whenever the coordinator enters a processing
+  /// state, so a hung transcription/planning request can never wedge the
+  /// state machine (new recordings are blocked while transcribing/planning).
+  private func updateProcessingWatchdog() {
+    processingWatchdog?.cancel()
+    processingWatchdog = nil
+
+    let timeout: TimeInterval
+    switch state {
+    case .transcribing:
+      timeout = transcribingWatchdogTimeout
+    case .planning:
+      timeout = planningWatchdogTimeout
+    default:
+      return
+    }
+
+    let item = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      guard self.state == .transcribing || self.state == .planning else { return }
+      debugLog(
+        "[VoiceCoordinator] Watchdog fired in state \(self.state.displayName); cancelling voice processing"
+      )
+      self.processingTask?.cancel()
+      self.processingTask = nil
+      self.state = .error("Voice timed out")
+    }
+    processingWatchdog = item
+    DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: item)
   }
 
   func handleToggleKeyDown() {
@@ -214,6 +267,11 @@ final class VoiceCoordinator {
   func handleHoldKeyUp() {
     guard voiceEnabled else {
       state = .idle
+      return
+    }
+
+    if isArmingRecording {
+      pendingKeyUpWhileArming = true
       return
     }
 
@@ -260,6 +318,11 @@ final class VoiceCoordinator {
       return
     }
 
+    if isArmingRecording {
+      pendingKeyUpWhileArming = true
+      return
+    }
+
     if state == .recordingHold, captureMode == .dictate {
       finishRecordingWithTrailingCapture(trigger: "dictate-hold", expectedMode: .dictate)
     }
@@ -275,14 +338,28 @@ final class VoiceCoordinator {
   }
 
   private func beginRecording(mode: State) {
+    processingTask?.cancel()
+    processingTask = nil
+    isArmingRecording = true
+    pendingKeyUpWhileArming = false
+
     ensureMicrophoneAccess { [weak self] granted in
       guard let self else { return }
+
+      self.isArmingRecording = false
+      let keyUpArrivedWhileArming = self.pendingKeyUpWhileArming
+      self.pendingKeyUpWhileArming = false
 
       if granted {
         self.updateAudioWarmState()
         do {
           try self.audioCapture.startRecording()
           self.state = mode
+          if keyUpArrivedWhileArming, mode == .recordingHold {
+            // The hold key was released while the permission prompt was still
+            // pending — finish immediately so recording can never get stuck.
+            self.finishRecording(trigger: "hold-armed-late")
+          }
         } catch {
           self.state = .error("Recording failed")
           debugLog("[VoiceCoordinator] Failed to start recording: \(error)")
@@ -320,7 +397,7 @@ final class VoiceCoordinator {
     let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let dispatchOptions = voiceDispatchOptions(bundleId: targetBundleId)
 
-    Task { [weak self] in
+    processingTask = Task { [weak self] in
       guard let self else { return }
 
       do {
@@ -441,6 +518,7 @@ final class VoiceCoordinator {
             }
           }
         } catch {
+          if Task.isCancelled { return }
           await MainActor.run {
             self.state = .error("Dispatch failed")
             debugLog("[VoiceCoordinator] Dispatch failed: \(error)")
@@ -457,6 +535,14 @@ final class VoiceCoordinator {
           debugLog("[VoiceCoordinator] STT transcription skipped: API key missing")
         }
       } catch {
+        // A cancelled request (watchdog or superseding recording) already
+        // handled its own state transition — don't overwrite it.
+        if Task.isCancelled || error is CancellationError
+          || (error as? URLError)?.code == .cancelled
+        {
+          debugLog("[VoiceCoordinator] Voice processing cancelled")
+          return
+        }
         await MainActor.run {
           self.state = .error("Transcription failed")
           debugLog("[VoiceCoordinator] STT transcription failed: \(error)")

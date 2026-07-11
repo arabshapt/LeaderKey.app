@@ -6,6 +6,7 @@ import XCTest
 
 final class MockVoiceAudioCapture: VoiceAudioCapturing {
   var isRecording = false
+  var onRecordingInterrupted: (() -> Void)?
   var startRecordingCallCount = 0
   var stopRecordingCallCount = 0
   var startRecordingError: Error?
@@ -36,6 +37,7 @@ final class MockVoiceAudioCapture: VoiceAudioCapturing {
 
 final class MockSpeechTranscriber: SpeechTranscribing {
   var transcribeCallCount = 0
+  var hangForever = false
   var resultProvider: () throws -> VoiceTranscriptionResult = {
     throw VoiceTranscriptionError.emptyTranscript
   }
@@ -48,6 +50,10 @@ final class MockSpeechTranscriber: SpeechTranscribing {
     prompt: String?
   ) async throws -> VoiceTranscriptionResult {
     transcribeCallCount += 1
+    if hangForever {
+      // Task.sleep is cancellation-aware, mimicking a hung URLSession request
+      try await Task.sleep(nanoseconds: 60_000_000_000)
+    }
     return try resultProvider()
   }
 }
@@ -197,14 +203,55 @@ final class VoiceCoordinatorTests: XCTestCase {
     // Permission granted after the key-up.
     pendingCompletion?(true)
 
-    XCTExpectFailure("Known race: key-up during permission arming is dropped; fixed in T4.1") {
-      let settled = self.waitUntil("recording settled after late permission grant", timeout: 2) {
-        coordinator.state != .recordingHold
-      }
-      XCTAssertTrue(
-        settled,
-        "recording should not stay stuck in recordingHold after key-up + late permission grant"
-      )
+    let settled = waitUntil("recording settled after late permission grant", timeout: 2) {
+      coordinator.state != .recordingHold
     }
+    XCTAssertTrue(
+      settled,
+      "recording should not stay stuck in recordingHold after key-up + late permission grant"
+    )
+    XCTAssertEqual(audioCapture.stopRecordingCallCount, 1, "late grant should finish immediately")
+  }
+
+  func testWatchdogRecoversFromHungTranscription() {
+    transcriber.hangForever = true
+    let coordinator = makeCoordinator()
+    coordinator.transcribingWatchdogTimeout = 0.2
+
+    coordinator.handleDictateHoldKeyDown()
+    coordinator.handleDictateHoldKeyUp()
+
+    XCTAssertTrue(
+      waitUntil("watchdog fired", timeout: 3) {
+        coordinator.state == .error("Voice timed out")
+      },
+      "hung transcription should be cancelled by the watchdog, got \(coordinator.state)"
+    )
+
+    // The coordinator must accept a fresh recording after the watchdog fired.
+    transcriber.hangForever = false
+    coordinator.handleDictateHoldKeyDown()
+    XCTAssertEqual(coordinator.state, .recordingHold)
+  }
+
+  func testDeviceChangeInterruptionSurfacesErrorAndRecovers() {
+    let coordinator = makeCoordinator()
+
+    coordinator.handleDictateHoldKeyDown()
+    XCTAssertEqual(coordinator.state, .recordingHold)
+
+    // Simulate the audio device changing mid-recording.
+    audioCapture.isRecording = false
+    audioCapture.onRecordingInterrupted?()
+
+    XCTAssertEqual(coordinator.state, .error("Audio device changed"))
+
+    // A key-up in the error state must not crash or restart anything.
+    coordinator.handleDictateHoldKeyUp()
+    XCTAssertEqual(coordinator.state, .error("Audio device changed"))
+
+    // The next key-down starts a fresh recording.
+    coordinator.handleDictateHoldKeyDown()
+    XCTAssertEqual(coordinator.state, .recordingHold)
   }
 }

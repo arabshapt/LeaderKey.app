@@ -8,6 +8,9 @@ extension Notification.Name {
 /// Seam for VoiceCoordinator so tests can substitute a mock capture backend.
 protocol VoiceAudioCapturing: AnyObject {
   var isRecording: Bool { get }
+  /// Invoked on the main queue when an in-flight recording is aborted
+  /// (e.g. the audio device changed mid-capture).
+  var onRecordingInterrupted: (() -> Void)? { get set }
   func setPrewarmingEnabled(_ enabled: Bool)
   func startRecording() throws
   func stopRecording() -> VoiceAudioCapture.CaptureResult?
@@ -45,6 +48,7 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
   private var activePreRollFrameCount: AVAudioFramePosition = 0
   private var lastCaptureURL: URL?
   private var configChangeObserver: NSObjectProtocol?
+  var onRecordingInterrupted: (() -> Void)?
 
   init() {
     configChangeObserver = NotificationCenter.default.addObserver(
@@ -234,7 +238,19 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
       let hadActiveFile = self.activeFile != nil
       self.teardownEngineLocked()
       if hadActiveFile {
+        // Fully abort the in-flight capture: the tap format may change with
+        // the device, so the open file must not receive further writes.
+        if let url = self.activeURL {
+          try? FileManager.default.removeItem(at: url)
+        }
+        self.activeFile = nil
+        self.activeURL = nil
+        self.activeFrameCount = 0
+        self.activePreRollFrameCount = 0
         debugLog("[VoiceAudioCapture] Active recording aborted by audio device change")
+        DispatchQueue.main.async { [weak self] in
+          self?.onRecordingInterrupted?()
+        }
       }
     }
     queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
