@@ -222,16 +222,50 @@ struct CommandScoutMenuInventoryResponse: Codable, Equatable {
 struct CommandScoutMenuFetchResult: Equatable {
   var items: [CommandScoutMenuItem]
   var errorMessage: String?
+
+  var isAppNotRunning: Bool {
+    errorMessage?.hasPrefix("ERROR: App not running:") == true
+  }
 }
 
 struct CommandScoutMenuSuggestionResult: Equatable {
   var suggestions: [CommandScoutSuggestion]
   var errorMessage: String?
+
+  var isAppNotRunning: Bool {
+    errorMessage?.hasPrefix("ERROR: App not running:") == true
+  }
+}
+
+enum CommandScoutScanMode: String, Equatable {
+  case menuOnly
+  case menuAndAI
+  case aiOnly
+
+  var displayName: String {
+    switch self {
+    case .menuOnly: return "Menu only"
+    case .menuAndAI: return "Menu + AI"
+    case .aiOnly: return "AI only"
+    }
+  }
 }
 
 struct CommandScoutSuggestionMergeResult: Equatable {
   var suggestions: [CommandScoutSuggestion]
   var addedCount: Int
+}
+
+struct CommandScoutAIInventorySuccess: Equatable {
+  var suggestions: [CommandScoutSuggestion]
+  var aiSuggestionCount: Int
+  var addedCount: Int
+  var diagnostics: CommandScoutAIParseDiagnostics
+}
+
+enum CommandScoutAIInventoryResult: Equatable {
+  case success(CommandScoutAIInventorySuccess)
+  case parseFailure(CommandScoutAIParseDiagnostics)
 }
 
 struct CommandScoutAppContext: Equatable {

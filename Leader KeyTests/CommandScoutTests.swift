@@ -441,6 +441,70 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(result.items.count, 1)
     }
 
+    func testResolvedScanModeDistinguishesMenuMenuAndAIAndAIOnly() {
+        let stopped = CommandScoutMenuSuggestionResult(
+            suggestions: [],
+            errorMessage: "ERROR: App not running: Safari"
+        )
+        let running = CommandScoutMenuSuggestionResult(
+            suggestions: [
+                makeSuggestion(value: "Safari > File > New", title: "New")
+            ],
+            errorMessage: nil
+        )
+
+        XCTAssertEqual(
+            CommandScoutService.resolvedScanMode(aiEnabled: false, menuResult: stopped),
+            .menuOnly
+        )
+        XCTAssertEqual(
+            CommandScoutService.resolvedScanMode(aiEnabled: true, menuResult: running),
+            .menuAndAI
+        )
+        XCTAssertEqual(
+            CommandScoutService.resolvedScanMode(aiEnabled: true, menuResult: stopped),
+            .aiOnly
+        )
+        XCTAssertTrue(stopped.isAppNotRunning)
+    }
+
+    func testAIOnlyInventoryScanUsesMockProviderAndMarksUnverifiedMenusForReview() async throws {
+        let response = #"{"suggestions":[{"title":"New Tab","source":"liveMenu","actionType":"menu","actionValue":"Safari > File > New Tab","suggestedSequence":"tN","confidence":0.98,"sourceNotes":"model guess"},{"title":"Open URL","source":"ai","actionType":"url","actionValue":"https://example.com/CaseSensitive","suggestedSequence":"u","confidence":0.9}]}"#
+            .data(using: .utf8)!
+        let provider = MockCommandScoutAIProvider(response: response)
+        let settings = CommandScoutProviderSettings(
+            providerKind: .gemini,
+            modelName: "mock",
+            baseURL: "",
+            webResearchEnabled: false
+        )
+
+        let result = try await CommandScoutService.runAIInventoryScan(
+            provider: provider,
+            appName: "Safari",
+            bundleId: "com.apple.Safari",
+            existingRoot: emptyRoot(),
+            menuSuggestions: [],
+            settings: settings
+        )
+
+        guard case .success(let success) = result else {
+            return XCTFail("Expected mock AI-only scan to succeed")
+        }
+        XCTAssertEqual(success.aiSuggestionCount, 2)
+        XCTAssertEqual(success.addedCount, 2)
+        let menu = try XCTUnwrap(success.suggestions.first { $0.actionType == .menu })
+        XCTAssertEqual(menu.source, .ai)
+        XCTAssertEqual(menu.confidence, 0.7)
+        XCTAssertTrue(menu.reviewNotes.contains("Unverified AI menu path"))
+        XCTAssertFalse(menu.isSelectableByDefault)
+        XCTAssertTrue(menu.canCreateAction)
+
+        let url = try XCTUnwrap(success.suggestions.first { $0.actionType == .url })
+        XCTAssertEqual(url.actionValue, "https://example.com/CaseSensitive")
+        XCTAssertEqual(url.confidence, 0.9)
+    }
+
     func testMenuAndAIMergeNormalizesOnlyMenuPathIdentity() {
         var menu = makeSuggestion(
             id: "menu",
@@ -1067,5 +1131,14 @@ final class CommandScoutTests: XCTestCase {
             conflictStatus: .clear,
             reviewNotes: ""
         )
+    }
+}
+
+private struct MockCommandScoutAIProvider: AIProviderClient {
+    let response: Data
+    var supportsWebResearch: Bool { false }
+
+    func generateJSON(system: String, prompt: String) async throws -> Data {
+        response
     }
 }

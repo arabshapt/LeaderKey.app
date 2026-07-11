@@ -267,7 +267,7 @@ struct OpenAIProvider: AIProviderClient {
                                         "type": "string",
                                         "minLength": 1,
                                         "maxLength": 3,
-                                        "pattern": "^[a-zA-Z0-9]{1,3}$",
+                                        "pattern": "^[-a-zA-Z0-9,./;'=\\[\\]\\\\]{1,3}$",
                                     ],
                                     "description": ["type": "string"],
                                     "aiDescription": ["type": "string"],

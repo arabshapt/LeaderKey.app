@@ -89,6 +89,80 @@ class CommandScoutService {
         )
     }
 
+    static func resolvedScanMode(
+        aiEnabled: Bool,
+        menuResult: CommandScoutMenuSuggestionResult
+    ) -> CommandScoutScanMode {
+        guard aiEnabled else { return .menuOnly }
+        if menuResult.suggestions.isEmpty, menuResult.errorMessage != nil {
+            return .aiOnly
+        }
+        return .menuAndAI
+    }
+
+    static func runAIInventoryScan(
+        provider: AIProviderClient,
+        appName: String,
+        bundleId: String,
+        existingRoot: Group,
+        menuSuggestions: [CommandScoutSuggestion],
+        settings: CommandScoutProviderSettings
+    ) async throws -> CommandScoutAIInventoryResult {
+        let existingKeys = existingRoot.actions.compactMap { item -> String? in
+            switch item {
+            case .action(let action): return action.key
+            case .group(let group): return group.key
+            case .layer(let layer): return layer.key
+            }
+        }
+        let configSummary = existingKeys.isEmpty ? "Empty" : existingKeys.joined(separator: ", ")
+        let promptInventory = menuSuggestions.map { suggestion in
+            [
+                "actionValue": suggestion.actionValue,
+                "shortcut": suggestion.shortcut ?? "",
+            ]
+        }
+        let menuItemsJSON: String
+        if let data = try? JSONSerialization.data(
+            withJSONObject: promptInventory,
+            options: [.sortedKeys]
+        ), let encoded = String(data: data, encoding: .utf8) {
+            menuItemsJSON = encoded
+        } else {
+            menuItemsJSON = "[]"
+        }
+
+        let prompt = CommandScoutPrompts.inventoryPrompt(
+            appName: appName,
+            bundleId: bundleId,
+            existingConfigSummary: configSummary,
+            fallbackSummary: "N/A",
+            menuItemsJSON: menuItemsJSON,
+            webResearchEnabled: settings.webResearchEnabled && provider.supportsWebResearch
+        )
+        let data = try await provider.generateJSON(
+            system: CommandScoutPrompts.systemPrompt,
+            prompt: prompt
+        )
+
+        switch parseAISuggestionsResult(data) {
+        case .success(let aiSuggestions, let diagnostics):
+            let mergeResult = mergeMenuAndAISuggestions(
+                menuSuggestions: menuSuggestions,
+                aiSuggestions: aiSuggestions
+            )
+            return .success(
+                CommandScoutAIInventorySuccess(
+                    suggestions: mergeResult.suggestions,
+                    aiSuggestionCount: aiSuggestions.count,
+                    addedCount: mergeResult.addedCount,
+                    diagnostics: diagnostics
+                ))
+        case .failure(let diagnostics):
+            return .parseFailure(diagnostics)
+        }
+    }
+
     // MARK: - Validation
 
     /// Validate a list of suggestions against each other and an existing config root.
@@ -205,7 +279,20 @@ class CommandScoutService {
                     merged[index].category = aiSuggestion.category
                 }
             } else {
-                merged.append(aiSuggestion)
+                var unverifiedSuggestion = aiSuggestion
+                if unverifiedSuggestion.actionType == .menu {
+                    unverifiedSuggestion.source = .ai
+                    unverifiedSuggestion.confidence = min(unverifiedSuggestion.confidence, 0.7)
+                    let reviewNote = "Unverified AI menu path; review it against the app before applying."
+                    if unverifiedSuggestion.reviewNotes.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty {
+                        unverifiedSuggestion.reviewNotes = reviewNote
+                    } else {
+                        unverifiedSuggestion.reviewNotes += " \(reviewNote)"
+                    }
+                }
+                merged.append(unverifiedSuggestion)
                 addedCount += 1
             }
         }

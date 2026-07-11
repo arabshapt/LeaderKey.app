@@ -16,6 +16,8 @@ struct CommandScoutView: View {
     @State private var activeScanID: UUID?
     @State private var statusMessage = ""
     @State private var scanError: String?
+    @State private var scanNotice: String?
+    @State private var scanMode: CommandScoutScanMode = .menuOnly
     @State private var showingHighRiskConfirmation = false
     @State private var lastAIParseDiagnostics: CommandScoutAIParseDiagnostics?
 
@@ -127,6 +129,12 @@ struct CommandScoutView: View {
             Image(systemName: "magnifyingglass")
             Text("Command Scout — \(appContext.appDisplayName)")
                 .font(.headline)
+            Text(scanMode.displayName)
+                .font(.caption2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(Capsule())
             Spacer()
             Text(statusMessage)
                 .font(.caption)
@@ -201,6 +209,11 @@ struct CommandScoutView: View {
                 Text(error)
                     .font(.caption)
                     .foregroundColor(.red)
+            }
+            if let notice = scanNotice {
+                Label(notice, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding(12)
@@ -610,8 +623,10 @@ struct CommandScoutView: View {
         activeScanID = scanID
         isScanning = true
         scanError = nil
+        scanNotice = nil
         lastAIParseDiagnostics = nil
-        statusMessage = "Scanning menus..."
+        scanMode = aiEnabled ? .menuAndAI : .menuOnly
+        statusMessage = scanMode == .menuOnly ? "Scanning menus..." : "Scanning menus before AI..."
 
         // Save provider settings
         Defaults[.commandScoutAIProvider] = providerKind
@@ -622,12 +637,26 @@ struct CommandScoutView: View {
         scanTask = Task {
             let menuResult = await CommandScoutService.scanMenuSuggestionResult(appName: appContext.appName)
             guard !Task.isCancelled else { return }
+            let resolvedMode = CommandScoutService.resolvedScanMode(
+                aiEnabled: aiEnabled,
+                menuResult: menuResult
+            )
 
             await MainActor.run {
                 guard activeScanID == scanID else { return }
+                scanMode = resolvedMode
                 suggestions = menuResult.suggestions
-                scanError = menuResult.errorMessage
-                statusMessage = "\(menuResult.suggestions.count) menu items found"
+                if resolvedMode == .aiOnly, menuResult.isAppNotRunning {
+                    scanError = nil
+                    scanNotice = "The app is not running. Continuing with an informational AI-only scan; menu paths cannot be verified."
+                    statusMessage = "AI-only scan (app not running)"
+                } else {
+                    scanError = menuResult.errorMessage
+                    if resolvedMode == .aiOnly {
+                        scanNotice = "Live menus are unavailable; continuing with AI only."
+                    }
+                    statusMessage = "\(menuResult.suggestions.count) menu items found"
+                }
             }
 
             guard !Task.isCancelled else { return }
@@ -648,7 +677,8 @@ struct CommandScoutView: View {
                 )
                 isScanning = false
                 let warning = lastAIParseDiagnostics?.warningMessage.map { " \($0)" } ?? ""
-                statusMessage = "\(suggestions.count) suggestions ready\(warning)"
+                let modePrefix = scanMode == .aiOnly ? "AI-only: " : ""
+                statusMessage = "\(modePrefix)\(suggestions.count) suggestions ready\(warning)"
                 activeScanID = nil
                 scanTask = nil
             }
@@ -673,61 +703,27 @@ struct CommandScoutView: View {
 
         let provider = AIProviderFactory.makeProvider(settings: settings, apiKey: apiKey)
 
-        // Build existing config summary
-        let existingKeys = session.root.actions.compactMap { item -> String? in
-            switch item {
-            case .action(let a): return a.key
-            case .group(let g): return g.key
-            case .layer(let l): return l.key
-            }
-        }
-        let configSummary = existingKeys.isEmpty ? "Empty" : existingKeys.joined(separator: ", ")
-
-        // Build menu items JSON for prompt
-        let menuItemsJSON: String
-        let promptInventory = existingMenuSuggestions.map { suggestion in
-            [
-                "actionValue": suggestion.actionValue,
-                "shortcut": suggestion.shortcut ?? "",
-            ]
-        }
-        if let data = try? JSONSerialization.data(withJSONObject: promptInventory, options: [.sortedKeys]),
-           let str = String(data: data, encoding: .utf8) {
-            menuItemsJSON = str
-        } else {
-            menuItemsJSON = "[]"
-        }
-
-        let prompt = CommandScoutPrompts.inventoryPrompt(
-            appName: appContext.appName,
-            bundleId: appContext.bundleId,
-            existingConfigSummary: configSummary,
-            fallbackSummary: "N/A",
-            menuItemsJSON: menuItemsJSON,
-            webResearchEnabled: settings.webResearchEnabled && provider.supportsWebResearch
-        )
-
         do {
-            let data = try await provider.generateJSON(
-                system: CommandScoutPrompts.systemPrompt,
-                prompt: prompt
+            let result = try await CommandScoutService.runAIInventoryScan(
+                provider: provider,
+                appName: appContext.appName,
+                bundleId: appContext.bundleId,
+                existingRoot: session.root,
+                menuSuggestions: existingMenuSuggestions,
+                settings: settings
             )
             guard !Task.isCancelled else { return }
 
-            switch CommandScoutService.parseAISuggestionsResult(data) {
-            case .success(let aiSuggestions, let diagnostics):
+            switch result {
+            case .success(let success):
                 await MainActor.run {
                     guard activeScanID == scanID else { return }
-                    lastAIParseDiagnostics = diagnostics
-                    let mergeResult = CommandScoutService.mergeMenuAndAISuggestions(
-                        menuSuggestions: suggestions,
-                        aiSuggestions: aiSuggestions
-                    )
-                    suggestions = mergeResult.suggestions
-                    let warning = diagnostics.warningMessage.map { " \($0)" } ?? ""
-                    statusMessage = "\(suggestions.count) suggestions (\(aiSuggestions.count) from AI, \(mergeResult.addedCount) new).\(warning)"
+                    lastAIParseDiagnostics = success.diagnostics
+                    suggestions = success.suggestions
+                    let warning = success.diagnostics.warningMessage.map { " \($0)" } ?? ""
+                    statusMessage = "\(suggestions.count) suggestions (\(success.aiSuggestionCount) from AI, \(success.addedCount) new).\(warning)"
                 }
-            case .failure(let diagnostics):
+            case .parseFailure(let diagnostics):
                 await MainActor.run {
                     guard activeScanID == scanID else { return }
                     lastAIParseDiagnostics = diagnostics

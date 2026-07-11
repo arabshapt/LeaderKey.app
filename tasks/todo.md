@@ -48,7 +48,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T3.1 AX key-equivalents on menu scan + UI chip + merge normalization
 - [x] T3.2 Widen sequence namespace (uppercase, punctuation last resort)
 - [x] T3.3 Free-slot integration + embedded compact grid
-- [ ] T3.4 AI-only mode for non-running apps
+- [x] T3.4 AI-only mode for non-running apps
 - [ ] T3.5 UsageStats (default-off) + Scout/viz consumers
 - [ ] T3.6 Global/fallback scouting
 
