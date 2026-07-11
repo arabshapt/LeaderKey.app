@@ -88,6 +88,29 @@ class ControllerTests: XCTestCase {
     XCTAssertFalse(Controller.shouldReuseCheatsheet(onHideFor: .never))
   }
 
+  func testThemeReplacementClosesOldWindowAndPreservesActivePresentation() {
+    let oldWindow = TrackingMainWindow(controller: controller)
+    let frame = NSRect(x: 120, y: 180, width: 420, height: 260)
+    oldWindow.setFrame(frame, display: false)
+    oldWindow.alphaValue = 0.42
+    oldWindow.ignoresMouseEvents = true
+    oldWindow.shouldBeVisible = true
+    oldWindow.orderFront(nil)
+    controller.window = oldWindow
+
+    let replacementWindow = TrackingMainWindow(controller: controller)
+    controller.replaceThemeWindow(with: replacementWindow)
+
+    XCTAssertTrue(controller.window === replacementWindow)
+    XCTAssertEqual(oldWindow.closeCallCount, 1)
+    XCTAssertFalse(oldWindow.isVisible)
+    XCTAssertEqual(replacementWindow.frame, frame)
+    XCTAssertTrue(replacementWindow.isVisible)
+    XCTAssertTrue(replacementWindow.shouldBeVisible)
+    XCTAssertEqual(replacementWindow.alphaValue, 0.42, accuracy: 0.001)
+    XCTAssertTrue(replacementWindow.ignoresMouseEvents)
+  }
+
   // Test shortcut parsing logic
   func testParseValidShortcuts() {
     // Test Cmd+Shift+B
@@ -143,5 +166,21 @@ class ControllerTests: XCTestCase {
 
     // Invalid modifier character
     XCTAssertNil(controller.parseCompactShortcutToCGEventData("Xb"), "Invalid modifier 'X' should fail")
+  }
+}
+
+private final class TrackingMainWindow: MainWindow {
+  private(set) var closeCallCount = 0
+
+  required init(controller: Controller) {
+    super.init(
+      controller: controller,
+      contentRect: NSRect(x: 0, y: 0, width: 100, height: 100)
+    )
+  }
+
+  override func close() {
+    closeCallCount += 1
+    super.close()
   }
 }

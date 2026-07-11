@@ -55,11 +55,9 @@ class Controller {
         guard value != currentTheme else { continue }
         currentTheme = value
         guard let self else { return }
-        let windowClass = Theme.classFor(value)
         await MainActor.run {
-          self.discardCheatsheet()
+          self.replaceThemeWindow(for: value)
         }
-        self.window = await windowClass.init(controller: self)
       }
     }
 
@@ -76,6 +74,36 @@ class Controller {
 
     // Lazily create cheatsheet to reduce baseline memory
     self.cheatsheetWindow = nil
+  }
+
+  private func replaceThemeWindow(for theme: Theme) {
+    let windowClass = Theme.classFor(theme)
+    replaceThemeWindow(with: windowClass.init(controller: self))
+  }
+
+  func replaceThemeWindow(with replacementWindow: MainWindow) {
+    guard let previousWindow = window, previousWindow !== replacementWindow else { return }
+
+    let wasVisible = previousWindow.isVisible
+    let shouldBeVisible = previousWindow.shouldBeVisible
+    let wasActive = wasVisible || shouldBeVisible
+
+    if wasActive {
+      replacementWindow.setFrame(previousWindow.frame, display: false)
+      replacementWindow.alphaValue = previousWindow.alphaValue
+      replacementWindow.ignoresMouseEvents = previousWindow.ignoresMouseEvents
+      replacementWindow.shouldBeVisible = shouldBeVisible
+    }
+
+    discardCheatsheet()
+    previousWindow.shouldBeVisible = false
+    window = replacementWindow
+    previousWindow.orderOut(nil)
+    previousWindow.close()
+
+    if wasVisible {
+      replacementWindow.orderFront(nil)
+    }
   }
 
   func show() {
