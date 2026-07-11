@@ -14,6 +14,7 @@
 		11F0B4A52E7C111100A1B2C3 /* CompactShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F0B4A62E7C111100A1B2C3 /* CompactShortcutTests.swift */; };
 		130196C62D73B3DE0093148B /* Breadcrumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130196C52D73B3DC0093148B /* Breadcrumbs.swift */; };
 		13080407B1A7D62ED7F8C9EB /* KarabinerCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */; };
+		16DEDECED699A6073C49D3DC /* CommandScoutTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DDF8F760B1AF06C16FD791 /* CommandScoutTree.swift */; };
 		205A4671860DF341FA0775F6 /* ShortcutsOverviewHTMLExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB3BD5519F0B1D7F830A0805 /* ShortcutsOverviewHTMLExporterTests.swift */; };
 		2609991E2E15B62D00CCC8DD /* SearchPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2609991D2E15B62D00CCC8DD /* SearchPane.swift */; };
 		260999222E19593800CCC8DD /* ViewSizeCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 260999212E19593800CCC8DD /* ViewSizeCache.swift */; };
@@ -202,6 +203,7 @@
 		6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModelTests.swift; sourceTree = "<group>"; };
 		81C56852E87F62B725200981 /* KarCompilerService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarCompilerService.swift; sourceTree = "<group>"; };
 		88C62E8645370FE40FE22FAD /* Karabiner2ExporterKarConfigTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Karabiner2ExporterKarConfigTests.swift; sourceTree = "<group>"; };
+		94DDF8F760B1AF06C16FD791 /* CommandScoutTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommandScoutTree.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyLookupCacheTests.swift; sourceTree = "<group>"; };
 		A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarabinerCommandRouterTests.swift; sourceTree = "<group>"; };
 		AA0000012EA0000100000001 /* CommandScoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScoutModels.swift; sourceTree = "<group>"; };
@@ -367,6 +369,7 @@
 				81C56852E87F62B725200981 /* KarCompilerService.swift */,
 				B4C5D6E7F8A9B0C1D2E3F4A5 /* GokuCompilerService.swift */,
 				68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */,
+				94DDF8F760B1AF06C16FD791 /* CommandScoutTree.swift */,
 			);
 			path = "Leader Key";
 			sourceTree = "<group>";
@@ -658,6 +661,7 @@
 				BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */,
 				CD16D256FBA80A159CAFEC37 /* ShortcutsOverviewView.swift in Sources */,
 				7D8DD72588EA198557510801 /* ShortcutsOverviewHTMLExporter.swift in Sources */,
+				16DEDECED699A6073C49D3DC /* CommandScoutTree.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

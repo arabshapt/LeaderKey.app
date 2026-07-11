@@ -23,9 +23,21 @@ enum ShortcutsOverview {
   ]
 
   static let candidateKeys: Set<String> = Set(keyboardRows.flatMap { $0 })
+  private static let baseKeyByShiftedKey = Dictionary(
+    uniqueKeysWithValues: shiftedKeyByBaseKey.map { ($0.value, $0.key) })
 
   static func shiftedKey(for baseKey: String) -> String? {
     shiftedKeyByBaseKey[baseKey]
+  }
+
+  static func physicalKeyPair(for key: String) -> (base: String, shifted: String)? {
+    if let shifted = shiftedKeyByBaseKey[key] {
+      return (key, shifted)
+    }
+    guard let base = baseKeyByShiftedKey[key], let shifted = shiftedKeyByBaseKey[base] else {
+      return nil
+    }
+    return (base, shifted)
   }
 
   // MARK: - Node helpers

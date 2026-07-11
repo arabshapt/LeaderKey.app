@@ -33,6 +33,7 @@ struct CommandScoutView: View {
     @State private var sourceFilter: CommandScoutSuggestionSource?
     @State private var searchText = ""
     @State private var selectedSuggestionID: String?
+    @State private var previewDrillPath: [String] = []
 
     private var filteredSuggestions: [CommandScoutSuggestion] {
         var result = suggestions
@@ -92,15 +93,22 @@ struct CommandScoutView: View {
                     .frame(minWidth: 280, idealWidth: 320)
             }
             Divider()
+            projectedPreview
+            Divider()
             footerBar
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 900, minHeight: 780)
         .onAppear(perform: loadProviderSettings)
         .onDisappear(perform: cancelScan)
         .onChange(of: providerKind) { newProvider in
             modelName = newProvider.defaultModel
             apiKeyInput = ""
             hasStoredKey = KeychainHelper.hasKey(account: newProvider.keychainAccount)
+        }
+        .onChange(of: projectedResolvedPath.keys) { validPath in
+            if previewDrillPath != validPath {
+                previewDrillPath = validPath
+            }
         }
         .alert("Apply high-risk suggestions?", isPresented: $showingHighRiskConfirmation) {
             Button("Apply", role: .destructive) {
@@ -478,6 +486,69 @@ struct CommandScoutView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Projected Grid
+
+    private var projectedPreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Projected Selected Shortcuts")
+                    .font(.caption.weight(.semibold))
+
+                Button("Root") { previewDrillPath = [] }
+                    .buttonStyle(.link)
+
+                ForEach(projectedResolvedPath.breadcrumb) { entry in
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7))
+                        .foregroundColor(.secondary)
+                    Button("\(entry.key) · \(entry.title)") {
+                        previewDrillPath = entry.path
+                    }
+                    .buttonStyle(.link)
+                }
+
+                Spacer()
+
+                Text("\(projectedLevel.freeKeys.count) free keys on this grid.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            ShortcutsKeyboardGrid(
+                level: projectedLevel,
+                compact: true,
+                onDrill: { assignment in
+                    guard assignment.isDrillable else { return }
+                    previewDrillPath = projectedResolvedPath.keys + [assignment.key]
+                }
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var projectedRoot: Group {
+        let selectedSuggestions = suggestions.filter {
+            selectedIDs.contains($0.id) && $0.conflictStatus == .clear
+        }
+        return CommandScoutTreeInsertion.projectedRoot(
+            byInserting: selectedSuggestions,
+            into: session.root
+        )
+    }
+
+    private var projectedResolvedPath: ShortcutsOverview.ResolvedPath {
+        ShortcutsOverview.resolvePath(previewDrillPath, from: projectedRoot.actions)
+    }
+
+    private var projectedLevel: ShortcutsOverview.LevelView {
+        ShortcutsOverview.levelView(
+            for: projectedResolvedPath.actions,
+            breadcrumb: projectedResolvedPath.breadcrumb
+        )
     }
 
     // MARK: - Footer

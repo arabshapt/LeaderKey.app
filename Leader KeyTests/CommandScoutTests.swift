@@ -328,6 +328,77 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(punctuation[0].suggestedSequence, "t,")
     }
 
+    func testSequenceTrieRejectsBlockedPrefixesAndOccupiedLeaves() {
+        let root = Group(key: nil, label: "Root", actions: [
+            .action(Action(key: "t", type: .command, value: "echo blocked")),
+            .group(Group(key: "g", label: "Group", actions: [
+                .action(Action(key: "n", type: .command, value: "echo occupied"))
+            ])),
+        ])
+        let trie = CommandScoutSequenceTrie(root: root)
+
+        XCTAssertEqual(trie.feasibility(for: ["t", "n"]), .blockedPrefix(["t"]))
+        XCTAssertEqual(trie.feasibility(for: ["g", "n"]), .occupiedLeaf(["g", "n"]))
+        XCTAssertEqual(trie.feasibility(for: ["g", "x"]), .available(physicalPenalty: 0))
+    }
+
+    func testSequenceTrieReportsBaseShiftOnlyPhysicalOpenings() {
+        let trie = CommandScoutSequenceTrie(
+            root: Group(key: nil, label: "Root", actions: [
+                .action(Action(key: "T", type: .command, value: "echo shifted"))
+            ]))
+
+        XCTAssertEqual(trie.feasibility(for: ["t"]), .available(physicalPenalty: 1))
+        XCTAssertEqual(trie.feasibility(for: ["w"]), .available(physicalPenalty: 0))
+    }
+
+    func testAssignSequencesIncludesEarlierPlannedSuggestionsInTrie() {
+        let first = makeSuggestion(
+            id: "first", sequence: "t n", value: "App > Tab > New", title: "New Tab")
+        let second = makeSuggestion(
+            id: "second", sequence: "t x", value: "App > Tab > Close", title: "Close Tab")
+        let duplicate = makeSuggestion(
+            id: "duplicate", sequence: "t n", value: "App > Tab > Duplicate", title: "Duplicate")
+
+        let assigned = CommandScoutService.assignSequences(
+            to: [first, second, duplicate], existingRoot: emptyRoot())
+
+        XCTAssertEqual(assigned[0].suggestedSequence, "tn")
+        XCTAssertEqual(assigned[1].suggestedSequence, "tx")
+        XCTAssertNotEqual(assigned[2].suggestedSequence, "tn")
+        XCTAssertFalse(assigned[2].suggestedSequence.isEmpty)
+    }
+
+    func testAssignSequencesUsesUppercaseSlotWhenLowercaseLeafIsOccupied() {
+        let root = Group(key: nil, label: "Root", actions: [
+            .group(Group(key: "t", label: "Tabs", actions: [
+                .action(Action(key: "w", type: .command, value: "echo occupied"))
+            ]))
+        ])
+        var suggestion = makeSuggestion(
+            sequence: "", value: "App > Tab > New", title: "New Tab")
+        suggestion.category = "Tabs"
+
+        let assigned = CommandScoutService.assignSequences(to: [suggestion], existingRoot: root)
+
+        XCTAssertEqual(assigned[0].suggestedSequence, "tW")
+    }
+
+    func testAssignSequencesEscapesStructurallyBlockedCategoryPrefix() {
+        let root = Group(key: nil, label: "Root", actions: [
+            .action(Action(key: "t", type: .command, value: "echo blocked"))
+        ])
+        var suggestion = makeSuggestion(
+            sequence: "t n", value: "App > Tab > New", title: "New Tab")
+        suggestion.category = "Tabs"
+
+        let assigned = CommandScoutService.assignSequences(to: [suggestion], existingRoot: root)
+
+        XCTAssertNotEqual(assigned[0].suggestedSequence, "tn")
+        XCTAssertFalse(assigned[0].suggestedSequence.isEmpty)
+        XCTAssertFalse(assigned[0].suggestedSequence.hasPrefix("t"))
+    }
+
     // MARK: - Menu Inventory JSON Parsing
 
     func testParseMenuInventoryJSON() {
@@ -896,6 +967,62 @@ final class CommandScoutTests: XCTestCase {
 
         XCTAssertEqual(result.insertedCount, 1)
         XCTAssertEqual(session.root.actions.compactMap { $0.item.key }, ["T", "t"])
+    }
+
+    func testProjectedTreeMatchesAppliedTreeForSameSuggestionBatch() {
+        let root = Group(key: nil, label: "Root", actions: [
+            .group(Group(key: "t", label: "Tabs", actions: []))
+        ])
+        let suggestions = [
+            makeSuggestion(
+                id: "new", sequence: "t N", value: "Chrome > Tab > New", title: "New Tab"),
+            makeSuggestion(
+                id: "slash", sequence: "g / x", actionType: .shortcut,
+                value: "Cx", title: "Slash Path"),
+        ]
+        let projected = CommandScoutTreeInsertion.projectedRoot(
+            byInserting: suggestions,
+            into: root
+        )
+
+        let session = ConfigEditorSession()
+        session.load(
+            root: root,
+            validationErrors: [],
+            selectedConfigKey: "Chrome",
+            preserveExpansion: false
+        )
+        let result = session.applyCommandScoutSuggestions(suggestions)
+
+        XCTAssertEqual(result.insertedCount, 2)
+        XCTAssertTrue(result.skippedMessages.isEmpty)
+        XCTAssertEqual(session.root, projected)
+        XCTAssertEqual(
+            ShortcutsOverview.flattenedSequences(from: projected.actions).map(\.keys),
+            [["t", "N"], ["g", "/", "x"]]
+        )
+    }
+
+    func testApplyCommandScoutSuggestionsSkipsBlockedPrefixWithoutMutatingTree() {
+        let root = Group(key: nil, label: "Root", actions: [
+            .action(Action(key: "t", type: .command, value: "echo existing"))
+        ])
+        let session = ConfigEditorSession()
+        session.load(
+            root: root,
+            validationErrors: [],
+            selectedConfigKey: "Chrome",
+            preserveExpansion: false
+        )
+
+        let result = session.applyCommandScoutSuggestions([
+            makeSuggestion(
+                sequence: "t n", value: "Chrome > Tab > New", title: "New Tab")
+        ])
+
+        XCTAssertEqual(result.insertedCount, 0)
+        XCTAssertEqual(result.skippedMessages.count, 1)
+        XCTAssertEqual(session.root, root)
     }
 
     func testApplyCommandScoutSuggestionsReportsSkippedItems() {

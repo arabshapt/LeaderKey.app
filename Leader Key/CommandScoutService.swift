@@ -97,9 +97,8 @@ class CommandScoutService {
         suggestions: [CommandScoutSuggestion],
         existingRoot: Group
     ) -> [CommandScoutSuggestion] {
-        let existingKeys = collectExistingSequences(from: existingRoot)
+        var sequenceTrie = CommandScoutSequenceTrie(root: existingRoot)
         let existingActionSignatures = collectExistingActionSignatures(from: existingRoot)
-        var seenSequences = Set<String>()
         var seenActions = Set<String>()
         var result: [CommandScoutSuggestion] = []
 
@@ -109,20 +108,23 @@ class CommandScoutService {
             let actionSig = actionSignature(type: suggestion.actionType, value: suggestion.actionValue)
             suggestion.suggestedSequence = normalizedSeq
 
+            let sequenceFeasibility = sequenceTrie.feasibility(for: tokens)
             if !isValidSequenceTokens(tokens) {
                 suggestion.conflictStatus = .invalidSequence
-            } else if existingKeys.contains(normalizedSeq) {
-                suggestion.conflictStatus = .duplicateSequence
-            } else if !seenSequences.insert(normalizedSeq).inserted {
-                suggestion.conflictStatus = .duplicateSequence
-            } else if suggestion.actionType == .unsupported {
-                suggestion.conflictStatus = .unsupportedAction
-            } else if !isValidActionValue(type: suggestion.actionType, value: suggestion.actionValue) {
-                suggestion.conflictStatus = .invalidActionValue
-            } else if existingActionSignatures.contains(actionSig) || !seenActions.insert(actionSig).inserted {
-                suggestion.conflictStatus = .duplicateAction
+            } else if case .available = sequenceFeasibility {
+                if suggestion.actionType == .unsupported {
+                    suggestion.conflictStatus = .unsupportedAction
+                } else if !isValidActionValue(type: suggestion.actionType, value: suggestion.actionValue) {
+                    suggestion.conflictStatus = .invalidActionValue
+                } else if existingActionSignatures.contains(actionSig) || seenActions.contains(actionSig) {
+                    suggestion.conflictStatus = .duplicateAction
+                } else {
+                    suggestion.conflictStatus = .clear
+                    seenActions.insert(actionSig)
+                    _ = sequenceTrie.reserve(tokens)
+                }
             } else {
-                suggestion.conflictStatus = .clear
+                suggestion.conflictStatus = .duplicateSequence
             }
 
             result.append(suggestion)
@@ -217,23 +219,35 @@ class CommandScoutService {
         existingRoot: Group,
         reservedKeys: [String] = []
     ) -> [CommandScoutSuggestion] {
-        let existingKeys = collectExistingSequences(from: existingRoot)
-        var usedSequences = existingKeys.union(Set(reservedKeys.map(CommandScoutSequenceNormalizer.normalizedSequence)))
+        var sequenceTrie = CommandScoutSequenceTrie(root: existingRoot)
+        for reservedKey in reservedKeys {
+            let tokens = CommandScoutSequenceNormalizer.tokens(from: reservedKey)
+            if isValidSequenceTokens(tokens) {
+                _ = sequenceTrie.reserve(tokens)
+            }
+        }
         var result: [CommandScoutSuggestion] = []
 
         for var suggestion in suggestions {
             if !suggestion.suggestedSequence.isEmpty {
                 suggestion.suggestedSequence = CommandScoutSequenceNormalizer.normalizedSequence(suggestion.suggestedSequence)
-                usedSequences.insert(suggestion.suggestedSequence)
-                result.append(suggestion)
-                continue
+                if isValidSequenceTokens(suggestion.sequenceTokens),
+                    sequenceTrie.reserve(suggestion.sequenceTokens)
+                {
+                    result.append(suggestion)
+                    continue
+                }
+                suggestion.reviewNotes = "Proposed path was structurally unavailable; assigned a free alternative"
+                suggestion.suggestedSequence = ""
             }
 
-            let candidates = sequenceCandidates(for: suggestion)
-            if let candidateIndex = candidates.firstIndex(where: { usedSequences.insert($0).inserted }) {
-                suggestion.suggestedSequence = candidates[candidateIndex]
-                if candidateIndex > 0 {
-                    suggestion.reviewNotes = "Preferred mnemonic '\(candidates[0])' unavailable; using '\(candidates[candidateIndex])'"
+            let candidateBatches = sequenceCandidateBatches(for: suggestion)
+            if let candidate = bestAvailableCandidate(in: candidateBatches, trie: sequenceTrie) {
+                suggestion.suggestedSequence = candidate.sequence
+                _ = sequenceTrie.reserve(suggestion.sequenceTokens)
+                if candidate.batchIndex > 0 || candidate.candidateIndex > 0 {
+                    let structuralNote = suggestion.reviewNotes.isEmpty ? "" : "\(suggestion.reviewNotes). "
+                    suggestion.reviewNotes = "\(structuralNote)Using free fallback '\(candidate.sequence)'"
                 }
             } else {
                 suggestion.reviewNotes = "No free sequence candidate in the 1-3 key namespace"
@@ -270,46 +284,6 @@ class CommandScoutService {
     }
 
     // MARK: - Private Helpers
-
-    /// Collect all existing key sequences from config tree as normalized strings.
-    private static func collectExistingSequences(from group: Group, prefix: [String] = []) -> Set<String> {
-        var sequences = Set<String>()
-        for item in group.actions {
-            switch item {
-            case .action(let action):
-                if let key = action.key, !key.isEmpty {
-                    let seq = (prefix + [key]).joined()
-                    sequences.insert(seq)
-                }
-            case .group(let subgroup):
-                if let key = subgroup.key, !key.isEmpty {
-                    let subPrefix = prefix + [key]
-                    let seq = subPrefix.joined()
-                    sequences.insert(seq)
-                    sequences.formUnion(collectExistingSequences(from: subgroup, prefix: subPrefix))
-                }
-            case .layer(let layer):
-                if let key = layer.key, !key.isEmpty {
-                    let subPrefix = prefix + [key]
-                    let seq = subPrefix.joined()
-                    sequences.insert(seq)
-                    sequences.formUnion(
-                        collectExistingSequences(
-                            from: Group(
-                                key: layer.key,
-                                label: layer.label,
-                                iconPath: layer.iconPath,
-                                stickyMode: nil,
-                                actions: layer.actions
-                            ),
-                            prefix: subPrefix
-                        )
-                    )
-                }
-            }
-        }
-        return sequences
-    }
 
     private static func collectExistingActionSignatures(from group: Group) -> Set<String> {
         var signatures = Set<String>()
@@ -455,7 +429,7 @@ class CommandScoutService {
         return String(chars[1])
     }
 
-    private static func sequenceCandidates(for suggestion: CommandScoutSuggestion) -> [String] {
+    private static func sequenceCandidateBatches(for suggestion: CommandScoutSuggestion) -> [[String]] {
         let prefix = categoryPrefix(for: suggestion.category)
         let lowerMnemonic = mnemonic(for: suggestion.title).lowercased()
         let upperMnemonic = lowerMnemonic.uppercased()
@@ -474,13 +448,48 @@ class CommandScoutService {
             suffixes.append(token.uppercased())
         }
 
-        var candidates = suffixes.map { prefix + $0 }
-        candidates.append(contentsOf: suffixes.map { prefix + lowerMnemonic + $0 })
         var seen = Set<String>()
-        return candidates.filter { candidate in
-            let tokens = CommandScoutSequenceNormalizer.tokens(from: candidate)
-            return tokens.count <= 3 && seen.insert(candidate).inserted
+        func uniqueValidBatch(_ candidates: [String]) -> [String] {
+            candidates.filter { candidate in
+                let tokens = CommandScoutSequenceNormalizer.tokens(from: candidate)
+                return isValidSequenceTokens(tokens) && seen.insert(candidate).inserted
+            }
         }
+
+        var batches = suffixes.map { uniqueValidBatch([prefix + $0]) }
+        batches.append(
+            contentsOf: suffixes.map { suffix in
+                uniqueValidBatch([
+                    prefix + lowerMnemonic + suffix,
+                    prefix + upperMnemonic + suffix,
+                ])
+            })
+        batches.append(contentsOf: suffixes.map { uniqueValidBatch([$0]) })
+        return batches.filter { !$0.isEmpty }
+    }
+
+    private static func bestAvailableCandidate(
+        in batches: [[String]],
+        trie: CommandScoutSequenceTrie
+    ) -> (sequence: String, batchIndex: Int, candidateIndex: Int)? {
+        for (batchIndex, batch) in batches.enumerated() {
+            let feasible = batch.enumerated().compactMap { candidateIndex, sequence
+                -> (sequence: String, penalty: Int, candidateIndex: Int)? in
+                let tokens = CommandScoutSequenceNormalizer.tokens(from: sequence)
+                guard case .available(let physicalPenalty) = trie.feasibility(for: tokens) else {
+                    return nil
+                }
+                return (sequence, physicalPenalty, candidateIndex)
+            }
+            if let best = feasible.min(by: { lhs, rhs in
+                lhs.penalty == rhs.penalty
+                    ? lhs.candidateIndex < rhs.candidateIndex
+                    : lhs.penalty < rhs.penalty
+            }) {
+                return (best.sequence, batchIndex, best.candidateIndex)
+            }
+        }
+        return nil
     }
 
     // MARK: - AI Parsing and Debug Bundle
