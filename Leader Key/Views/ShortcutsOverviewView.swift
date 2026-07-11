@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum ShortcutsOverviewTarget: Hashable, Identifiable {
   case global
@@ -187,6 +188,7 @@ struct ShortcutsOverviewView: View {
   let compact: Bool
 
   @State private var searchQuery = ""
+  @State private var exportErrorMessage: String?
 
   init(
     userConfig: UserConfig,
@@ -221,6 +223,19 @@ struct ShortcutsOverviewView: View {
         reconcileSelection()
       }
     }
+    .alert(
+      "Export Failed",
+      isPresented: Binding(
+        get: { exportErrorMessage != nil },
+        set: { isPresented in
+          if !isPresented { exportErrorMessage = nil }
+        }
+      )
+    ) {
+      Button("OK") { exportErrorMessage = nil }
+    } message: {
+      Text(exportErrorMessage ?? "The shortcut map could not be exported.")
+    }
   }
 
   private var regularBody: some View {
@@ -231,6 +246,12 @@ struct ShortcutsOverviewView: View {
             .font(.title2.weight(.semibold))
 
           Spacer()
+
+          Button {
+            exportHTML()
+          } label: {
+            Label("Export HTML…", systemImage: "square.and.arrow.up")
+          }
 
           Picker("Configuration", selection: $selection.target) {
             ForEach(configOptions) { option in
@@ -502,6 +523,11 @@ struct ShortcutsOverviewView: View {
     return shared + apps
   }
 
+  private var selectedConfigName: String {
+    configOptions.first(where: { $0.target == selection.target })?.title
+      ?? globalDefaultDisplayName
+  }
+
   private func drill(_ assignment: ShortcutsOverview.KeyAssignment) {
     guard assignment.isDrillable else { return }
     selection.drillPath = resolvedPath.keys + [assignment.key]
@@ -517,6 +543,31 @@ struct ShortcutsOverviewView: View {
     if validPath != selection.drillPath {
       selection.drillPath = validPath
     }
+  }
+
+  private func exportHTML() {
+    do {
+      let html = try ShortcutsOverview.exportHTML(
+        configName: selectedConfigName,
+        actions: selectedRoot.actions
+      )
+      let panel = NSSavePanel()
+      panel.allowedContentTypes = [.html]
+      panel.canCreateDirectories = true
+      panel.nameFieldStringValue = "leaderkey-\(exportFileSlug).html"
+      guard panel.runModal() == .OK, let destination = panel.url else { return }
+      try html.write(to: destination, atomically: true, encoding: .utf8)
+    } catch {
+      exportErrorMessage = error.localizedDescription
+    }
+  }
+
+  private var exportFileSlug: String {
+    let mapped = selectedConfigName.lowercased().map { character -> Character in
+      character.isLetter || character.isNumber ? character : "-"
+    }
+    let parts = String(mapped).split(separator: "-", omittingEmptySubsequences: true)
+    return parts.isEmpty ? "shortcuts" : parts.joined(separator: "-")
   }
 
   private func physicalKeyOrder(_ lhs: String, _ rhs: String) -> Bool {

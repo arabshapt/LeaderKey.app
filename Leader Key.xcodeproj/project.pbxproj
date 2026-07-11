@@ -14,6 +14,7 @@
 		11F0B4A52E7C111100A1B2C3 /* CompactShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F0B4A62E7C111100A1B2C3 /* CompactShortcutTests.swift */; };
 		130196C62D73B3DE0093148B /* Breadcrumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130196C52D73B3DC0093148B /* Breadcrumbs.swift */; };
 		13080407B1A7D62ED7F8C9EB /* KarabinerCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9EA1CBE1178B125D5818180 /* KarabinerCommandRouterTests.swift */; };
+		205A4671860DF341FA0775F6 /* ShortcutsOverviewHTMLExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB3BD5519F0B1D7F830A0805 /* ShortcutsOverviewHTMLExporterTests.swift */; };
 		2609991E2E15B62D00CCC8DD /* SearchPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2609991D2E15B62D00CCC8DD /* SearchPane.swift */; };
 		260999222E19593800CCC8DD /* ViewSizeCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 260999212E19593800CCC8DD /* ViewSizeCache.swift */; };
 		260999242EAB000100CCC8DD /* PreferencesPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 260999232EAB000100CCC8DD /* PreferencesPane.swift */; };
@@ -85,6 +86,7 @@
 		606C56EF2DAB875A00198B9F /* Cheater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606C56EE2DAB875A00198B9F /* Cheater.swift */; };
 		62B678F50D31B911D994A129 /* ShortcutsOverviewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */; };
 		750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */; };
+		7D8DD72588EA198557510801 /* ShortcutsOverviewHTMLExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */; };
 		7FDB1FCD1908EF321F80682E /* NativeConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */; };
 		9253885043F54C408AE8E556 /* KarCompilerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81C56852E87F62B725200981 /* KarCompilerService.swift */; };
 		9988B913EEF6F026B160CFA5 /* KarabinerCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0897E50967F769EFD0F9425A /* KarabinerCommandRouter.swift */; };
@@ -196,6 +198,7 @@
 		5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModel.swift; sourceTree = "<group>"; };
 		605385A22D523CAD00BEDB4B /* Pulsate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pulsate.swift; sourceTree = "<group>"; };
 		606C56EE2DAB875A00198B9F /* Cheater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheater.swift; sourceTree = "<group>"; };
+		68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewHTMLExporter.swift; sourceTree = "<group>"; };
 		6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModelTests.swift; sourceTree = "<group>"; };
 		81C56852E87F62B725200981 /* KarCompilerService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarCompilerService.swift; sourceTree = "<group>"; };
 		88C62E8645370FE40FE22FAD /* Karabiner2ExporterKarConfigTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Karabiner2ExporterKarConfigTests.swift; sourceTree = "<group>"; };
@@ -221,6 +224,7 @@
 		B4C5D6E7F8A9B0C1D2E3F4A5 /* GokuCompilerService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GokuCompilerService.swift; sourceTree = "<group>"; };
 		DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeConfigEditorView.swift; sourceTree = "<group>"; };
 		EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceCoordinatorTests.swift; sourceTree = "<group>"; };
+		FB3BD5519F0B1D7F830A0805 /* ShortcutsOverviewHTMLExporterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewHTMLExporterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -362,6 +366,7 @@
 				AD575A024DD1637B61404740 /* KarabinerUserCommandReceiver.swift */,
 				81C56852E87F62B725200981 /* KarCompilerService.swift */,
 				B4C5D6E7F8A9B0C1D2E3F4A5 /* GokuCompilerService.swift */,
+				68E8348FEC034D65A1AE6F12 /* ShortcutsOverviewHTMLExporter.swift */,
 			);
 			path = "Leader Key";
 			sourceTree = "<group>";
@@ -389,6 +394,7 @@
 				39029F0795999DCE42CA12E3 /* ControllerTests.swift */,
 				EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */,
 				6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */,
+				FB3BD5519F0B1D7F830A0805 /* ShortcutsOverviewHTMLExporterTests.swift */,
 			);
 			path = "Leader KeyTests";
 			sourceTree = "<group>";
@@ -651,6 +657,7 @@
 				A3D1E5F6B7C8D9E0F1A2B3C4 /* GokuCompilerService.swift in Sources */,
 				BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */,
 				CD16D256FBA80A159CAFEC37 /* ShortcutsOverviewView.swift in Sources */,
+				7D8DD72588EA198557510801 /* ShortcutsOverviewHTMLExporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -670,6 +677,7 @@
 				08A5FDD3FC85750508E31740 /* ControllerTests.swift in Sources */,
 				750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */,
 				62B678F50D31B911D994A129 /* ShortcutsOverviewModelTests.swift in Sources */,
+				205A4671860DF341FA0775F6 /* ShortcutsOverviewHTMLExporterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
