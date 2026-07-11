@@ -135,8 +135,17 @@ struct TagsRegistry: Codable, Equatable {
 }
 
 class UserConfig: ObservableObject {
-  // Root for the default config (global-config.json)
-  @Published var root = emptyRoot
+  // Root for the default config (global-config.json).
+  // Only reassigned on the main thread; off-main readers use threadSafeRoot.
+  @Published var root = emptyRoot {
+    didSet {
+      rootSnapshotLock.lock()
+      rootSnapshot = root
+      rootSnapshotLock.unlock()
+    }
+  }
+  private var rootSnapshot = emptyRoot
+  private let rootSnapshotLock = NSLock()
   // Root for the config currently being edited in Settings
   @Published var currentlyEditingGroup = emptyRoot
   @Published var validationErrors: [ValidationError] = []  // Errors specific to the default config
@@ -153,7 +162,11 @@ class UserConfig: ObservableObject {
   let tagConfigPrefix = "tag."
   let normalTagConfigPrefix = "normal-tag."
   let tagsRegistryFileName = "tags-registry.json"
-  var appConfigs: [String: Group?] = [:]  // Cache for app-specific configs
+  // Cache for app-specific configs. Written on the main thread AND on the
+  // background export queues (Karabiner2InputMethod), so all access must go
+  // through the locked accessors below — never touch the storage directly.
+  private var appConfigsStorage: [String: Group?] = [:]
+  private let appConfigsLock = NSLock()
   let alertHandler: AlertHandler
   let fileManager: FileManager
   var suppressValidationAlerts = false  // Internal flag
@@ -166,6 +179,45 @@ class UserConfig: ObservableObject {
 
   // Cache parsed configurations to avoid repeated JSON parsing
   internal let configCache = ConfigCache()
+
+  // MARK: - Thread-safe app-config cache accessors
+
+  /// Outer nil = no cache entry. Assigning a literal nil to the old dict
+  /// removed the key, so removal is a separate accessor here.
+  func cachedAppConfig(for key: String) -> Group?? {
+    appConfigsLock.lock()
+    defer { appConfigsLock.unlock() }
+    return appConfigsStorage[key]
+  }
+
+  func setCachedAppConfig(_ config: Group, for key: String) {
+    appConfigsLock.lock()
+    defer { appConfigsLock.unlock() }
+    appConfigsStorage[key] = config
+  }
+
+  func removeCachedAppConfig(for key: String) {
+    appConfigsLock.lock()
+    defer { appConfigsLock.unlock() }
+    appConfigsStorage.removeValue(forKey: key)
+  }
+
+  func clearAppConfigCache() {
+    appConfigsLock.lock()
+    defer { appConfigsLock.unlock() }
+    appConfigsStorage.removeAll()
+  }
+
+  /// `root` is only reassigned on the main thread; off-main readers (export
+  /// queues) get a lock-guarded snapshot to avoid torn struct reads.
+  var threadSafeRoot: Group {
+    if Thread.isMainThread {
+      return root
+    }
+    rootSnapshotLock.lock()
+    defer { rootSnapshotLock.unlock() }
+    return rootSnapshot
+  }
 
   init(
     alertHandler: AlertHandler = DefaultAlertHandler(),
@@ -413,7 +465,7 @@ class UserConfig: ObservableObject {
     Events.send(.willReload)
 
     // Clear caches and reset state
-    appConfigs = [:]  // Clear app-specific cache
+    clearAppConfigCache()  // Clear app-specific cache
     configCache.clearCache()  // Clear parsed config cache
     ConfigPreprocessor.shared.invalidateAll()  // Clear preprocessed key lookup caches
 

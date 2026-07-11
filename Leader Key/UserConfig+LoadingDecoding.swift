@@ -29,10 +29,10 @@ extension UserConfig {
     let defaultAppKey = "app.default"
     
     // Check cache first
-    if let cachedDefaultAppConfig = appConfigs[defaultAppKey] {
-      return cachedDefaultAppConfig ?? root  // Return cached or default if nil
+    if let cachedDefaultAppConfig = cachedAppConfig(for: defaultAppKey) {
+      return cachedDefaultAppConfig ?? threadSafeRoot  // Return cached or default if nil
     }
-    
+
     let defaultAppConfigPath = (Defaults[.configDir] as NSString).appendingPathComponent(
       defaultAppConfigFileName)
     if fileManager.fileExists(atPath: defaultAppConfigPath) {
@@ -40,24 +40,23 @@ extension UserConfig {
       if let defaultAppRoot = decodeConfig(
         from: defaultAppConfigPath, suppressAlerts: true, isDefaultConfig: false)
       {
-        appConfigs[defaultAppKey] = defaultAppRoot  // Cache successful load
+        setCachedAppConfig(defaultAppRoot, for: defaultAppKey)  // Cache successful load
         return defaultAppRoot
       } else {
-        appConfigs[defaultAppKey] = nil  // Cache failed load as nil
+        removeCachedAppConfig(for: defaultAppKey)
       }
     } else {
-      // File doesn't exist, cache this fact
-      appConfigs[defaultAppKey] = nil
+      removeCachedAppConfig(for: defaultAppKey)
     }
-    
+
     // Fallback to default global-config.json (already loaded into self.root)
-    return root
+    return threadSafeRoot
   }
 
   func getNormalFallbackConfig() -> Group {
     let normalFallbackKey = "normal.default"
 
-    if let cachedNormalFallbackConfig = appConfigs[normalFallbackKey] {
+    if let cachedNormalFallbackConfig = cachedAppConfig(for: normalFallbackKey) {
       return cachedNormalFallbackConfig ?? Group(actions: [])
     }
 
@@ -67,13 +66,13 @@ extension UserConfig {
       if let normalFallbackRoot = decodeConfig(
         from: normalFallbackConfigPath, suppressAlerts: true, isDefaultConfig: false)
       {
-        appConfigs[normalFallbackKey] = normalFallbackRoot
+        setCachedAppConfig(normalFallbackRoot, for: normalFallbackKey)
         return normalFallbackRoot
       } else {
-        appConfigs[normalFallbackKey] = nil
+        removeCachedAppConfig(for: normalFallbackKey)
       }
     } else {
-      appConfigs[normalFallbackKey] = nil
+      removeCachedAppConfig(for: normalFallbackKey)
     }
 
     return Group(actions: [])
@@ -87,8 +86,8 @@ extension UserConfig {
     let fallbackConfig = getFallbackConfig()
 
     // If no fallback config exists (getFallbackConfig returned root), return as is
-    guard appConfigs[defaultAppKey] != nil else {
-      return root
+    guard cachedAppConfig(for: defaultAppKey) != nil else {
+      return threadSafeRoot
     }
     
     // Create a new group with all items marked as fallback
@@ -106,9 +105,9 @@ extension UserConfig {
     // 1. Try specific app config
     if let bundleId = canonicalRegularAppBundleId(for: bundleId), !bundleId.isEmpty {
       // Check cache first
-      if let cachedConfig = appConfigs[bundleId] {
+      if let cachedConfig = cachedAppConfig(for: bundleId) {
         debugLog("[ConfigDebug] getConfig cache hit for \(bundleId): \(cachedConfig == nil ? "nil (returning root)" : "non-nil (returning cached merged)")")
-        return cachedConfig ?? root  // Return cached config or default if cache entry is nil (load failed previously)
+        return cachedConfig ?? threadSafeRoot  // Return cached config or default if cache entry is nil (load failed previously)
       }
 
       // Construct app-specific config path
@@ -128,12 +127,12 @@ extension UserConfig {
             appSpecificConfig: appRoot, bundleId: bundleId)
           // Sort the merged result to ensure app-specific and fallback items are properly intermixed
           let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
-          appConfigs[bundleId] = mergedConfig  // Cache merged result
+          setCachedAppConfig(mergedConfig, for: bundleId)  // Cache merged result
           debugLog("[ConfigDebug] getConfig returning merged config for \(bundleId) with \(mergedConfig.actions.count) top-level items")
           return mergedConfig
         } else {
-          debugLog("[ConfigDebug] getConfig decode FAILED for \(bundleId), caching nil and falling back")
-          appConfigs[bundleId] = nil  // Cache failed load explicitly as nil
+          debugLog("[ConfigDebug] getConfig decode FAILED for \(bundleId), falling back")
+          removeCachedAppConfig(for: bundleId)
           // Fall through to try app-fallback-config.json
         }
       } else {
@@ -146,12 +145,12 @@ extension UserConfig {
             bundleId: bundleId
           )
           let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
-          appConfigs[bundleId] = mergedConfig
+          setCachedAppConfig(mergedConfig, for: bundleId)
           return mergedConfig
         }
 
-        debugLog("[ConfigDebug] getConfig file missing and no tags for \(bundleId), caching nil and falling back")
-        appConfigs[bundleId] = nil
+        debugLog("[ConfigDebug] getConfig file missing and no tags for \(bundleId), falling back")
+        removeCachedAppConfig(for: bundleId)
         // Fall through to try app-fallback-config.json
       }
     }
@@ -167,7 +166,7 @@ extension UserConfig {
     }
 
     let cacheKey = "normal.\(bundleId)"
-    if let cachedConfig = appConfigs[cacheKey] {
+    if let cachedConfig = cachedAppConfig(for: cacheKey) {
       return cachedConfig ?? getNormalFallbackConfig()
     }
 
@@ -183,10 +182,10 @@ extension UserConfig {
           bundleId: bundleId
         )
         let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
-        appConfigs[cacheKey] = mergedConfig
+        setCachedAppConfig(mergedConfig, for: cacheKey)
         return mergedConfig
       } else {
-        appConfigs[cacheKey] = nil
+        removeCachedAppConfig(for: cacheKey)
       }
     } else {
       let tagIds = assignedTagIds(for: bundleId, normalMode: true)
@@ -196,11 +195,11 @@ extension UserConfig {
           bundleId: bundleId
         )
         let mergedConfig = sortGroupRecursively(group: rawMergedConfig)
-        appConfigs[cacheKey] = mergedConfig
+        setCachedAppConfig(mergedConfig, for: cacheKey)
         return mergedConfig
       }
 
-      appConfigs[cacheKey] = nil
+      removeCachedAppConfig(for: cacheKey)
     }
 
     return getNormalFallbackConfig()
@@ -520,7 +519,7 @@ extension UserConfig {
 
     // If fallback is just root (no fallback file exists), return app config as-is
     let defaultAppKey = "app.default"
-    guard appConfigs[defaultAppKey] != nil else {
+    guard cachedAppConfig(for: defaultAppKey) != nil else {
       debugLog(
         "[UserConfig] mergeConfigWithFallback: No fallback app config available, merging only assigned tags"
       )
@@ -548,7 +547,7 @@ extension UserConfig {
   internal func mergeNormalConfigWithFallback(appSpecificConfig: Group, bundleId: String) -> Group {
     let fallbackConfig = getNormalFallbackConfig()
     let normalFallbackKey = "normal.default"
-    guard appConfigs[normalFallbackKey] != nil else {
+    guard cachedAppConfig(for: normalFallbackKey) != nil else {
       debugLog(
         "[UserConfig] mergeNormalConfigWithFallback: No normal fallback config available, merging only assigned tags"
       )

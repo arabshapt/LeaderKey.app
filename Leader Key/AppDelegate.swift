@@ -1720,10 +1720,9 @@ extension AppDelegate {
 
     currentInputMethod = Karabiner2InputMethod()
 
-    // Pass loadStateMappings as onExportComplete callback to avoid a data race:
-    // exportCurrentConfiguration runs on a background thread and mutates config.appConfigs.
-    // loadStateMappings calls findActionForMapping which reads config.appConfigs.
-    // Running both concurrently crashes (Swift dicts are not thread-safe).
+    // Pass loadStateMappings as onExportComplete callback so state mappings are
+    // loaded from the freshly exported configuration. (The app-config cache
+    // itself is thread-safe via UserConfig's locked accessors.)
     if let method = currentInputMethod, method.start(with: self, onExportComplete: { [weak self] in
       self?.loadStateMappings()
     }) {

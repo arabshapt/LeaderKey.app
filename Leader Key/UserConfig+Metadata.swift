@@ -322,7 +322,7 @@ extension UserConfig {
     }
 
     saveTagsRegistry(registry)
-    appConfigs.removeValue(forKey: normalMode ? "normal.\(normalizedBundleId)" : normalizedBundleId)
+    removeCachedAppConfig(for: normalMode ? "normal.\(normalizedBundleId)" : normalizedBundleId)
     reloadConfig()
     return registry
   }

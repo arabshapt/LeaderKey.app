@@ -4,7 +4,10 @@ import os
 /// Thread-safe cache for parsed configuration groups to avoid repeated JSON parsing
 final class ConfigCache {
   private let cache = NSCache<NSString, CacheEntry>()
-  private let queue = DispatchQueue(label: "com.leaderkey.configcache", attributes: .concurrent)
+  // NSLock instead of a concurrent queue + barriers: barrier blocks need a
+  // GCD pool thread, so readers blocked in queue.sync deadlock when the pool
+  // is exhausted. A lock releases directly to a waiting thread.
+  private let lock = NSLock()
   private let maxCacheAge: TimeInterval = 60  // Cache for 1 minute
 
   /// Wrapper to store both the config and its timestamp
@@ -32,50 +35,51 @@ final class ConfigCache {
 
   /// Get cached config if available and not expired
   func getConfig(for path: String, fileModificationDate: Date? = nil) -> Group? {
-    queue.sync {
-      guard let entry = cache.object(forKey: path as NSString) else { return nil }
+    lock.lock()
+    defer { lock.unlock() }
 
-      // Check if cache is expired
-      if entry.isExpired(maxAge: maxCacheAge) {
-        cache.removeObject(forKey: path as NSString)
-        return nil
-      }
+    guard let entry = cache.object(forKey: path as NSString) else { return nil }
 
-      // Check if file has been modified since caching
-      if let fileMod = fileModificationDate,
-        let cachedMod = entry.fileModificationDate,
-        fileMod > cachedMod
-      {
-        cache.removeObject(forKey: path as NSString)
-        return nil
-      }
-
-      return entry.group
+    // Check if cache is expired
+    if entry.isExpired(maxAge: maxCacheAge) {
+      cache.removeObject(forKey: path as NSString)
+      return nil
     }
+
+    // Check if file has been modified since caching
+    if let fileMod = fileModificationDate,
+      let cachedMod = entry.fileModificationDate,
+      fileMod > cachedMod
+    {
+      cache.removeObject(forKey: path as NSString)
+      return nil
+    }
+
+    return entry.group
   }
 
   /// Store config in cache
   func setConfig(_ group: Group, for path: String, fileModificationDate: Date? = nil) {
-    queue.async(flags: .barrier) {
-      let entry = CacheEntry(group: group, fileModificationDate: fileModificationDate)
-      // Estimate size based on number of items (rough approximation)
-      let estimatedCost = self.estimateCost(for: group)
-      self.cache.setObject(entry, forKey: path as NSString, cost: estimatedCost)
-    }
+    let entry = CacheEntry(group: group, fileModificationDate: fileModificationDate)
+    // Estimate size based on number of items (rough approximation)
+    let estimatedCost = estimateCost(for: group)
+    lock.lock()
+    defer { lock.unlock() }
+    cache.setObject(entry, forKey: path as NSString, cost: estimatedCost)
   }
 
   /// Clear all cached configs
   func clearCache() {
-    queue.async(flags: .barrier) {
-      self.cache.removeAllObjects()
-    }
+    lock.lock()
+    defer { lock.unlock() }
+    cache.removeAllObjects()
   }
 
   /// Remove specific config from cache
   func removeConfig(for path: String) {
-    queue.async(flags: .barrier) {
-      self.cache.removeObject(forKey: path as NSString)
-    }
+    lock.lock()
+    defer { lock.unlock() }
+    cache.removeObject(forKey: path as NSString)
   }
 
   /// Estimate memory cost of a group for cache limits

@@ -372,6 +372,50 @@ final class UserConfigTests: XCTestCase {
     XCTAssertTrue(subject.exists)
   }
 
+  /// Hammers the app-config cache from concurrent readers while the main
+  /// thread clears it, mirroring export-queue getConfig vs reloadConfig.
+  /// Guards the locked accessors — with an unsynchronized dictionary this
+  /// crashes or trips TSan.
+  func testConcurrentGetConfigWhileClearingCacheDoesNotCrash() throws {
+    Defaults[.configDir] = tempBaseDir
+    subject.ensureAndLoad()
+
+    let appJSON = """
+      {"type":"group","actions":[{"key":"a","type":"command","value":"true","label":"Test"}]}
+      """
+    try appJSON.write(
+      toFile: tempBaseDir + "/app.com.test.one.json", atomically: true, encoding: .utf8)
+    try appJSON.write(
+      toFile: tempBaseDir + "/app.com.test.two.json", atomically: true, encoding: .utf8)
+
+    // A handful of dedicated workers mirrors production concurrency (main +
+    // export queues) without exhausting the GCD thread pool.
+    let workerCount = 4
+    let iterationsPerWorker = 25
+    let group = DispatchGroup()
+    for worker in 0..<workerCount {
+      DispatchQueue(label: "hammer-\(worker)").async(group: group) {
+        for i in 0..<iterationsPerWorker {
+          let bundleId = (worker + i) % 2 == 0 ? "com.test.one" : "com.test.two"
+          _ = self.subject.getConfig(for: bundleId)
+          _ = self.subject.getNormalConfig(for: bundleId)
+        }
+      }
+    }
+
+    let hammerDone = expectation(description: "hammer done")
+    group.notify(queue: .main) { hammerDone.fulfill() }
+
+    // Interleave cache clears while the workers run.
+    for _ in 0..<25 {
+      subject.clearAppConfigCache()
+      RunLoop.current.run(until: Date().addingTimeInterval(0.002))
+    }
+
+    // Generous timeout: ThreadSanitizer slows the decode/merge path heavily.
+    wait(for: [hammerDone], timeout: 60)
+  }
+
   func testShowsAlertWhenConfigFileFailsToParse() throws {
     // Use temp dir with a valid config first, then corrupt it (never touch real config dir)
     Defaults[.configDir] = tempBaseDir
