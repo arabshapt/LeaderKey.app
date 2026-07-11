@@ -304,7 +304,9 @@ class CommandScoutService {
     static func assignSequences(
         to suggestions: [CommandScoutSuggestion],
         existingRoot: Group,
-        reservedKeys: [String] = []
+        reservedKeys: [String] = [],
+        usageSnapshot: UsageStatsSnapshot = .empty,
+        usageContext: UsageContext? = nil
     ) -> [CommandScoutSuggestion] {
         var sequenceTrie = CommandScoutSequenceTrie(root: existingRoot)
         for reservedKey in reservedKeys {
@@ -329,7 +331,12 @@ class CommandScoutService {
             }
 
             let candidateBatches = sequenceCandidateBatches(for: suggestion)
-            if let candidate = bestAvailableCandidate(in: candidateBatches, trie: sequenceTrie) {
+            if let candidate = bestAvailableCandidate(
+                in: candidateBatches,
+                trie: sequenceTrie,
+                usageSnapshot: usageSnapshot,
+                usageContext: usageContext
+            ) {
                 suggestion.suggestedSequence = candidate.sequence
                 _ = sequenceTrie.reserve(suggestion.sequenceTokens)
                 if candidate.batchIndex > 0 || candidate.candidateIndex > 0 {
@@ -543,7 +550,16 @@ class CommandScoutService {
             }
         }
 
-        var batches = suffixes.map { uniqueValidBatch([prefix + $0]) }
+        let punctuationCount = CommandScoutSequenceNormalizer.punctuationTokens.count
+        let titleSuffixes = suffixes.dropFirst(2 + punctuationCount)
+        var batches = [
+            uniqueValidBatch([prefix + lowerMnemonic]),
+            uniqueValidBatch([prefix + upperMnemonic]),
+            uniqueValidBatch(
+                CommandScoutSequenceNormalizer.punctuationTokens.map { prefix + $0 }
+            ),
+        ]
+        batches.append(contentsOf: titleSuffixes.map { uniqueValidBatch([prefix + $0]) })
         batches.append(
             contentsOf: suffixes.map { suffix in
                 uniqueValidBatch([
@@ -557,21 +573,30 @@ class CommandScoutService {
 
     private static func bestAvailableCandidate(
         in batches: [[String]],
-        trie: CommandScoutSequenceTrie
+        trie: CommandScoutSequenceTrie,
+        usageSnapshot: UsageStatsSnapshot,
+        usageContext: UsageContext?
     ) -> (sequence: String, batchIndex: Int, candidateIndex: Int)? {
         for (batchIndex, batch) in batches.enumerated() {
             let feasible = batch.enumerated().compactMap { candidateIndex, sequence
-                -> (sequence: String, penalty: Int, candidateIndex: Int)? in
+                -> (sequence: String, penalty: Int, usageCount: Int, candidateIndex: Int)? in
                 let tokens = CommandScoutSequenceNormalizer.tokens(from: sequence)
                 guard case .available(let physicalPenalty) = trie.feasibility(for: tokens) else {
                     return nil
                 }
-                return (sequence, physicalPenalty, candidateIndex)
+                let usageCount = usageContext.map {
+                    usageSnapshot.count(context: $0, keys: tokens)
+                } ?? 0
+                return (sequence, physicalPenalty, usageCount, candidateIndex)
             }
             if let best = feasible.min(by: { lhs, rhs in
-                lhs.penalty == rhs.penalty
-                    ? lhs.candidateIndex < rhs.candidateIndex
-                    : lhs.penalty < rhs.penalty
+                if lhs.penalty != rhs.penalty {
+                    return lhs.penalty < rhs.penalty
+                }
+                if lhs.usageCount != rhs.usageCount {
+                    return lhs.usageCount > rhs.usageCount
+                }
+                return lhs.candidateIndex < rhs.candidateIndex
             }) {
                 return (best.sequence, batchIndex, best.candidateIndex)
             }

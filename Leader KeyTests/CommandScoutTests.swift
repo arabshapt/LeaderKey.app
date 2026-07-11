@@ -328,6 +328,34 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(punctuation[0].suggestedSequence, "t,")
     }
 
+    func testAssignSequencesUsesHistoryOnlyWithinMnemonicAndPhysicalTier() {
+        var suggestion = makeSuggestion(
+            sequence: "", actionType: .menu, value: "App > Tab > New", title: "New Tab")
+        suggestion.category = "Tabs"
+        let context = UsageContext(scope: .app, bundleId: "com.example.App")
+        let snapshot = UsageStatsSnapshot(
+            records: [
+                UsageRecord(
+                    context: context,
+                    keys: ["t", "/"],
+                    count: 40,
+                    firstObservedAt: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            ],
+            totalExecutions: 40
+        )
+
+        let assigned = CommandScoutService.assignSequences(
+            to: [suggestion],
+            existingRoot: emptyRoot(),
+            reservedKeys: ["tw", "tW"],
+            usageSnapshot: snapshot,
+            usageContext: context
+        )
+
+        XCTAssertEqual(assigned[0].suggestedSequence, "t/")
+    }
+
     func testSequenceTrieRejectsBlockedPrefixesAndOccupiedLeaves() {
         let root = Group(key: nil, label: "Root", actions: [
             .action(Action(key: "t", type: .command, value: "echo blocked")),

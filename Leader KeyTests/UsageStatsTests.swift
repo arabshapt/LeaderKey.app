@@ -40,6 +40,99 @@ final class UsageStatsTests: XCTestCase {
     XCTAssertNil(UsageTelemetryPayload(dictionary: ["v": 1, "type": "usage", "scope": "app", "keys": []]))
   }
 
+  func testHeatAggregatesDescendantsAndUsesLogarithmicRelativeIntensity() throws {
+    let context = UsageContext(scope: .app, bundleId: "com.example.App")
+    let observedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let snapshot = UsageStatsSnapshot(
+      records: [
+        UsageRecord(context: context, keys: ["t", "N"], count: 9, firstObservedAt: observedAt),
+        UsageRecord(context: context, keys: ["t", "x"], count: 7, firstObservedAt: observedAt),
+        UsageRecord(context: context, keys: ["a"], count: 1, firstObservedAt: observedAt),
+      ],
+      totalExecutions: 17
+    )
+
+    let rootHeat = UsageInsights.heatByKey(
+      snapshot: snapshot,
+      context: context,
+      pathPrefix: [],
+      visibleKeys: ["t", "a", "z"]
+    )
+    XCTAssertEqual(rootHeat["t"]?.count, 16)
+    XCTAssertEqual(try XCTUnwrap(rootHeat["t"]?.intensity), 1, accuracy: 0.000_001)
+    XCTAssertEqual(rootHeat["a"]?.count, 1)
+    XCTAssertLessThan(try XCTUnwrap(rootHeat["a"]?.intensity), 0.5)
+    XCTAssertNil(rootHeat["z"])
+
+    let childHeat = UsageInsights.heatByKey(
+      snapshot: snapshot,
+      context: context,
+      pathPrefix: ["t"],
+      visibleKeys: ["N", "x"]
+    )
+    XCTAssertEqual(childHeat["N"]?.count, 9)
+    XCTAssertEqual(childHeat["x"]?.count, 7)
+  }
+
+  func testNotObservedEvidenceRequiresSevenDaysAndFiftyContextExecutions() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let context = UsageContext(scope: .global)
+    let oldEnough = now.addingTimeInterval(-8 * 24 * 60 * 60)
+    let mature = UsageStatsSnapshot(
+      records: [UsageRecord(context: context, keys: ["used"], count: 50, firstObservedAt: oldEnough)],
+      totalExecutions: 50
+    )
+
+    XCTAssertTrue(
+      UsageInsights.hasNotObservedEvidence(
+        snapshot: mature,
+        context: context,
+        keys: ["unseen"],
+        now: now
+      )
+    )
+    XCTAssertFalse(
+      UsageInsights.hasNotObservedEvidence(
+        snapshot: mature,
+        context: context,
+        keys: ["used"],
+        now: now
+      )
+    )
+
+    let tooRecent = UsageStatsSnapshot(
+      records: [
+        UsageRecord(
+          context: context,
+          keys: ["used"],
+          count: 50,
+          firstObservedAt: now.addingTimeInterval(-6 * 24 * 60 * 60)
+        )
+      ],
+      totalExecutions: 50
+    )
+    let tooSparse = UsageStatsSnapshot(
+      records: [UsageRecord(context: context, keys: ["used"], count: 49, firstObservedAt: oldEnough)],
+      totalExecutions: 49
+    )
+    XCTAssertFalse(
+      UsageInsights.hasNotObservedEvidence(
+        snapshot: tooRecent,
+        context: context,
+        keys: ["unseen"],
+        now: now
+      )
+    )
+    XCTAssertFalse(
+      UsageInsights.hasNotObservedEvidence(
+        snapshot: tooSparse,
+        context: context,
+        keys: ["unseen"],
+        now: now
+      )
+    )
+  }
+
   func testRecordFlushAndLoadRoundTripPreservesExactKeysAndContext() throws {
     let directory = makeTemporaryDirectory()
     let observedAt = Date(timeIntervalSince1970: 1_700_000_000)

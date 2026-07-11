@@ -5,6 +5,7 @@ import SwiftUI
 struct CommandScoutView: View {
     @EnvironmentObject var config: UserConfig
     @ObservedObject var session: ConfigEditorSession
+    @ObservedObject private var usageStats = UsageStatsStore.shared
     @Environment(\.dismiss) private var dismiss
 
     let appContext: CommandScoutAppContext
@@ -532,6 +533,7 @@ struct CommandScoutView: View {
             ShortcutsKeyboardGrid(
                 level: projectedLevel,
                 compact: true,
+                usageHeatByKey: projectedUsageHeat,
                 onDrill: { assignment in
                     guard assignment.isDrillable else { return }
                     previewDrillPath = projectedResolvedPath.keys + [assignment.key]
@@ -562,6 +564,28 @@ struct CommandScoutView: View {
             for: projectedResolvedPath.actions,
             breadcrumb: projectedResolvedPath.breadcrumb
         )
+    }
+
+    private var usageContext: UsageContext {
+        UsageContext(scope: .app, bundleId: appContext.bundleId)
+    }
+
+    private var projectedUsageHeat: [String: UsageHeat] {
+        let counts = Dictionary(
+            uniqueKeysWithValues: projectedLevel.assignments.values.map { assignment in
+                let context = assignment.isFromFallback
+                    ? UsageContext(scope: .fallback)
+                    : usageContext
+                return (
+                    assignment.key,
+                    usageStats.snapshot.count(
+                        context: context,
+                        keyPrefix: projectedResolvedPath.keys + [assignment.key]
+                    )
+                )
+            }
+        )
+        return UsageInsights.heatByKey(countsByKey: counts)
     }
 
     // MARK: - Footer
@@ -669,7 +693,9 @@ struct CommandScoutView: View {
                 guard activeScanID == scanID else { return }
                 suggestions = CommandScoutService.assignSequences(
                     to: suggestions,
-                    existingRoot: session.root
+                    existingRoot: session.root,
+                    usageSnapshot: usageStats.snapshot,
+                    usageContext: usageContext
                 )
                 suggestions = CommandScoutService.validate(
                     suggestions: suggestions,
@@ -766,7 +792,12 @@ struct CommandScoutView: View {
             suggestion.suggestedSequence = ""
             return suggestion
         }
-        suggestions = CommandScoutService.assignSequences(to: suggestions, existingRoot: session.root)
+        suggestions = CommandScoutService.assignSequences(
+            to: suggestions,
+            existingRoot: session.root,
+            usageSnapshot: usageStats.snapshot,
+            usageContext: usageContext
+        )
         suggestions = CommandScoutService.validate(suggestions: suggestions, existingRoot: session.root)
     }
 

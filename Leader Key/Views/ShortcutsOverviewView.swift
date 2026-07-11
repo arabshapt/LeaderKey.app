@@ -54,6 +54,7 @@ final class ShortcutsOverviewSelection: ObservableObject {
 struct ShortcutsKeyboardGrid: View {
   let level: ShortcutsOverview.LevelView
   var compact = false
+  var usageHeatByKey: [String: UsageHeat] = [:]
   var onDrill: (ShortcutsOverview.KeyAssignment) -> Void = { _ in }
 
   var body: some View {
@@ -80,12 +81,14 @@ struct ShortcutsKeyboardGrid: View {
       assignmentButton(
         glyph: shiftedKey,
         assignment: shiftedAssignment,
-        conflict: level.duplicateConflicts[shiftedKey]
+        conflict: level.duplicateConflicts[shiftedKey],
+        usageHeat: usageHeatByKey[shiftedKey]
       )
       assignmentButton(
         glyph: baseKey,
         assignment: baseAssignment,
-        conflict: level.duplicateConflicts[baseKey]
+        conflict: level.duplicateConflicts[baseKey],
+        usageHeat: usageHeatByKey[baseKey]
       )
     }
     .frame(width: compact ? 32 : 54, height: compact ? 32 : 54)
@@ -102,7 +105,8 @@ struct ShortcutsKeyboardGrid: View {
   private func assignmentButton(
     glyph: String,
     assignment: ShortcutsOverview.KeyAssignment?,
-    conflict: ShortcutsOverview.DuplicateConflict?
+    conflict: ShortcutsOverview.DuplicateConflict?,
+    usageHeat: UsageHeat?
   ) -> some View {
     Button {
       if let assignment, assignment.isDrillable {
@@ -139,33 +143,50 @@ struct ShortcutsKeyboardGrid: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .foregroundStyle(assignment.map { overviewColor(for: $0.type) } ?? .secondary)
       .background(
-        assignment.map { overviewColor(for: $0.type).opacity(0.16) } ?? Color.clear
+        assignment.map {
+          overviewColor(for: $0.type).opacity(0.14 + (usageHeat?.intensity ?? 0) * 0.34)
+        } ?? Color.clear
       )
       .contentShape(Rectangle())
       .opacity(assignment?.isFromFallback == true ? 0.7 : 1)
     }
     .buttonStyle(.plain)
     .accessibilityLabel(
-      accessibilityLabel(glyph: glyph, assignment: assignment, conflict: conflict)
+      accessibilityLabel(
+        glyph: glyph,
+        assignment: assignment,
+        conflict: conflict,
+        usageHeat: usageHeat
+      )
     )
     .accessibilityHint(assignment?.isDrillable == true ? "Open this shortcut group" : "")
-    .help(helpText(glyph: glyph, assignment: assignment, conflict: conflict))
+    .help(
+      helpText(
+        glyph: glyph,
+        assignment: assignment,
+        conflict: conflict,
+        usageHeat: usageHeat
+      )
+    )
   }
 
   private func accessibilityLabel(
     glyph: String,
     assignment: ShortcutsOverview.KeyAssignment?,
-    conflict: ShortcutsOverview.DuplicateConflict?
+    conflict: ShortcutsOverview.DuplicateConflict?,
+    usageHeat: UsageHeat?
   ) -> String {
     guard let assignment else { return "\(glyph), unassigned" }
     let duplicateSuffix = conflict == nil ? "" : ", duplicate assignment conflict"
-    return "\(glyph), \(assignment.displayName)\(duplicateSuffix)"
+    let usageSuffix = usageHeat.map { ", \($0.count) observed invocation(s)" } ?? ""
+    return "\(glyph), \(assignment.displayName)\(usageSuffix)\(duplicateSuffix)"
   }
 
   private func helpText(
     glyph: String,
     assignment: ShortcutsOverview.KeyAssignment?,
-    conflict: ShortcutsOverview.DuplicateConflict?
+    conflict: ShortcutsOverview.DuplicateConflict?,
+    usageHeat: UsageHeat?
   ) -> String {
     guard let assignment else { return "\(glyph): Free" }
     var lines = ["\(glyph): \(assignment.displayName)"]
@@ -174,6 +195,9 @@ struct ShortcutsKeyboardGrid: View {
     }
     if assignment.isFromFallback {
       lines.append("Inherited from \(assignment.fallbackSource ?? defaultAppConfigDisplayName)")
+    }
+    if let usageHeat {
+      lines.append("Observed \(usageHeat.count) time(s); heat is relative to this level")
     }
     if let conflict {
       lines.append("\(conflict.shadowed.count) duplicate assignment(s) also use this exact key")
@@ -184,6 +208,7 @@ struct ShortcutsKeyboardGrid: View {
 
 struct ShortcutsOverviewView: View {
   @ObservedObject var userConfig: UserConfig
+  @ObservedObject private var usageStats = UsageStatsStore.shared
   @StateObject private var selection: ShortcutsOverviewSelection
   let compact: Bool
 
@@ -271,7 +296,11 @@ struct ShortcutsOverviewView: View {
 
         breadcrumbBar
 
-        ShortcutsKeyboardGrid(level: currentLevel, onDrill: drill)
+        ShortcutsKeyboardGrid(
+          level: currentLevel,
+          usageHeatByKey: currentUsageHeat,
+          onDrill: drill
+        )
           .frame(maxWidth: .infinity, alignment: .center)
 
         freeKeyFooter
@@ -298,7 +327,12 @@ struct ShortcutsOverviewView: View {
   private var compactBody: some View {
     VStack(alignment: .leading, spacing: 8) {
       breadcrumbBar
-      ShortcutsKeyboardGrid(level: currentLevel, compact: true, onDrill: drill)
+      ShortcutsKeyboardGrid(
+        level: currentLevel,
+        compact: true,
+        usageHeatByKey: currentUsageHeat,
+        onDrill: drill
+      )
       freeKeyFooter
     }
   }
@@ -431,6 +465,16 @@ struct ShortcutsOverviewView: View {
         .font(.caption2)
         .foregroundStyle(.secondary)
       }
+
+      if UsageInsights.hasNotObservedEvidence(
+        snapshot: usageStats.snapshot,
+        context: entry.isFromFallback ? UsageContext(scope: .fallback) : currentUsageContext,
+        keys: entry.keys
+      ) {
+        Label("Not observed during tracking", systemImage: "clock.badge.questionmark")
+          .font(.caption2)
+          .foregroundStyle(.orange)
+      }
     }
     .padding(.vertical, 5)
     .padding(.horizontal, 8)
@@ -459,6 +503,31 @@ struct ShortcutsOverviewView: View {
       for: resolvedPath.actions,
       breadcrumb: resolvedPath.breadcrumb
     )
+  }
+
+  private var currentUsageContext: UsageContext {
+    switch selection.target {
+    case .global:
+      return UsageContext(scope: .global)
+    case .fallback:
+      return UsageContext(scope: .fallback)
+    case .app(let bundleId):
+      return UsageContext(scope: .app, bundleId: bundleId)
+    }
+  }
+
+  private var currentUsageHeat: [String: UsageHeat] {
+    let counts = Dictionary(uniqueKeysWithValues: currentLevel.assignments.values.map { assignment in
+      let context = assignment.isFromFallback ? UsageContext(scope: .fallback) : currentUsageContext
+      return (
+        assignment.key,
+        usageStats.snapshot.count(
+          context: context,
+          keyPrefix: resolvedPath.keys + [assignment.key]
+        )
+      )
+    })
+    return UsageInsights.heatByKey(countsByKey: counts)
   }
 
   private var flattenedSequences: [ShortcutsOverview.SequenceEntry] {

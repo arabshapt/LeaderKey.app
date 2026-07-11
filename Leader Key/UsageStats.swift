@@ -81,12 +81,68 @@ struct UsageStatsSnapshot: Equatable {
     records.first { $0.context == context && $0.keys == keys }?.count ?? 0
   }
 
+  func count(context: UsageContext, keyPrefix: [String]) -> Int {
+    guard !keyPrefix.isEmpty else { return 0 }
+    return records.lazy
+      .filter { $0.context == context && $0.keys.starts(with: keyPrefix) }
+      .reduce(0) { $0 + $1.count }
+  }
+
   func totalExecutions(in context: UsageContext) -> Int {
     records.lazy.filter { $0.context == context }.reduce(0) { $0 + $1.count }
   }
 
   func firstObservedAt(in context: UsageContext) -> Date? {
     records.lazy.filter { $0.context == context }.map(\.firstObservedAt).min()
+  }
+}
+
+struct UsageHeat: Equatable {
+  let count: Int
+  let intensity: Double
+}
+
+enum UsageInsights {
+  static let evidenceMinimumAge: TimeInterval = 7 * 24 * 60 * 60
+  static let evidenceMinimumExecutions = 50
+
+  static func heatByKey(
+    snapshot: UsageStatsSnapshot,
+    context: UsageContext,
+    pathPrefix: [String],
+    visibleKeys: [String]
+  ) -> [String: UsageHeat] {
+    let counts = Dictionary(uniqueKeysWithValues: visibleKeys.map { key in
+      (key, snapshot.count(context: context, keyPrefix: pathPrefix + [key]))
+    })
+    return heatByKey(countsByKey: counts)
+  }
+
+  static func heatByKey(countsByKey counts: [String: Int]) -> [String: UsageHeat] {
+    let maximum = counts.values.max() ?? 0
+    guard maximum > 0 else { return [:] }
+    let denominator = log1p(Double(maximum))
+
+    return counts.compactMapValues { count in
+      guard count > 0 else { return nil }
+      return UsageHeat(count: count, intensity: log1p(Double(count)) / denominator)
+    }
+  }
+
+  static func hasNotObservedEvidence(
+    snapshot: UsageStatsSnapshot,
+    context: UsageContext,
+    keys: [String],
+    now: Date = Date()
+  ) -> Bool {
+    guard snapshot.count(context: context, keys: keys) == 0,
+      snapshot.totalExecutions(in: context) >= evidenceMinimumExecutions,
+      let firstObservedAt = snapshot.firstObservedAt(in: context),
+      now.timeIntervalSince(firstObservedAt) >= evidenceMinimumAge
+    else {
+      return false
+    }
+    return true
   }
 }
 

@@ -49,10 +49,10 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T3.2 Widen sequence namespace (uppercase, punctuation last resort)
 - [x] T3.3 Free-slot integration + embedded compact grid
 - [x] T3.4 AI-only mode for non-running apps
-- [ ] T3.5 UsageStats (default-off) + Scout/viz consumers
+- [x] T3.5 UsageStats (default-off) + Scout/viz consumers
   - [x] Opt-in local store, persistence, directory switching, and Clear History
   - [x] Regular shortcut invocation telemetry
-  - [ ] Heat, ranking, and pruning evidence consumers
+  - [x] Heat, ranking, and pruning evidence consumers
 - [ ] T3.6 Global/fallback scouting
 
 ## Stage H — Cheatsheet + low cleanups (T1.4/T1.5)
