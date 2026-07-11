@@ -118,6 +118,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
         contentView: { GeneralPane().environmentObject(self.config) }
       ),
       Settings.Pane(
+        identifier: .shortcuts,
+        title: "Shortcuts",
+        toolbarIcon: NSImage(
+          systemSymbolName: "keyboard", accessibilityDescription: "Shortcut Map")!,
+        contentView: { ShortcutsOverviewView(userConfig: self.config) }
+      ),
+      Settings.Pane(
         identifier: .opacity,
         title: "Opacity",
         toolbarIcon: NSImage(
