@@ -41,7 +41,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T2.1 ShortcutsOverviewModel + tests
 - [x] T2.2 ShortcutsOverviewView (keyboard grid + flattened list)
 - [x] T2.3a Settings pane (.shortcuts)
-- [ ] T2.3b Standalone window + socket command `shortcut-map open`
+- [x] T2.3b Standalone window + socket command `shortcut-map open`
 - [ ] T2.3c HTML export
 
 ## Stage G — Command Scout (T3)

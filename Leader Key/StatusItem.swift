@@ -82,6 +82,7 @@ class StatusItem {
   private var voiceStatusMenuItem: NSMenuItem?
 
   var handlePreferences: (() -> Void)?
+  var handleShowShortcutsOverview: (() -> Void)?
   var handleReloadConfig: (() -> Void)?
   var handleRevealConfig: (() -> Void)?
   var handleCheckForUpdates: (() -> Void)?
@@ -126,6 +127,12 @@ class StatusItem {
     )
     preferencesItem.target = self
     menu.addItem(preferencesItem)
+
+    let shortcutsOverviewItem = NSMenuItem(
+      title: "Shortcut Map…", action: #selector(showShortcutsOverview), keyEquivalent: ""
+    )
+    shortcutsOverviewItem.target = self
+    menu.addItem(shortcutsOverviewItem)
 
     menu.addItem(NSMenuItem.separator())
 
@@ -253,6 +260,10 @@ class StatusItem {
 
   @objc func showPreferences() {
     handlePreferences?()
+  }
+
+  @objc func showShortcutsOverview() {
+    handleShowShortcutsOverview?()
   }
 
   @objc func reloadConfig() {

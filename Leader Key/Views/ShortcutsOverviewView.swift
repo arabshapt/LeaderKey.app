@@ -32,6 +32,22 @@ final class ShortcutsOverviewSelection: ObservableObject {
     self.target = target
     self.drillPath = drillPath
   }
+
+  /// A nil request comes from the status menu and deliberately preserves the
+  /// current selection. Socket bundle requests select a discovered app map or
+  /// the effective fallback map when that app has no regular configuration.
+  func preselect(bundleId: String?, using userConfig: UserConfig) {
+    guard let bundleId = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !bundleId.isEmpty
+    else { return }
+
+    let configKey = userConfig.configKey(forBundleId: bundleId)
+    if case .app(let resolvedBundleId) = userConfig.configFileKind(forDisplayKey: configKey) {
+      target = .app(bundleId: resolvedBundleId)
+    } else {
+      target = .fallback
+    }
+  }
 }
 
 struct ShortcutsKeyboardGrid: View {

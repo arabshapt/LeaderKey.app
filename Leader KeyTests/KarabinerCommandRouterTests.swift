@@ -75,10 +75,15 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     var commandScoutBundleId: String?
     var commandScoutSource: String?
+    var shortcutMapOpenRequests: [String?] = []
 
     func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String) {
       commandScoutBundleId = bundleId
       commandScoutSource = source
+    }
+
+    func unixSocketServerDidReceiveShortcutMapOpen(bundleId: String?) {
+      shortcutMapOpenRequests.append(bundleId)
     }
 
     func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String {
@@ -356,5 +361,93 @@ final class KarabinerCommandRouterTests: XCTestCase {
       command: "command-scout foobar",
       delegate: delegate)
     XCTAssertTrue(result.hasPrefix("ERROR:"))
+  }
+
+  // MARK: - Shortcut Map
+
+  func testShortcutMapOpenWithoutPayloadPreservesSelectionRequest() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "shortcut-map open", delegate: delegate),
+      "OK"
+    )
+    XCTAssertEqual(delegate.shortcutMapOpenRequests.count, 1)
+    XCTAssertNil(delegate.shortcutMapOpenRequests[0])
+  }
+
+  func testShortcutMapOpenWithEmptyObjectPreservesSelectionRequest() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(command: "shortcut-map open {}", delegate: delegate),
+      "OK"
+    )
+    XCTAssertEqual(delegate.shortcutMapOpenRequests.count, 1)
+    XCTAssertNil(delegate.shortcutMapOpenRequests[0])
+  }
+
+  func testShortcutMapOpenWithBundleIdForwardsTrimmedBundle() {
+    let delegate = MockDelegate()
+
+    XCTAssertEqual(
+      KarabinerCommandRouter.route(
+        command: "shortcut-map open {\"bundleId\":\"  com.google.Chrome  \"}",
+        delegate: delegate
+      ),
+      "OK"
+    )
+    XCTAssertEqual(delegate.shortcutMapOpenRequests, ["com.google.Chrome"])
+  }
+
+  func testShortcutMapOpenRejectsMalformedAndInvalidPayloads() {
+    let delegate = MockDelegate()
+    let invalidCommands = [
+      "shortcut-map open {",
+      "shortcut-map open []",
+      "shortcut-map open {\"bundleId\":\"   \"}",
+      "shortcut-map open {\"bundleId\":42}",
+    ]
+
+    for command in invalidCommands {
+      XCTAssertTrue(
+        KarabinerCommandRouter.route(command: command, delegate: delegate).hasPrefix("ERROR:"),
+        command
+      )
+    }
+    XCTAssertTrue(delegate.shortcutMapOpenRequests.isEmpty)
+  }
+
+  func testShortcutMapRejectsMissingAndUnknownSubcommands() {
+    let delegate = MockDelegate()
+
+    XCTAssertTrue(
+      KarabinerCommandRouter.route(command: "shortcut-map", delegate: delegate).hasPrefix("ERROR:"))
+    XCTAssertTrue(
+      KarabinerCommandRouter.route(command: "shortcut-map close", delegate: delegate).hasPrefix(
+        "ERROR:"))
+    XCTAssertTrue(delegate.shortcutMapOpenRequests.isEmpty)
+  }
+
+  func testShortcutMapPreselectionUsesCustomAppAndFallbackTargets() {
+    let config = UserConfig()
+    config.discoveredConfigFiles = [
+      "My Browser": "/tmp/app.com.example.Browser.json",
+      defaultAppConfigDisplayName: "/tmp/app-fallback-config.json",
+    ]
+    let selection = ShortcutsOverviewSelection(target: .global, drillPath: ["g"])
+
+    selection.preselect(bundleId: nil, using: config)
+    XCTAssertEqual(selection.target, .global)
+    XCTAssertEqual(selection.drillPath, ["g"])
+
+    selection.preselect(bundleId: "com.example.Browser", using: config)
+    XCTAssertEqual(selection.target, .app(bundleId: "com.example.Browser"))
+    XCTAssertTrue(selection.drillPath.isEmpty)
+
+    selection.drillPath = ["a"]
+    selection.preselect(bundleId: "com.example.Missing", using: config)
+    XCTAssertEqual(selection.target, .fallback)
+    XCTAssertTrue(selection.drillPath.isEmpty)
   }
 }

@@ -72,6 +72,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   var controller: Controller!
   var statusItem = StatusItem()
   let config = UserConfig()
+  private let shortcutsOverviewSelection = ShortcutsOverviewSelection()
+  private var shortcutsOverviewWindow: NSWindow?
   var fileMonitor: FileMonitor!
   var state: UserState!
   @IBOutlet var updaterController: SPUStandardUpdaterController!
@@ -786,6 +788,9 @@ extension AppDelegate {
       self.settingsWindowController.show()
       NSApp.activate(ignoringOtherApps: true)
     }
+    statusItem.handleShowShortcutsOverview = { [weak self] in
+      self?.openShortcutsOverviewWindow(bundleId: nil)
+    }
     statusItem.handleReloadConfig = {
       print("[StatusItem] Reload Config clicked.")
       self.config.reloadConfig()
@@ -828,6 +833,37 @@ extension AppDelegate {
         }
       }
     }
+  }
+
+  fileprivate func openShortcutsOverviewWindow(bundleId: String?) {
+    shortcutsOverviewSelection.preselect(bundleId: bundleId, using: config)
+
+    let window: NSWindow
+    if let existingWindow = shortcutsOverviewWindow {
+      window = existingWindow
+    } else {
+      let contentView = ShortcutsOverviewView(
+        userConfig: config,
+        selection: shortcutsOverviewSelection
+      )
+      let newWindow = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
+        styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        backing: .buffered,
+        defer: false
+      )
+      newWindow.title = "Leader Key Shortcut Map"
+      newWindow.contentViewController = NSHostingController(rootView: contentView)
+      newWindow.isReleasedWhenClosed = false
+      newWindow.minSize = NSSize(width: 900, height: 600)
+      newWindow.setFrameAutosaveName("LeaderKeyShortcutMapWindow")
+      newWindow.center()
+      shortcutsOverviewWindow = newWindow
+      window = newWindow
+    }
+
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
   }
 
   func handleConfigEvent(
@@ -1117,6 +1153,13 @@ extension AppDelegate {
       // Open settings and trigger Command Scout for this bundleId
       self.config.commandScoutPendingBundleId = bundleId
       self.unixSocketServerDidReceiveSettings()
+    }
+  }
+
+  func unixSocketServerDidReceiveShortcutMapOpen(bundleId: String?) {
+    debugLog("[AppDelegate] Shortcut Map open: bundleId=\(bundleId ?? "nil")")
+    DispatchQueue.main.async { [weak self] in
+      self?.openShortcutsOverviewWindow(bundleId: bundleId)
     }
   }
 

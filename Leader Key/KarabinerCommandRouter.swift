@@ -42,6 +42,41 @@ enum KarabinerCommandRouter {
       }
     }
 
+    let shortcutMapParts = trimmedCommand.split(separator: " ", maxSplits: 2)
+    if shortcutMapParts.first?.lowercased() == "shortcut-map" {
+      guard shortcutMapParts.count >= 2 else {
+        return "ERROR: shortcut-map requires a subcommand (e.g. open)"
+      }
+      let subcommand = shortcutMapParts[1].lowercased()
+
+      switch subcommand {
+      case "open":
+        let payloadText = shortcutMapParts.count > 2 ? String(shortcutMapParts[2]) : "{}"
+        guard let payloadData = payloadText.data(using: .utf8),
+          let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
+        else {
+          return "ERROR: shortcut-map open requires an optional JSON object"
+        }
+
+        var bundleId: String?
+        if payload.keys.contains("bundleId") {
+          guard
+            let parsedBundleId = (payload["bundleId"] as? String)?.trimmingCharacters(
+              in: .whitespacesAndNewlines),
+            !parsedBundleId.isEmpty
+          else {
+            return "ERROR: shortcut-map open bundleId must be a nonblank string"
+          }
+          bundleId = parsedBundleId
+        }
+
+        delegate?.unixSocketServerDidReceiveShortcutMapOpen(bundleId: bundleId)
+        return "OK"
+      default:
+        return "ERROR: Unknown shortcut-map subcommand: \(subcommand)"
+      }
+    }
+
     if trimmedCommand.lowercased().hasPrefix("dispatch execute") {
       let payloadStart = trimmedCommand.index(trimmedCommand.startIndex, offsetBy: "dispatch execute".count)
       let payloadText = trimmedCommand[payloadStart...].trimmingCharacters(in: .whitespacesAndNewlines)
