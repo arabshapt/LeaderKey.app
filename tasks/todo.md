@@ -56,7 +56,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T3.6 Global/fallback scouting
 
 ## Stage H — Cheatsheet + low cleanups (T1.4/T1.5)
-- [ ] T1.4 Cheatsheet window reuse for .always
+- [x] T1.4 Cheatsheet window reuse for .always
 - [x] T1.5 Delete dead CGEvent-tap machinery
 - [ ] T1.5 Delete ThreadOptimization.debounce
 - [ ] T1.5 Karabiner2InputMethod.isActive returns bool directly

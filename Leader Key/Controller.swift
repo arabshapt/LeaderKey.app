@@ -45,12 +45,20 @@ class Controller {
     self.userConfig = userConfig
     self.appDelegate = appDelegate  // Store the reference
 
-    let initialWindowClass = Theme.classFor(Defaults[.theme])
+    let initialTheme = Defaults[.theme]
+    let initialWindowClass = Theme.classFor(initialTheme)
     self.window = initialWindowClass.init(controller: self)
 
-    Task {
+    Task { [weak self] in
+      var currentTheme = initialTheme
       for await value in Defaults.updates(.theme) {
+        guard value != currentTheme else { continue }
+        currentTheme = value
+        guard let self else { return }
         let windowClass = Theme.classFor(value)
+        await MainActor.run {
+          self.discardCheatsheet()
+        }
         self.window = await windowClass.init(controller: self)
       }
     }
@@ -59,6 +67,9 @@ class Controller {
       switch event {
       case .didReload:
         ViewSizeCache.shared.clear()  // invalidate cached sizes when config changes
+        ThreadOptimization.executeOnMain {
+          self.discardCheatsheet()
+        }
       default: break
       }
     }.store(in: &cancellables)
@@ -205,11 +216,13 @@ class Controller {
       Events.send(.didDeactivate)
     }
 
-    // Fully close cheatsheet so AppKit releases it (we recreate lazily)
-    cheatsheetWindow?.close()
-    // Release cheatsheet window to free memory when not visible
-    cheatsheetWindow = nil
     cheatsheetTimer?.invalidate()
+    cheatsheetTimer = nil
+    if Self.shouldReuseCheatsheet(onHideFor: Defaults[.autoOpenCheatsheet]) {
+      cheatsheetWindow?.orderOut(nil)
+    } else {
+      discardCheatsheet()
+    }
 
     // Proactively drop in-memory image caches when panel is hidden
     KingfisherManager.shared.cache.clearMemoryCache()
@@ -447,6 +460,19 @@ class Controller {
     }
     positionCheatsheetWindow()
     cheatsheetWindow?.orderFront(nil)
+  }
+
+  static func shouldReuseCheatsheet(
+    onHideFor setting: AutoOpenCheatsheetSetting
+  ) -> Bool {
+    setting == .always
+  }
+
+  private func discardCheatsheet() {
+    cheatsheetTimer?.invalidate()
+    cheatsheetTimer = nil
+    cheatsheetWindow?.close()
+    cheatsheetWindow = nil
   }
 
   private func scheduleCheatsheet() {

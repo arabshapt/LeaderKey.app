@@ -82,6 +82,12 @@ class ControllerTests: XCTestCase {
     XCTAssertEqual(attempts.first?.1, ["t", "N"])
   }
 
+  func testCheatsheetReuseIsLimitedToAlwaysMode() {
+    XCTAssertTrue(Controller.shouldReuseCheatsheet(onHideFor: .always))
+    XCTAssertFalse(Controller.shouldReuseCheatsheet(onHideFor: .delay))
+    XCTAssertFalse(Controller.shouldReuseCheatsheet(onHideFor: .never))
+  }
+
   // Test shortcut parsing logic
   func testParseValidShortcuts() {
     // Test Cmd+Shift+B
