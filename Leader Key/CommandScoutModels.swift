@@ -156,6 +156,7 @@ struct CommandScoutSuggestion: Identifiable, Codable, Equatable {
   var confidence: Double
   var conflictStatus: CommandScoutConflictStatus
   var reviewNotes: String
+  var shortcut: String? = nil
 
   var isHighConfidence: Bool {
     confidence >= 0.75
@@ -199,9 +200,18 @@ struct CommandScoutMenuItem: Codable, Equatable, Identifiable {
   let appName: String
   let enabled: Bool
   let path: String
+  let shortcut: String?
   let title: String
 
   var id: String { path }
+
+  init(appName: String, enabled: Bool, path: String, shortcut: String? = nil, title: String) {
+    self.appName = appName
+    self.enabled = enabled
+    self.path = path
+    self.shortcut = shortcut
+    self.title = title
+  }
 }
 
 struct CommandScoutMenuInventoryResponse: Codable, Equatable {
@@ -217,6 +227,11 @@ struct CommandScoutMenuFetchResult: Equatable {
 struct CommandScoutMenuSuggestionResult: Equatable {
   var suggestions: [CommandScoutSuggestion]
   var errorMessage: String?
+}
+
+struct CommandScoutSuggestionMergeResult: Equatable {
+  var suggestions: [CommandScoutSuggestion]
+  var addedCount: Int
 }
 
 struct CommandScoutAppContext: Equatable {

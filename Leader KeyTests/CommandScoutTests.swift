@@ -4,6 +4,32 @@ import XCTest
 
 final class CommandScoutTests: XCTestCase {
 
+    // MARK: - Native Menu Shortcut Formatting
+
+    func testAXMenuShortcutFormatterFormatsDefaultCommandAndModifiers() {
+        XCTAssertEqual(
+            AXMenuShortcutFormatter.format(commandCharacter: "t", modifiers: 1, virtualKey: 17),
+            "⌘⇧T"
+        )
+        XCTAssertEqual(
+            AXMenuShortcutFormatter.format(commandCharacter: "k", modifiers: 14, virtualKey: 40),
+            "⌃⌥K"
+        )
+    }
+
+    func testAXMenuShortcutFormatterFallsBackToVirtualKeys() {
+        XCTAssertEqual(
+            AXMenuShortcutFormatter.format(commandCharacter: nil, modifiers: 0, virtualKey: 123),
+            "⌘←"
+        )
+        XCTAssertEqual(
+            AXMenuShortcutFormatter.format(commandCharacter: nil, modifiers: 8, virtualKey: 122),
+            "F1"
+        )
+        XCTAssertNil(
+            AXMenuShortcutFormatter.format(commandCharacter: nil, modifiers: 0, virtualKey: nil))
+    }
+
     // MARK: - Sequence Normalizer
 
     func testTokensSplitBySpaces() {
@@ -140,7 +166,13 @@ final class CommandScoutTests: XCTestCase {
 
     func testMenuItemsConvertToSuggestions() {
         let items = [
-            CommandScoutMenuItem(appName: "Safari", enabled: true, path: "File > New Window", title: "New Window"),
+            CommandScoutMenuItem(
+                appName: "Safari",
+                enabled: true,
+                path: "File > New Window",
+                shortcut: "⌘N",
+                title: "New Window"
+            ),
             CommandScoutMenuItem(appName: "Safari", enabled: true, path: "Edit > Copy", title: "Copy"),
         ]
         let suggestions = CommandScoutService.suggestionsFromMenuItems(items, appName: "Safari")
@@ -148,6 +180,7 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(suggestions[0].actionValue, "Safari > File > New Window")
         XCTAssertEqual(suggestions[0].source, .liveMenu)
         XCTAssertEqual(suggestions[0].actionType, .menu)
+        XCTAssertEqual(suggestions[0].shortcut, "⌘N")
     }
 
     func testMenuItemsFilterNoise() {
@@ -244,6 +277,15 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(parsed?.app, "Safari")
         XCTAssertEqual(parsed?.items.count, 1)
         XCTAssertEqual(parsed?.items[0].title, "New")
+        XCTAssertNil(parsed?.items[0].shortcut)
+    }
+
+    func testParseMenuInventoryJSONIncludesOptionalShortcut() {
+        let json = """
+            {"app":"Safari","items":[{"appName":"Safari","enabled":true,"path":"File > New","shortcut":"⌘N","title":"New"}]}
+            """
+        let parsed = CommandScoutService.parseMenuInventoryJSON(json)
+        XCTAssertEqual(parsed?.items[0].shortcut, "⌘N")
     }
 
     func testParseMenuInventoryInvalidJSON() {
@@ -264,6 +306,106 @@ final class CommandScoutTests: XCTestCase {
         let result = CommandScoutService.menuFetchResult(appName: "Safari", rawJSON: json)
         XCTAssertNil(result.errorMessage)
         XCTAssertEqual(result.items.count, 1)
+    }
+
+    func testMenuAndAIMergeNormalizesOnlyMenuPathIdentity() {
+        var menu = makeSuggestion(
+            id: "menu",
+            sequence: "",
+            actionType: .menu,
+            value: "Safari > File > New Tab",
+            title: "New Tab"
+        )
+        menu.shortcut = "⌘T"
+
+        var ai = makeSuggestion(
+            id: "ai",
+            sequence: "t n",
+            actionType: .menu,
+            value: "  safari  >  FILE > new   tab  ",
+            title: "New Tab"
+        )
+        ai.source = .ai
+        ai.aiDescription = "AI detail"
+        ai.category = "Tabs"
+
+        let menuResult = CommandScoutService.mergeMenuAndAISuggestions(
+            menuSuggestions: [menu],
+            aiSuggestions: [ai]
+        )
+        XCTAssertEqual(menuResult.suggestions.count, 1)
+        XCTAssertEqual(menuResult.addedCount, 0)
+        XCTAssertEqual(menuResult.suggestions[0].source, .liveMenu)
+        XCTAssertEqual(menuResult.suggestions[0].shortcut, "⌘T")
+        XCTAssertEqual(menuResult.suggestions[0].suggestedSequence, "tn")
+        XCTAssertEqual(menuResult.suggestions[0].aiDescription, "AI detail")
+        XCTAssertEqual(menuResult.suggestions[0].category, "Tabs")
+
+        let urlMenu = makeSuggestion(
+            id: "url-menu",
+            sequence: "u",
+            actionType: .url,
+            value: "https://example.com/CaseSensitive",
+            title: "URL"
+        )
+        let urlAI = makeSuggestion(
+            id: "url-ai",
+            sequence: "v",
+            actionType: .url,
+            value: "https://example.com/casesensitive",
+            title: "URL"
+        )
+        let urlResult = CommandScoutService.mergeMenuAndAISuggestions(
+            menuSuggestions: [urlMenu],
+            aiSuggestions: [urlAI]
+        )
+        XCTAssertEqual(urlResult.suggestions.count, 2)
+        XCTAssertEqual(urlResult.addedCount, 1)
+    }
+
+    func testValidationPreservesCaseSensitiveURLAndShortcutIdentities() {
+        let suggestions = [
+            makeSuggestion(
+                id: "url-upper", sequence: "u", actionType: .url,
+                value: "https://example.com/Path", title: "Upper URL"),
+            makeSuggestion(
+                id: "url-lower", sequence: "v", actionType: .url,
+                value: "https://example.com/path", title: "Lower URL"),
+            makeSuggestion(
+                id: "shortcut-upper", sequence: "s", actionType: .shortcut,
+                value: "Ct", title: "Upper Shortcut"),
+            makeSuggestion(
+                id: "shortcut-lower", sequence: "x", actionType: .shortcut,
+                value: "ct", title: "Lower Shortcut"),
+        ]
+
+        let result = CommandScoutService.validate(suggestions: suggestions, existingRoot: emptyRoot())
+        XCTAssertTrue(result.allSatisfy { $0.conflictStatus == .clear })
+    }
+
+    func testMenuCacheSupportsConcurrentReadsWritesAndClears() {
+        let cache = CommandScoutMenuCache()
+        let item = CommandScoutMenuItem(
+            appName: "Safari", enabled: true, path: "File > New", shortcut: "⌘N", title: "New")
+        let queue = DispatchQueue(label: "CommandScoutMenuCacheTests", attributes: .concurrent)
+        let group = DispatchGroup()
+
+        for index in 0..<300 {
+            group.enter()
+            queue.async {
+                let key = "app-\(index % 7)"
+                cache.store([item], for: key)
+                _ = cache.items(for: key, ttl: 300)
+                if index.isMultiple(of: 11) {
+                    cache.clear(key: key)
+                }
+                group.leave()
+            }
+        }
+
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+        cache.store([item], for: "final")
+        XCTAssertEqual(cache.items(for: "final", ttl: 300), [item])
     }
 
     // MARK: - AI Parsing and Debug Bundle

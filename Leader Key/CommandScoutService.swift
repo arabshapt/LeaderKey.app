@@ -1,30 +1,66 @@
 import Foundation
 import os
 
+final class CommandScoutMenuCache {
+    private struct Entry {
+        let items: [CommandScoutMenuItem]
+        let timestamp: Date
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func items(for key: String, now: Date = Date(), ttl: TimeInterval) -> [CommandScoutMenuItem]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[key], now.timeIntervalSince(entry.timestamp) < ttl else {
+            entries.removeValue(forKey: key)
+            return nil
+        }
+        return entry.items
+    }
+
+    func store(_ items: [CommandScoutMenuItem], for key: String, timestamp: Date = Date()) {
+        lock.lock()
+        entries[key] = Entry(items: items, timestamp: timestamp)
+        lock.unlock()
+    }
+
+    func clear(key: String? = nil) {
+        lock.lock()
+        if let key {
+            entries.removeValue(forKey: key)
+        } else {
+            entries.removeAll()
+        }
+        lock.unlock()
+    }
+}
+
 class CommandScoutService {
     static let maxAISuggestions = 60
 
     // MARK: - Menu Inventory Cache
 
-    private static var menuCache: [String: (items: [CommandScoutMenuItem], timestamp: Date)] = [:]
+    private static let menuCache = CommandScoutMenuCache()
     private static let cacheTTL: TimeInterval = 300  // 5 minutes
 
     /// Fetch menu items for an app, using cache if fresh.
-    /// Must be called from main thread (AX API requirement).
-    static func fetchMenuItems(appName: String) -> CommandScoutMenuFetchResult {
+    static func fetchMenuItems(appName: String) async -> CommandScoutMenuFetchResult {
         let cacheKey = appName.lowercased()
 
-        if let cached = menuCache[cacheKey],
-           Date().timeIntervalSince(cached.timestamp) < cacheTTL {
-            return CommandScoutMenuFetchResult(items: cached.items, errorMessage: nil)
+        if let cachedItems = menuCache.items(for: cacheKey, ttl: cacheTTL) {
+            return CommandScoutMenuFetchResult(items: cachedItems, errorMessage: nil)
         }
 
         let spid = OSSignpostID(log: signpostLog)
         os_signpost(.begin, log: signpostLog, name: "CommandScout.menuScan", signpostID: spid, "%{public}s", appName)
-        let json = KarabinerUserCommandReceiver.listMenuItemsJSON(app: appName)
+        let json = await Task.detached(priority: .userInitiated) {
+            KarabinerUserCommandReceiver.listMenuItemsJSON(app: appName)
+        }.value
         let result = menuFetchResult(appName: appName, rawJSON: json)
         if result.errorMessage == nil {
-            menuCache[cacheKey] = (items: result.items, timestamp: Date())
+            menuCache.store(result.items, for: cacheKey)
         }
         os_signpost(.end, log: signpostLog, name: "CommandScout.menuScan", signpostID: spid)
         return result
@@ -33,20 +69,20 @@ class CommandScoutService {
     /// Clear cached menu items for an app (or all if nil).
     static func clearMenuCache(appName: String? = nil) {
         if let appName = appName {
-            menuCache.removeValue(forKey: appName.lowercased())
+            menuCache.clear(key: appName.lowercased())
         } else {
-            menuCache.removeAll()
+            menuCache.clear()
         }
     }
 
     /// Full menu scan: fetch + convert + filter. Returns suggestions with no sequences assigned.
-    static func scanMenuSuggestions(appName: String) -> [CommandScoutSuggestion] {
-        scanMenuSuggestionResult(appName: appName).suggestions
+    static func scanMenuSuggestions(appName: String) async -> [CommandScoutSuggestion] {
+        await scanMenuSuggestionResult(appName: appName).suggestions
     }
 
     /// Full menu scan with diagnostics. Returns suggestions with no sequences assigned.
-    static func scanMenuSuggestionResult(appName: String) -> CommandScoutMenuSuggestionResult {
-        let result = fetchMenuItems(appName: appName)
+    static func scanMenuSuggestionResult(appName: String) async -> CommandScoutMenuSuggestionResult {
+        let result = await fetchMenuItems(appName: appName)
         return CommandScoutMenuSuggestionResult(
             suggestions: suggestionsFromMenuItems(result.items, appName: appName),
             errorMessage: result.errorMessage
@@ -127,9 +163,52 @@ class CommandScoutService {
                 alternatives: [],
                 confidence: 0.85,
                 conflictStatus: .clear,
-                reviewNotes: ""
+                reviewNotes: "",
+                shortcut: item.shortcut
             )
         }
+    }
+
+    /// Merge AI enrichment into native menu suggestions. Menu paths are
+    /// case-folded and whitespace-normalized; every other action value keeps
+    /// exact case so URLs and shortcut specifications are never conflated.
+    static func mergeMenuAndAISuggestions(
+        menuSuggestions: [CommandScoutSuggestion],
+        aiSuggestions: [CommandScoutSuggestion]
+    ) -> CommandScoutSuggestionMergeResult {
+        var merged = menuSuggestions
+        var menuIndexByIdentity: [String: Int] = [:]
+        for (index, suggestion) in menuSuggestions.enumerated() {
+            let identity = actionIdentity(type: suggestion.actionType, value: suggestion.actionValue)
+            if menuIndexByIdentity[identity] == nil {
+                menuIndexByIdentity[identity] = index
+            }
+        }
+
+        var addedCount = 0
+        for aiSuggestion in aiSuggestions {
+            let identity = actionIdentity(
+                type: aiSuggestion.actionType,
+                value: aiSuggestion.actionValue
+            )
+            if let index = menuIndexByIdentity[identity] {
+                if !aiSuggestion.suggestedSequence.isEmpty {
+                    merged[index].suggestedSequence = CommandScoutSequenceNormalizer.normalizedSequence(
+                        aiSuggestion.suggestedSequence)
+                }
+                if !aiSuggestion.aiDescription.isEmpty {
+                    merged[index].aiDescription = aiSuggestion.aiDescription
+                }
+                if !aiSuggestion.category.isEmpty && aiSuggestion.category != "Misc" {
+                    merged[index].category = aiSuggestion.category
+                }
+            } else {
+                merged.append(aiSuggestion)
+                addedCount += 1
+            }
+        }
+
+        return CommandScoutSuggestionMergeResult(suggestions: merged, addedCount: addedCount)
     }
 
     /// Assign mnemonic sequences to suggestions that don't have one.
@@ -278,8 +357,23 @@ class CommandScoutService {
         return signatures
     }
 
+    static func actionIdentity(type: CommandScoutActionType, value: String) -> String {
+        let normalizedValue: String
+        if type == .menu {
+            normalizedValue = value.components(separatedBy: ">")
+                .map { component in
+                    component.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                }
+                .joined(separator: ">")
+                .lowercased(with: Locale(identifier: "en_US_POSIX"))
+        } else {
+            normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return "\(type.rawValue):\(normalizedValue)"
+    }
+
     private static func actionSignature(type: CommandScoutActionType, value: String) -> String {
-        "\(type.rawValue):\(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+        actionIdentity(type: type, value: value)
     }
 
     private static func isValidActionValue(type: CommandScoutActionType, value: String) -> Bool {
@@ -440,7 +534,8 @@ class CommandScoutService {
                 alternatives: parseAlternatives(item["alternatives"]),
                 confidence: parseConfidence(item["confidence"]),
                 conflictStatus: .clear,
-                reviewNotes: item["sourceNotes"] as? String ?? ""
+                reviewNotes: item["sourceNotes"] as? String ?? "",
+                shortcut: item["shortcut"] as? String
             )
         }
 
@@ -503,6 +598,7 @@ class CommandScoutService {
                     "confidence": suggestion.confidence,
                     "conflictStatus": suggestion.conflictStatus.rawValue,
                     "reviewNotes": suggestion.reviewNotes,
+                    "shortcut": suggestion.shortcut ?? "",
                 ] as [String: Any]
             },
         ]

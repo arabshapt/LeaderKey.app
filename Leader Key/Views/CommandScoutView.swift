@@ -49,6 +49,7 @@ struct CommandScoutView: View {
                     || suggestion.category.localizedCaseInsensitiveContains(query)
                     || suggestion.actionValue.localizedCaseInsensitiveContains(query)
                     || suggestion.suggestedSequence.localizedCaseInsensitiveContains(query)
+                    || (suggestion.shortcut?.localizedCaseInsensitiveContains(query) ?? false)
             }
         }
         return result
@@ -329,6 +330,17 @@ struct CommandScoutView: View {
                 .lineLimit(1)
                 .frame(minWidth: 120, alignment: .leading)
 
+            if let shortcut = suggestion.shortcut, !shortcut.isEmpty {
+                Text(shortcut)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .help("Native menu shortcut")
+            }
+
             Text(suggestion.category)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -392,6 +404,11 @@ struct CommandScoutView: View {
                         }
 
                         LabeledContent("Action Type") { Text(suggestion.actionType.displayName) }
+                        if let shortcut = suggestion.shortcut, !shortcut.isEmpty {
+                            LabeledContent("Native Shortcut") {
+                                Text(shortcut).font(.system(.body, design: .monospaced))
+                            }
+                        }
                         LabeledContent("Value") {
                             TextField("Action value", text: bindingForSelectedSuggestion(\.actionValue))
                                 .font(.system(.body, design: .monospaced))
@@ -532,7 +549,7 @@ struct CommandScoutView: View {
         Defaults[.commandScoutWebResearchEnabled] = webResearchEnabled
 
         scanTask = Task {
-            let menuResult = CommandScoutService.scanMenuSuggestionResult(appName: appContext.appName)
+            let menuResult = await CommandScoutService.scanMenuSuggestionResult(appName: appContext.appName)
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
@@ -597,7 +614,13 @@ struct CommandScoutView: View {
 
         // Build menu items JSON for prompt
         let menuItemsJSON: String
-        if let data = try? JSONEncoder().encode(existingMenuSuggestions.map(\.actionValue)),
+        let promptInventory = existingMenuSuggestions.map { suggestion in
+            [
+                "actionValue": suggestion.actionValue,
+                "shortcut": suggestion.shortcut ?? "",
+            ]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: promptInventory, options: [.sortedKeys]),
            let str = String(data: data, encoding: .utf8) {
             menuItemsJSON = str
         } else {
@@ -625,33 +648,13 @@ struct CommandScoutView: View {
                 await MainActor.run {
                     guard activeScanID == scanID else { return }
                     lastAIParseDiagnostics = diagnostics
-                    // Merge: AI suggestions with matching actionValue enrich menu ones (keep AI sequence + description).
-                    // Non-matching AI suggestions are added as new.
-                    var menuByValue: [String: Int] = [:]
-                    for (i, s) in suggestions.enumerated() {
-                        menuByValue["\(s.actionType.rawValue):\(s.actionValue)"] = i
-                    }
-                    var newCount = 0
-                    for ai in aiSuggestions {
-                        let key = "\(ai.actionType.rawValue):\(ai.actionValue)"
-                        if let idx = menuByValue[key] {
-                            // Enrich existing menu suggestion with AI sequence + description
-                            if !ai.suggestedSequence.isEmpty {
-                                suggestions[idx].suggestedSequence = CommandScoutSequenceNormalizer.normalizedSequence(ai.suggestedSequence)
-                            }
-                            if !ai.aiDescription.isEmpty {
-                                suggestions[idx].aiDescription = ai.aiDescription
-                            }
-                            if !ai.category.isEmpty && ai.category != "Misc" {
-                                suggestions[idx].category = ai.category
-                            }
-                        } else {
-                            suggestions.append(ai)
-                            newCount += 1
-                        }
-                    }
+                    let mergeResult = CommandScoutService.mergeMenuAndAISuggestions(
+                        menuSuggestions: suggestions,
+                        aiSuggestions: aiSuggestions
+                    )
+                    suggestions = mergeResult.suggestions
                     let warning = diagnostics.warningMessage.map { " \($0)" } ?? ""
-                    statusMessage = "\(suggestions.count) suggestions (\(aiSuggestions.count) from AI, \(newCount) new).\(warning)"
+                    statusMessage = "\(suggestions.count) suggestions (\(aiSuggestions.count) from AI, \(mergeResult.addedCount) new).\(warning)"
                 }
             case .failure(let diagnostics):
                 await MainActor.run {

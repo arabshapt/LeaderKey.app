@@ -8,6 +8,7 @@ export interface LeaderKeyMenuItem {
   appName: string;
   enabled: boolean;
   path: string;
+  shortcut?: string;
   title: string;
 }
 

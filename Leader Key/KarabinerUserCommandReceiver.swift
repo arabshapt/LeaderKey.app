@@ -55,11 +55,65 @@ enum URLPlaceholderExpander {
   }
 }
 
+enum AXMenuShortcutFormatter {
+  private static let shiftMask: UInt32 = 1 << 0
+  private static let optionMask: UInt32 = 1 << 1
+  private static let controlMask: UInt32 = 1 << 2
+  private static let noCommandMask: UInt32 = 1 << 3
+
+  static func format(
+    commandCharacter: String?,
+    modifiers: UInt32?,
+    virtualKey: UInt32?
+  ) -> String? {
+    guard let key = displayKey(commandCharacter: commandCharacter, virtualKey: virtualKey) else {
+      return nil
+    }
+
+    let modifierMask = modifiers ?? 0
+    var result = ""
+    if modifierMask & noCommandMask == 0 { result += "⌘" }
+    if modifierMask & controlMask != 0 { result += "⌃" }
+    if modifierMask & optionMask != 0 { result += "⌥" }
+    if modifierMask & shiftMask != 0 { result += "⇧" }
+    return result + key
+  }
+
+  private static func displayKey(commandCharacter: String?, virtualKey: UInt32?) -> String? {
+    if let commandCharacter, !commandCharacter.isEmpty {
+      switch commandCharacter {
+      case "\r", "\n": return "↩"
+      case "\t": return "⇥"
+      case " ": return "Space"
+      default:
+        let trimmed = commandCharacter.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+          return trimmed.count == 1 ? trimmed.uppercased() : trimmed
+        }
+      }
+    }
+
+    guard let virtualKey else { return nil }
+    return virtualKeyNames[virtualKey]
+  }
+
+  private static let virtualKeyNames: [UInt32: String] = [
+    36: "↩", 48: "⇥", 49: "Space", 51: "⌫", 53: "⎋", 71: "Clear", 76: "↩",
+    115: "↖", 116: "⇞", 117: "⌦", 119: "↘", 121: "⇟",
+    123: "←", 124: "→", 125: "↓", 126: "↑",
+    122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+    98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+    105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17", 79: "F18",
+    80: "F19", 90: "F20",
+  ]
+}
+
 final class KarabinerUserCommandReceiver {
   private struct MenuInventoryItem: Encodable {
     let appName: String
     let enabled: Bool
     let path: String
+    let shortcut: String?
     let title: String
   }
 
@@ -847,6 +901,16 @@ final class KarabinerUserCommandReceiver {
     return nil
   }
 
+  private static func axGetUInt32(_ element: AXUIElement, attr: String) -> UInt32? {
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
+      let number = ref as? NSNumber
+    else {
+      return nil
+    }
+    return number.uint32Value
+  }
+
   private static func axGetSize(_ element: AXUIElement, attr: String) -> CGSize? {
     var ref: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success,
@@ -930,6 +994,11 @@ final class KarabinerUserCommandReceiver {
             appName: appName,
             enabled: axGetBool(element, attr: kAXEnabledAttribute) ?? true,
             path: path,
+            shortcut: AXMenuShortcutFormatter.format(
+              commandCharacter: axGetString(element, attr: kAXMenuItemCmdCharAttribute),
+              modifiers: axGetUInt32(element, attr: kAXMenuItemCmdModifiersAttribute),
+              virtualKey: axGetUInt32(element, attr: kAXMenuItemCmdVirtualKeyAttribute)
+            ),
             title: title!
           ))
       }
