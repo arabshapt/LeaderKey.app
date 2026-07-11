@@ -64,6 +64,12 @@ class StatusItem {
       updateStatusItemAppearance()
     }
   }
+  /// Live partial transcript shown in the menu while a dictation is recording.
+  var voicePartialTranscript: String? {
+    didSet {
+      updateStatusItemAppearance()
+    }
+  }
   var stickyModeActive = false {
     didSet {
       updateStatusItemAppearance()
@@ -419,6 +425,9 @@ class StatusItem {
     case .idle:
       return "Voice: Idle"
     case .recording:
+      if let partial = voicePartialTranscript, !partial.isEmpty {
+        return "Voice: \(partial.count > 60 ? String(partial.prefix(60)) + "…" : partial)"
+      }
       return "Voice: Recording"
     case .processing:
       return "Voice: Processing"

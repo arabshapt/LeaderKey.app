@@ -14,6 +14,10 @@ protocol VoiceAudioCapturing: AnyObject {
   func setPrewarmingEnabled(_ enabled: Bool)
   func startRecording() throws
   func stopRecording() -> VoiceAudioCapture.CaptureResult?
+  /// Writes the audio captured so far in the active session to a temp WAV
+  /// without stopping the recording. Caller deletes the file. Nil when no
+  /// session is active or no audio has accumulated.
+  func writeSessionSnapshot() -> URL?
   func stopCompletely()
   func cleanupTempFiles()
 }
@@ -46,6 +50,11 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
   private var activeURL: URL?
   private var activeFrameCount: AVAudioFramePosition = 0
   private var activePreRollFrameCount: AVAudioFramePosition = 0
+  // In-memory copy of the active session's buffers so chunked
+  // pre-transcription can snapshot mid-recording (bounded at ~120s).
+  private var sessionBuffers: [StoredBuffer] = []
+  private var sessionFrameCount: AVAudioFramePosition = 0
+  private let maxSessionSnapshotDuration: TimeInterval = 120
   private var lastCaptureURL: URL?
   private var configChangeObserver: NSObjectProtocol?
   var onRecordingInterrupted: (() -> Void)?
@@ -110,6 +119,9 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
       activeFrameCount = 0
       activePreRollFrameCount = preRollFrameCount
 
+      sessionBuffers = preRollBuffers
+      sessionFrameCount = preRollFrameCount
+
       for stored in preRollBuffers {
         try file.write(from: stored.buffer)
         activeFrameCount += stored.frameCount
@@ -132,6 +144,8 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
       activeURL = nil
       activeFrameCount = 0
       activePreRollFrameCount = 0
+      sessionBuffers.removeAll()
+      sessionFrameCount = 0
       lastCaptureURL = url
 
       if !prewarmingEnabled {
@@ -162,8 +176,37 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
       activePreRollFrameCount = 0
       preRollBuffers.removeAll()
       preRollFrameCount = 0
+      sessionBuffers.removeAll()
+      sessionFrameCount = 0
       lastCaptureURL = nil
       teardownEngineLocked()
+    }
+  }
+
+  func writeSessionSnapshot() -> URL? {
+    queue.sync { () -> URL? in
+      guard activeFile != nil, !sessionBuffers.isEmpty,
+        let format = installedTapFormat
+      else { return nil }
+
+      let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("leaderkey-voice-chunk-\(UUID().uuidString)")
+        .appendingPathExtension("wav")
+      do {
+        // autoreleasepool so the AVAudioFile deallocates (finalizing the WAV
+        // header) before the caller reads the snapshot.
+        try autoreleasepool {
+          let file = try AVAudioFile(forWriting: url, settings: format.settings)
+          for stored in sessionBuffers {
+            try file.write(from: stored.buffer)
+          }
+        }
+        return url
+      } catch {
+        debugLog("[VoiceAudioCapture] Failed to write session snapshot: \(error)")
+        try? FileManager.default.removeItem(at: url)
+        return nil
+      }
     }
   }
 
@@ -247,6 +290,8 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
         self.activeURL = nil
         self.activeFrameCount = 0
         self.activePreRollFrameCount = 0
+        self.sessionBuffers.removeAll()
+        self.sessionFrameCount = 0
         debugLog("[VoiceAudioCapture] Active recording aborted by audio device change")
         DispatchQueue.main.async { [weak self] in
           self?.onRecordingInterrupted?()
@@ -285,6 +330,12 @@ final class VoiceAudioCapture: VoiceAudioCapturing {
         activeFrameCount += frames
       } catch {
         debugLog("[VoiceAudioCapture] Failed to write audio buffer: \(error)")
+      }
+      let maxSessionFrames = AVAudioFramePosition(
+        (installedTapFormat?.sampleRate ?? 48000) * maxSessionSnapshotDuration)
+      if sessionFrameCount < maxSessionFrames {
+        sessionBuffers.append(StoredBuffer(buffer: buffer, frameCount: frames))
+        sessionFrameCount += frames
       }
       return
     }

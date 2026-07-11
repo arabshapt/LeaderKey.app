@@ -142,6 +142,14 @@ extension Defaults.Keys {
   /// Local Parakeet model name sent in the transcription request.
   static let voiceParakeetModel = Key<String>(
     "voiceParakeetModel", default: "parakeet-tdt-0.6b-v3", suite: defaultsSuite)
+  /// Strip the trailing period Whisper adds to short command-like dictations.
+  static let voiceDictationStripTrailingPeriod = Key<Bool>(
+    "voiceDictationStripTrailingPeriod", default: false, suite: defaultsSuite)
+  /// While dictating with the local Parakeet server, transcribe the growing
+  /// clip every second: keeps the server warm and shows a live partial
+  /// transcript in the status menu. Local provider only.
+  static let voiceChunkedPreTranscription = Key<Bool>(
+    "voiceChunkedPreTranscription", default: true, suite: defaultsSuite)
   /// Local inference server URL for planner tiers (llama-server or Ollama).
   static let voiceLlamaServerURL = Key<String>(
     "voiceLlamaServerURL", default: "http://localhost:11434", suite: defaultsSuite)

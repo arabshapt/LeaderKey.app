@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os
 
 struct VoiceTranscriptionResult {
   let text: String
@@ -198,56 +199,125 @@ final class OpenAICompatibleSpeechToTextClient: SpeechTranscribing {
 
   /// Re-encodes the captured WAV to 16 kHz Int16 mono before upload. Most ASR backends
   /// (Parakeet/Whisper) are trained on this format and resampling on the server side can be
-  /// flaky for short clips. Uses /usr/bin/afconvert (a separate process) so any failure in the
-  /// system audio converter cannot crash Leader Key. Falls back to the original file on any error.
+  /// flaky for short clips. Conversion runs in-process via AVAudioConverter (the previous
+  /// afconvert subprocess cost a process spawn on the latency path); NSExceptions from the
+  /// audio stack are contained by LKExceptionCatcher. Falls back to the original file on
+  /// any error.
   private static func preparedAudioForUpload(audioURL: URL) throws -> (Data, String) {
-    let originalData = try Data(contentsOf: audioURL)
     let originalFilename = audioURL.lastPathComponent
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(.begin, log: signpostLog, name: "Voice.prepareAudio", signpostID: spid)
+    defer { os_signpost(.end, log: signpostLog, name: "Voice.prepareAudio", signpostID: spid) }
+
+    var convertedData: Data?
+    do {
+      try LKExceptionCatcher.perform {
+        convertedData = try? convertTo16kMonoWAVData(audioURL: audioURL)
+      }
+    } catch {
+      debugLog("[VoiceTranscriber] Audio conversion raised NSException: \(error)")
+    }
+
+    if let convertedData, !convertedData.isEmpty {
+      let convertedFilename = (originalFilename as NSString).deletingPathExtension + "-16k.wav"
+      return (convertedData, convertedFilename)
+    }
+
+    debugLog("[VoiceTranscriber] In-process conversion failed; sending original audio")
+    return (try Data(contentsOf: audioURL), originalFilename)
+  }
+
+  /// Converts an audio file to a 16 kHz Int16 mono WAV and returns its bytes.
+  /// Internal for testing.
+  static func convertTo16kMonoWAVData(audioURL: URL) throws -> Data {
+    let sourceFile = try AVAudioFile(forReading: audioURL)
+    let sourceFormat = sourceFile.processingFormat
+
+    guard
+      let targetFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
+      let converter = AVAudioConverter(from: sourceFormat, to: targetFormat)
+    else {
+      throw VoiceTranscriptionError.invalidResponse
+    }
 
     let outputURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("leaderkey-voice-upload-\(UUID().uuidString)")
       .appendingPathExtension("wav")
     defer { try? FileManager.default.removeItem(at: outputURL) }
 
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
-    process.arguments = [
-      "-f", "WAVE",
-      "-d", "LEI16@16000",
-      "-c", "1",
-      audioURL.path,
-      outputURL.path,
-    ]
-    let stderrPipe = Pipe()
-    process.standardOutput = Pipe()
-    process.standardError = stderrPipe
+    // Scope the writer so the AVAudioFile deallocates (finalizing the WAV
+    // header) before the bytes are read back.
+    try autoreleasepool {
+      let outputSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false,
+      ]
+      let outputFile = try AVAudioFile(
+        forWriting: outputURL, settings: outputSettings,
+        commonFormat: .pcmFormatInt16, interleaved: true)
 
-    do {
-      try process.run()
-      process.waitUntilExit()
-    } catch {
-      debugLog("[VoiceTranscriber] afconvert spawn failed: \(error); sending original audio")
-      return (originalData, originalFilename)
+      let inputChunkFrames: AVAudioFrameCount = 8192
+      var reachedEnd = false
+      let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+        if reachedEnd {
+          outStatus.pointee = .endOfStream
+          return nil
+        }
+        guard
+          let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: inputChunkFrames)
+        else {
+          outStatus.pointee = .endOfStream
+          return nil
+        }
+        do {
+          try sourceFile.read(into: buffer)
+        } catch {
+          outStatus.pointee = .endOfStream
+          return nil
+        }
+        if buffer.frameLength == 0 {
+          reachedEnd = true
+          outStatus.pointee = .endOfStream
+          return nil
+        }
+        outStatus.pointee = .haveData
+        return buffer
+      }
+
+      let outputChunkFrames = AVAudioFrameCount(
+        Double(inputChunkFrames) * targetFormat.sampleRate / sourceFormat.sampleRate) + 1024
+      conversionLoop: while true {
+        guard
+          let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: targetFormat, frameCapacity: outputChunkFrames)
+        else {
+          throw VoiceTranscriptionError.invalidResponse
+        }
+        var conversionError: NSError?
+        let status = converter.convert(
+          to: outputBuffer, error: &conversionError, withInputFrom: inputBlock)
+        switch status {
+        case .haveData:
+          try outputFile.write(from: outputBuffer)
+        case .inputRanDry, .endOfStream:
+          if outputBuffer.frameLength > 0 {
+            try outputFile.write(from: outputBuffer)
+          }
+          break conversionLoop
+        case .error:
+          throw conversionError ?? VoiceTranscriptionError.invalidResponse
+        @unknown default:
+          break conversionLoop
+        }
+      }
     }
 
-    guard process.terminationStatus == 0 else {
-      let errOutput =
-        String(
-          data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8
-        ) ?? ""
-      debugLog(
-        "[VoiceTranscriber] afconvert exited \(process.terminationStatus): \(errOutput); sending original audio"
-      )
-      return (originalData, originalFilename)
-    }
-
-    guard let convertedData = try? Data(contentsOf: outputURL), !convertedData.isEmpty else {
-      debugLog("[VoiceTranscriber] afconvert produced no output; sending original audio")
-      return (originalData, originalFilename)
-    }
-
-    let convertedFilename = (originalFilename as NSString).deletingPathExtension + "-16k.wav"
-    return (convertedData, convertedFilename)
+    return try Data(contentsOf: outputURL)
   }
 
   private static func quality(

@@ -3,6 +3,7 @@ import AppKit
 import Defaults
 import Foundation
 import KeyboardShortcuts
+import os
 
 enum VoiceKeychain {
   static let groqAPIKeyAccount = "voice.groq"
@@ -99,6 +100,14 @@ final class VoiceCoordinator {
   // timeout is 30s; planning can chain transcribe retries + a confirmation dialog).
   var transcribingWatchdogTimeout: TimeInterval = 35
   var planningWatchdogTimeout: TimeInterval = 90
+  // Extra recording time captured after a hold key is released.
+  var holdReleaseTrailingCapture: TimeInterval = 0
+  private var hasConfirmedMicAuthorization = false
+  // Chunked pre-transcription while dictating (local provider): keeps the STT
+  // server warm and shows a live partial transcript in the status menu.
+  private var chunkTimer: Timer?
+  private var chunkTask: Task<Void, Never>?
+  private var chunkInFlight = false
   private(set) var state: State = .idle {
     didSet {
       statusItem.voiceStatus = state.statusItemStatus
@@ -196,9 +205,72 @@ final class VoiceCoordinator {
     }
     processingTask?.cancel()
     processingTask = nil
+    stopChunkedPreTranscription()
     audioCapture.stopCompletely()
     audioCapture.cleanupTempFiles()
     state = .idle
+  }
+
+  // MARK: - Chunked pre-transcription
+
+  private var chunkedPreTranscriptionEnabled: Bool {
+    // Local Parakeet only: re-sending the growing clip every second is free
+    // against a LAN server but would burn quota against a cloud API.
+    Defaults[.voiceChunkedPreTranscription] && Defaults[.voiceSTTProvider] == .parakeet
+  }
+
+  private func startChunkedPreTranscriptionIfEnabled() {
+    guard captureMode == .dictate, chunkedPreTranscriptionEnabled else { return }
+    chunkTimer?.invalidate()
+    chunkTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+      self?.sendChunkTranscription()
+    }
+  }
+
+  private func stopChunkedPreTranscription() {
+    chunkTimer?.invalidate()
+    chunkTimer = nil
+    chunkTask?.cancel()
+    chunkTask = nil
+    chunkInFlight = false
+    statusItem.voicePartialTranscript = nil
+  }
+
+  private func sendChunkTranscription() {
+    guard captureMode == .dictate,
+      state == .recordingHold || state == .recordingToggle
+    else {
+      stopChunkedPreTranscription()
+      return
+    }
+    // Skip a tick rather than queueing behind a slow request.
+    guard !chunkInFlight else { return }
+    guard let snapshotURL = audioCapture.writeSessionSnapshot() else { return }
+
+    chunkInFlight = true
+    chunkTask = Task { [weak self] in
+      defer { try? FileManager.default.removeItem(at: snapshotURL) }
+      guard let self else { return }
+
+      let snapshot = VoiceAudioCapture.CaptureResult(
+        url: snapshotURL, duration: 0, sampleRate: 0, frameCount: 0, preRollFrameCount: 0)
+      do {
+        let transcript = try await self.transcribe(result: snapshot, prompt: nil)
+        await MainActor.run {
+          self.chunkInFlight = false
+          guard self.captureMode == .dictate,
+            self.state == .recordingHold || self.state == .recordingToggle
+          else { return }
+          self.statusItem.voicePartialTranscript = transcript.text
+          debugLog("[VoiceCoordinator] Chunk transcript: \"\(transcript.text)\"")
+        }
+      } catch {
+        await MainActor.run {
+          self.chunkInFlight = false
+          debugLog("[VoiceCoordinator] Chunk transcription failed: \(error)")
+        }
+      }
+    }
   }
 
   /// Arms a one-shot timeout whenever the coordinator enters a processing
@@ -329,8 +401,14 @@ final class VoiceCoordinator {
   }
 
   private func finishRecordingWithTrailingCapture(trigger: String, expectedMode: CaptureMode) {
-    let trailingDuration: TimeInterval = 0.3
-    DispatchQueue.main.asyncAfter(deadline: .now() + trailingDuration) { [weak self] in
+    // People release the hold key after the last word, and the 0.75s pre-roll
+    // covers the front — so no fixed trailing wait by default. Bump to ~0.1
+    // only if word-final clipping shows up in practice.
+    guard holdReleaseTrailingCapture > 0 else {
+      finishRecording(trigger: trigger)
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + holdReleaseTrailingCapture) { [weak self] in
       guard let self else { return }
       guard self.state == .recordingHold, self.captureMode == expectedMode else { return }
       self.finishRecording(trigger: trigger)
@@ -351,7 +429,6 @@ final class VoiceCoordinator {
       self.pendingKeyUpWhileArming = false
 
       if granted {
-        self.updateAudioWarmState()
         do {
           try self.audioCapture.startRecording()
           self.state = mode
@@ -359,6 +436,8 @@ final class VoiceCoordinator {
             // The hold key was released while the permission prompt was still
             // pending — finish immediately so recording can never get stuck.
             self.finishRecording(trigger: "hold-armed-late")
+          } else {
+            self.startChunkedPreTranscriptionIfEnabled()
           }
         } catch {
           self.state = .error("Recording failed")
@@ -371,6 +450,7 @@ final class VoiceCoordinator {
   }
 
   private func finishRecording(trigger: String) {
+    stopChunkedPreTranscription()
     let result = audioCapture.stopRecording()
     let mode = captureMode
 
@@ -397,7 +477,16 @@ final class VoiceCoordinator {
     let targetBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let dispatchOptions = voiceDispatchOptions(bundleId: targetBundleId)
 
+    // Release→text latency interval, ends when processing settles on any path.
+    let processingSpid = OSSignpostID(log: signpostLog)
+    os_signpost(
+      .begin, log: signpostLog, name: "Voice.processing", signpostID: processingSpid,
+      "%{public}s", trigger)
+
     processingTask = Task { [weak self] in
+      defer {
+        os_signpost(.end, log: signpostLog, name: "Voice.processing", signpostID: processingSpid)
+      }
       guard let self else { return }
 
       do {
@@ -556,6 +645,11 @@ final class VoiceCoordinator {
     prompt: String?,
     modelOverride: VoiceSTTModel? = nil
   ) async throws -> VoiceTranscriptionResult {
+    let spid = OSSignpostID(log: signpostLog)
+    os_signpost(
+      .begin, log: signpostLog, name: "Voice.transcribe", signpostID: spid, "%{public}s",
+      Defaults[.voiceSTTProvider].rawValue)
+    defer { os_signpost(.end, log: signpostLog, name: "Voice.transcribe", signpostID: spid) }
     switch Defaults[.voiceSTTProvider] {
     case .groq:
       guard let apiKey = KeychainHelper.load(account: VoiceKeychain.groqAPIKeyAccount) else {
@@ -720,11 +814,28 @@ final class VoiceCoordinator {
   }
 
   private func ensureMicrophoneAccess(_ completion: @escaping (Bool) -> Void) {
+    // Once authorized, skip the status query on every keypress. A mid-run
+    // revocation kills the mic at the OS level anyway and surfaces as a
+    // recording failure.
+    if hasConfirmedMicAuthorization {
+      completion(true)
+      return
+    }
     switch micAuthorizationStatus() {
     case .authorized:
+      hasConfirmedMicAuthorization = true
+      // First confirmation: apply the prewarm policy now that we may
+      // legitimately hold the microphone open.
+      updateAudioWarmState()
       completion(true)
     case .notDetermined:
-      requestMicAccess(completion)
+      requestMicAccess { [weak self] granted in
+        if granted, let self {
+          self.hasConfirmedMicAuthorization = true
+          self.updateAudioWarmState()
+        }
+        completion(granted)
+      }
     case .denied, .restricted:
       completion(false)
     @unknown default:
@@ -763,22 +874,71 @@ final class VoiceCoordinator {
 
   @MainActor
   private func handleDictationTranscript(_ transcript: String) {
-    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    var trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       state = .ready("No speech detected")
       returnToIdleAfterReady()
       return
     }
 
+    if Defaults[.voiceDictationStripTrailingPeriod] {
+      trimmed = Self.strippingTrailingPeriod(trimmed)
+    }
+
     let pasteboard = NSPasteboard.general
+
+    // Pasting lands in the frontmost app — if that's Leader Key itself there
+    // is no useful target, so just leave the text on the clipboard.
+    if let frontmost = NSWorkspace.shared.frontmostApplication,
+      frontmost.bundleIdentifier == Bundle.main.bundleIdentifier
+    {
+      pasteboard.clearContents()
+      pasteboard.setString(trimmed, forType: .string)
+      debugLog("[VoiceCoordinator] Dictation target is Leader Key; copied without pasting")
+      state = .ready("Copied (no paste target)")
+      returnToIdleAfterReady()
+      return
+    }
+
+    // Snapshot the user's clipboard so dictation doesn't eat it.
+    let savedItems = (pasteboard.pasteboardItems ?? []).map { item -> NSPasteboardItem in
+      let copy = NSPasteboardItem()
+      for type in item.types {
+        if let data = item.data(forType: type) {
+          copy.setData(data, forType: type)
+        }
+      }
+      return copy
+    }
+
     pasteboard.clearContents()
     pasteboard.setString(trimmed, forType: .string)
+    let ourChangeCount = pasteboard.changeCount
 
     Self.simulatePaste()
+
+    // Restore after the paste keystroke has been consumed — but only if
+    // nothing else wrote to the pasteboard in the meantime.
+    if !savedItems.isEmpty {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        guard pasteboard.changeCount == ourChangeCount else { return }
+        pasteboard.clearContents()
+        pasteboard.writeObjects(savedItems)
+      }
+    }
 
     debugLog("[VoiceCoordinator] Dictation transcript pasted (\(trimmed.utf8.count) bytes)")
     state = .ready(Self.readyMessage(for: trimmed))
     returnToIdleAfterReady()
+  }
+
+  /// Whisper likes to end short command-like dictations with a period.
+  /// Strips a single trailing period when the text contains no other one.
+  static func strippingTrailingPeriod(_ text: String) -> String {
+    guard text.hasSuffix("."), !text.hasSuffix("..") else { return text }
+    let withoutLast = String(text.dropLast())
+    guard !withoutLast.contains(".") else { return text }
+    return withoutLast
   }
 
   private static func simulatePaste() {

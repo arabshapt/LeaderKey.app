@@ -28,6 +28,8 @@ final class MockVoiceAudioCapture: VoiceAudioCapturing {
     return captureResult
   }
 
+  func writeSessionSnapshot() -> URL? { nil }
+
   func stopCompletely() {
     isRecording = false
   }
@@ -232,6 +234,56 @@ final class VoiceCoordinatorTests: XCTestCase {
     transcriber.hangForever = false
     coordinator.handleDictateHoldKeyDown()
     XCTAssertEqual(coordinator.state, .recordingHold)
+  }
+
+  func testStrippingTrailingPeriod() {
+    XCTAssertEqual(VoiceCoordinator.strippingTrailingPeriod("open new tab."), "open new tab")
+    XCTAssertEqual(VoiceCoordinator.strippingTrailingPeriod("open new tab"), "open new tab")
+    // Multiple sentences keep their punctuation
+    XCTAssertEqual(
+      VoiceCoordinator.strippingTrailingPeriod("First. Second."), "First. Second.")
+    // Ellipses are preserved
+    XCTAssertEqual(VoiceCoordinator.strippingTrailingPeriod("wait..."), "wait...")
+    XCTAssertEqual(VoiceCoordinator.strippingTrailingPeriod("."), "")
+  }
+
+  func testConvertTo16kMonoWAVData() throws {
+    // Write a 0.25s 440Hz sine at 48kHz stereo float as the conversion input
+    let sourceURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("leaderkey-voice-convtest-\(UUID().uuidString).wav")
+    defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+    // Scope the writer so the WAV header is finalized before conversion reads it
+    try autoreleasepool {
+      let sourceFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
+      let sourceFile = try AVAudioFile(forWriting: sourceURL, settings: sourceFormat.settings)
+      let frameCount = AVAudioFrameCount(48000 * 0.25)
+      let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount)!
+      buffer.frameLength = frameCount
+      for frame in 0..<Int(frameCount) {
+        let sample = Float(sin(2.0 * Double.pi * 440.0 * Double(frame) / 48000.0)) * 0.5
+        buffer.floatChannelData![0][frame] = sample
+        buffer.floatChannelData![1][frame] = sample
+      }
+      try sourceFile.write(from: buffer)
+    }
+
+    let converted = try OpenAICompatibleSpeechToTextClient.convertTo16kMonoWAVData(
+      audioURL: sourceURL)
+    XCTAssertFalse(converted.isEmpty)
+
+    // Round-trip: the converted bytes must parse as a 16kHz mono WAV of ~0.25s
+    let convertedURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("leaderkey-voice-convtest-out-\(UUID().uuidString).wav")
+    defer { try? FileManager.default.removeItem(at: convertedURL) }
+    try converted.write(to: convertedURL)
+
+    let convertedFile = try AVAudioFile(forReading: convertedURL)
+    XCTAssertEqual(convertedFile.fileFormat.sampleRate, 16000)
+    XCTAssertEqual(convertedFile.fileFormat.channelCount, 1)
+    let expectedFrames = Double(16000) * 0.25
+    XCTAssertEqual(Double(convertedFile.length), expectedFrames, accuracy: expectedFrames * 0.1)
   }
 
   func testDeviceChangeInterruptionSurfacesErrorAndRecovers() {

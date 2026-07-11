@@ -162,7 +162,21 @@ struct VoicePane: View {
               Text("OpenAI-compatible endpoint POST {URL}/v1/audio/transcriptions. No API key required.")
                 .font(.callout)
                 .foregroundColor(.secondary)
+
+              Defaults.Toggle(
+                "Live partial transcripts while dictating (local server only)",
+                key: .voiceChunkedPreTranscription)
+
+              Text(
+                "Transcribes the growing clip every second while you hold the dictation key: the status menu shows words as you speak and the final request hits a warm server."
+              )
+                .font(.callout)
+                .foregroundColor(.secondary)
             }
+
+            Defaults.Toggle(
+              "Strip trailing period from short dictations",
+              key: .voiceDictationStripTrailingPeriod)
 
             if let keychainMessage {
               Text(keychainMessage)
