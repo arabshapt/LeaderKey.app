@@ -105,6 +105,7 @@
 		AA10000C2EB000010000000C /* VoiceDispatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000B2EB000010000000B /* VoiceDispatchBridge.swift */; };
 		AA20000C2EB000020000000C /* LKExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = AA20000B2EB000020000000B /* LKExceptionCatcher.m */; };
 		BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */; };
+		CD16D256FBA80A159CAFEC37 /* ShortcutsOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3951FF7A08492B35BF12022E /* ShortcutsOverviewView.swift */; };
 		E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */; };
 		F1A2B3C4D5E6F7A8B9C0D1E2 /* KeyLookupCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */; };
 /* End PBXBuildFile section */
@@ -149,6 +150,7 @@
 		26F868182E60C27100B5D464 /* Karabiner2InputMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Karabiner2InputMethod.swift; sourceTree = "<group>"; };
 		26F8681A2E60C27900B5D464 /* Karabiner2Exporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Karabiner2Exporter.swift; sourceTree = "<group>"; };
 		39029F0795999DCE42CA12E3 /* ControllerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ControllerTests.swift; sourceTree = "<group>"; };
+		3951FF7A08492B35BF12022E /* ShortcutsOverviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewView.swift; sourceTree = "<group>"; };
 		423632122D676F5200878D92 /* FileMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMonitor.swift; sourceTree = "<group>"; };
 		423632142D678F4400878D92 /* TestPlan.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = TestPlan.xctestplan; sourceTree = "<group>"; };
 		423632212D68CA6500878D92 /* MysteryBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MysteryBox.swift; sourceTree = "<group>"; };
@@ -413,6 +415,7 @@
 				115AA5BE2DA521C200C17E18 /* ActionIcon.swift */,
 				DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */,
 				AA00000C2EA0000100000012 /* CommandScoutView.swift */,
+				3951FF7A08492B35BF12022E /* ShortcutsOverviewView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -647,6 +650,7 @@
 				9253885043F54C408AE8E556 /* KarCompilerService.swift in Sources */,
 				A3D1E5F6B7C8D9E0F1A2B3C4 /* GokuCompilerService.swift in Sources */,
 				BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */,
+				CD16D256FBA80A159CAFEC37 /* ShortcutsOverviewView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
