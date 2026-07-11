@@ -83,6 +83,7 @@
 		526B4503A36B284D4B6B1D80 /* KarabinerExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C85DBA5C48D1E51C34144C8 /* KarabinerExporterTests.swift */; };
 		605385A32D523CAD00BEDB4B /* Pulsate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 605385A22D523CAD00BEDB4B /* Pulsate.swift */; };
 		606C56EF2DAB875A00198B9F /* Cheater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606C56EE2DAB875A00198B9F /* Cheater.swift */; };
+		62B678F50D31B911D994A129 /* ShortcutsOverviewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */; };
 		750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */; };
 		7FDB1FCD1908EF321F80682E /* NativeConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC109206B4BE2C10874ACC7 /* NativeConfigEditorView.swift */; };
 		9253885043F54C408AE8E556 /* KarCompilerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81C56852E87F62B725200981 /* KarCompilerService.swift */; };
@@ -103,6 +104,7 @@
 		AA10000A2EB000010000000A /* VoicePromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000092EB0000100000009 /* VoicePromptBuilder.swift */; };
 		AA10000C2EB000010000000C /* VoiceDispatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000B2EB000010000000B /* VoiceDispatchBridge.swift */; };
 		AA20000C2EB000020000000C /* LKExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = AA20000B2EB000020000000B /* LKExceptionCatcher.m */; };
+		BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */; };
 		E6142145EB0D142876EF5FA2 /* KarCompilerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058F6E1A57F127FC2C8BF259 /* KarCompilerServiceTests.swift */; };
 		F1A2B3C4D5E6F7A8B9C0D1E2 /* KeyLookupCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */; };
 /* End PBXBuildFile section */
@@ -189,8 +191,10 @@
 		42F4CDCE2D46E2B300D0DD76 /* Cheatsheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheatsheet.swift; sourceTree = "<group>"; };
 		42F4CDD02D48C51F00D0DD76 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		42FDC3192D51687B004F5C5C /* AdvancedPane.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AdvancedPane.swift; sourceTree = "<group>"; };
+		5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModel.swift; sourceTree = "<group>"; };
 		605385A22D523CAD00BEDB4B /* Pulsate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pulsate.swift; sourceTree = "<group>"; };
 		606C56EE2DAB875A00198B9F /* Cheater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cheater.swift; sourceTree = "<group>"; };
+		6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShortcutsOverviewModelTests.swift; sourceTree = "<group>"; };
 		81C56852E87F62B725200981 /* KarCompilerService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KarCompilerService.swift; sourceTree = "<group>"; };
 		88C62E8645370FE40FE22FAD /* Karabiner2ExporterKarConfigTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Karabiner2ExporterKarConfigTests.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* KeyLookupCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyLookupCacheTests.swift; sourceTree = "<group>"; };
@@ -263,6 +267,7 @@
 				427C18242BD31E2E00955B98 /* GeneralPane.swift */,
 				AA1000032EB0000100000003 /* VoicePane.swift */,
 				42FDC3192D51687B004F5C5C /* AdvancedPane.swift */,
+				5B6589FC74576831A3215C9F /* ShortcutsOverviewModel.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -381,6 +386,7 @@
 				AA0000052EA0000100000005 /* CommandScoutTests.swift */,
 				39029F0795999DCE42CA12E3 /* ControllerTests.swift */,
 				EC2437F004C7F3CB3343E5A1 /* VoiceCoordinatorTests.swift */,
+				6E7AE2450B9E941CCCB60408 /* ShortcutsOverviewModelTests.swift */,
 			);
 			path = "Leader KeyTests";
 			sourceTree = "<group>";
@@ -640,6 +646,7 @@
 				A0E527BE504D1E823832C517 /* KarabinerUserCommandReceiver.swift in Sources */,
 				9253885043F54C408AE8E556 /* KarCompilerService.swift in Sources */,
 				A3D1E5F6B7C8D9E0F1A2B3C4 /* GokuCompilerService.swift in Sources */,
+				BC30E0B5D7E2C0908DCC346B /* ShortcutsOverviewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -658,6 +665,7 @@
 				AA0000062EA0000100000006 /* CommandScoutTests.swift in Sources */,
 				08A5FDD3FC85750508E31740 /* ControllerTests.swift in Sources */,
 				750092155D46D804C945D8AA /* VoiceCoordinatorTests.swift in Sources */,
+				62B678F50D31B911D994A129 /* ShortcutsOverviewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
