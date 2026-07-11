@@ -509,8 +509,14 @@ final class CommandScoutTests: XCTestCase {
 
         let result = try await CommandScoutService.runAIInventoryScan(
             provider: provider,
-            appName: "Safari",
-            bundleId: "com.apple.Safari",
+            target: .app(
+                CommandScoutAppTarget(
+                    selectedConfigKey: "Safari",
+                    bundleId: "com.apple.Safari",
+                    appName: "Safari",
+                    appDisplayName: "Safari"
+                )
+            ),
             existingRoot: emptyRoot(),
             menuSuggestions: [],
             settings: settings
@@ -531,6 +537,96 @@ final class CommandScoutTests: XCTestCase {
         let url = try XCTUnwrap(success.suggestions.first { $0.actionType == .url })
         XCTAssertEqual(url.actionValue, "https://example.com/CaseSensitive")
         XCTAssertEqual(url.confidence, 0.9)
+    }
+
+    func testCommandScoutTargetsResolveSharedAndRegularScopesOnly() throws {
+        let config = UserConfig()
+
+        XCTAssertEqual(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: globalDefaultDisplayName,
+                userConfig: config
+            ),
+            .global
+        )
+        XCTAssertEqual(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: defaultAppConfigDisplayName,
+                userConfig: config
+            ),
+            .fallback
+        )
+        let appTarget = try XCTUnwrap(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: "App: com.example.App",
+                userConfig: config
+            )
+        )
+        XCTAssertEqual(appTarget.bundleId, "com.example.App")
+        XCTAssertTrue(appTarget.supportsMenuInventory)
+        XCTAssertEqual(appTarget.usageContext, UsageContext(scope: .app, bundleId: "com.example.App"))
+
+        XCTAssertNil(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: normalFallbackConfigDisplayName,
+                userConfig: config
+            )
+        )
+        XCTAssertNil(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: "Normal: com.example.App",
+                userConfig: config
+            )
+        )
+        XCTAssertNil(
+            CommandScoutTarget.resolve(
+                selectedConfigKey: "Tag: work",
+                userConfig: config
+            )
+        )
+    }
+
+    func testGlobalAIOnlyScanAllowsReviewedApplicationsURLsAndCommands() async throws {
+        let response = #"{"suggestions":[{"id":"app","title":"Safari","actionType":"application","actionValue":"Safari","suggestedSequence":"a","confidence":0.9},{"id":"url","title":"Docs","actionType":"url","actionValue":"https://example.com/CaseSensitive","suggestedSequence":"u","confidence":0.9},{"id":"command","title":"Cleanup","actionType":"command","actionValue":"echo review-me","suggestedSequence":"c","confidence":0.9},{"id":"menu","title":"Forbidden Menu","actionType":"menu","actionValue":"Safari > File > New","suggestedSequence":"m","confidence":0.9},{"id":"shortcut","title":"Forbidden Shortcut","actionType":"shortcut","actionValue":"Ct","suggestedSequence":"s","confidence":0.9}]}"#
+            .data(using: .utf8)!
+        let result = try await CommandScoutService.runAIInventoryScan(
+            provider: MockCommandScoutAIProvider(response: response),
+            target: .global,
+            existingRoot: emptyRoot(),
+            menuSuggestions: [
+                makeSuggestion(value: "Safari > File > Existing", title: "Existing Menu")
+            ],
+            settings: mockProviderSettings()
+        )
+
+        guard case .success(let success) = result else {
+            return XCTFail("Expected Global AI-only scan to succeed")
+        }
+        XCTAssertEqual(Set(success.suggestions.map(\.actionType)), [.application, .url, .command])
+        XCTAssertFalse(success.suggestions.contains(where: { $0.actionType == .menu }))
+        let command = try XCTUnwrap(success.suggestions.first(where: { $0.actionType == .command }))
+        XCTAssertTrue(command.actionType.requiresExplicitSelection)
+        XCTAssertTrue(command.reviewNotes.contains("Review this command"))
+        XCTAssertTrue(CommandScoutPrompts.systemPrompt(for: .global).contains("Global map"))
+    }
+
+    func testFallbackAIOnlyScanAllowsCrossAppShortcutsAndKeystrokesOnly() async throws {
+        let response = #"{"suggestions":[{"id":"shortcut","title":"Copy","actionType":"shortcut","actionValue":"Cc","suggestedSequence":"c","confidence":0.9},{"id":"keystroke","title":"Paste","actionType":"keystroke","actionValue":"Cv","suggestedSequence":"p","confidence":0.9},{"id":"menu","title":"Forbidden Menu","actionType":"menu","actionValue":"Safari > Edit > Copy","suggestedSequence":"m","confidence":0.9},{"id":"url","title":"Forbidden URL","actionType":"url","actionValue":"https://example.com","suggestedSequence":"u","confidence":0.9}]}"#
+            .data(using: .utf8)!
+        let result = try await CommandScoutService.runAIInventoryScan(
+            provider: MockCommandScoutAIProvider(response: response),
+            target: .fallback,
+            existingRoot: emptyRoot(),
+            menuSuggestions: [],
+            settings: mockProviderSettings()
+        )
+
+        guard case .success(let success) = result else {
+            return XCTFail("Expected Fallback AI-only scan to succeed")
+        }
+        XCTAssertEqual(Set(success.suggestions.map(\.actionType)), [.shortcut, .keystroke])
+        XCTAssertFalse(success.suggestions.contains(where: { $0.actionType == .menu }))
+        XCTAssertTrue(CommandScoutPrompts.systemPrompt(for: .fallback).contains("Fallback map"))
     }
 
     func testMenuAndAIMergeNormalizesOnlyMenuPathIdentity() {
@@ -1130,10 +1226,57 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(result.skippedMessages.count, 2)
     }
 
+    func testGenericApplyPathSupportsGlobalAndFallbackTargets() {
+        let globalSession = ConfigEditorSession()
+        globalSession.load(
+            root: emptyRoot(),
+            validationErrors: [],
+            selectedConfigKey: globalDefaultDisplayName,
+            preserveExpansion: false
+        )
+        let globalResult = globalSession.applyCommandScoutSuggestions([
+            makeSuggestion(
+                sequence: "a",
+                actionType: .application,
+                value: "Safari",
+                title: "Safari"
+            )
+        ])
+        XCTAssertEqual(globalResult.insertedCount, 1)
+        XCTAssertEqual(globalSession.root.actions.first?.item.type, .application)
+
+        let fallbackSession = ConfigEditorSession()
+        fallbackSession.load(
+            root: emptyRoot(),
+            validationErrors: [],
+            selectedConfigKey: defaultAppConfigDisplayName,
+            preserveExpansion: false
+        )
+        let fallbackResult = fallbackSession.applyCommandScoutSuggestions([
+            makeSuggestion(
+                sequence: "c",
+                actionType: .shortcut,
+                value: "Cc",
+                title: "Copy"
+            )
+        ])
+        XCTAssertEqual(fallbackResult.insertedCount, 1)
+        XCTAssertEqual(fallbackSession.root.actions.first?.item.type, .shortcut)
+    }
+
     // MARK: - Helpers
 
     private func emptyRoot() -> Group {
         Group(key: nil, label: "Root", stickyMode: nil, actions: [])
+    }
+
+    private func mockProviderSettings() -> CommandScoutProviderSettings {
+        CommandScoutProviderSettings(
+            providerKind: .gemini,
+            modelName: "mock",
+            baseURL: "",
+            webResearchEnabled: false
+        )
     }
 
     private func makeSuggestion(

@@ -8,7 +8,7 @@ struct CommandScoutView: View {
     @ObservedObject private var usageStats = UsageStatsStore.shared
     @Environment(\.dismiss) private var dismiss
 
-    let appContext: CommandScoutAppContext
+    let target: CommandScoutTarget
 
     @State private var suggestions: [CommandScoutSuggestion] = []
     @State private var selectedIDs: Set<String> = []
@@ -128,7 +128,7 @@ struct CommandScoutView: View {
     private var headerBar: some View {
         HStack {
             Image(systemName: "magnifyingglass")
-            Text("Command Scout — \(appContext.appDisplayName)")
+            Text("Command Scout — \(target.displayName)")
                 .font(.headline)
             Text(scanMode.displayName)
                 .font(.caption2)
@@ -265,9 +265,17 @@ struct CommandScoutView: View {
     }
 
     private var aiToggle: some View {
-        Toggle("AI", isOn: $aiEnabled)
-            .toggleStyle(.switch)
-            .controlSize(.small)
+        SwiftUI.Group {
+            if target.requiresAI {
+                Label("AI-only target", systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Toggle("AI", isOn: $aiEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+        }
     }
 
     private var providerPicker: some View {
@@ -567,7 +575,7 @@ struct CommandScoutView: View {
     }
 
     private var usageContext: UsageContext {
-        UsageContext(scope: .app, bundleId: appContext.bundleId)
+        target.usageContext
     }
 
     private var projectedUsageHeat: [String: UsageHeat] {
@@ -621,6 +629,10 @@ struct CommandScoutView: View {
         baseURL = Defaults[.commandScoutAIBaseURL]
         webResearchEnabled = Defaults[.commandScoutWebResearchEnabled]
         hasStoredKey = KeychainHelper.hasKey(account: providerKind.keychainAccount)
+        if target.requiresAI {
+            aiEnabled = true
+            scanMode = .aiOnly
+        }
     }
 
     private func saveAPIKey() {
@@ -649,8 +661,13 @@ struct CommandScoutView: View {
         scanError = nil
         scanNotice = nil
         lastAIParseDiagnostics = nil
-        scanMode = aiEnabled ? .menuAndAI : .menuOnly
-        statusMessage = scanMode == .menuOnly ? "Scanning menus..." : "Scanning menus before AI..."
+        let shouldRunAI = aiEnabled || target.requiresAI
+        scanMode = target.supportsMenuInventory
+            ? (shouldRunAI ? .menuAndAI : .menuOnly)
+            : .aiOnly
+        statusMessage = target.supportsMenuInventory
+            ? (shouldRunAI ? "Scanning menus before AI..." : "Scanning menus...")
+            : "Preparing AI-only scan..."
 
         // Save provider settings
         Defaults[.commandScoutAIProvider] = providerKind
@@ -659,18 +676,29 @@ struct CommandScoutView: View {
         Defaults[.commandScoutWebResearchEnabled] = webResearchEnabled
 
         scanTask = Task {
-            let menuResult = await CommandScoutService.scanMenuSuggestionResult(appName: appContext.appName)
+            let menuResult: CommandScoutMenuSuggestionResult
+            if target.supportsMenuInventory, let appName = target.appName {
+                menuResult = await CommandScoutService.scanMenuSuggestionResult(appName: appName)
+            } else {
+                menuResult = CommandScoutMenuSuggestionResult(suggestions: [], errorMessage: nil)
+            }
             guard !Task.isCancelled else { return }
-            let resolvedMode = CommandScoutService.resolvedScanMode(
-                aiEnabled: aiEnabled,
-                menuResult: menuResult
-            )
+            let resolvedMode = target.supportsMenuInventory
+                ? CommandScoutService.resolvedScanMode(
+                    aiEnabled: shouldRunAI,
+                    menuResult: menuResult
+                )
+                : .aiOnly
 
             await MainActor.run {
                 guard activeScanID == scanID else { return }
                 scanMode = resolvedMode
                 suggestions = menuResult.suggestions
-                if resolvedMode == .aiOnly, menuResult.isAppNotRunning {
+                if !target.supportsMenuInventory {
+                    scanError = nil
+                    scanNotice = "Shared configurations use AI-only suggestions; menu actions are excluded."
+                    statusMessage = "AI-only \(target.displayName) scan"
+                } else if resolvedMode == .aiOnly, menuResult.isAppNotRunning {
                     scanError = nil
                     scanNotice = "The app is not running. Continuing with an informational AI-only scan; menu paths cannot be verified."
                     statusMessage = "AI-only scan (app not running)"
@@ -684,7 +712,7 @@ struct CommandScoutView: View {
             }
 
             guard !Task.isCancelled else { return }
-            if aiEnabled {
+            if shouldRunAI {
                 await runAIScan(existingMenuSuggestions: menuResult.suggestions, scanID: scanID)
             }
 
@@ -732,8 +760,7 @@ struct CommandScoutView: View {
         do {
             let result = try await CommandScoutService.runAIInventoryScan(
                 provider: provider,
-                appName: appContext.appName,
-                bundleId: appContext.bundleId,
+                target: target,
                 existingRoot: session.root,
                 menuSuggestions: existingMenuSuggestions,
                 settings: settings
@@ -912,8 +939,8 @@ struct CommandScoutView: View {
             webResearchEnabled: webResearchEnabled
         )
         let bundle = CommandScoutService.debugBundle(
-            appName: appContext.appName,
-            bundleId: appContext.bundleId,
+            appName: target.displayName,
+            bundleId: target.debugBundleIdentifier,
             statusMessage: statusMessage,
             scanError: scanError,
             providerSettings: settings,

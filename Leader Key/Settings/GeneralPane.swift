@@ -259,7 +259,10 @@ struct GeneralPane: View {
                   }
 
                   if useNativeOutlineConfigEditor,
-                    config.extractRegularAppBundleId(from: config.selectedConfigKeyForEditing) != nil
+                    CommandScoutTarget.resolve(
+                      selectedConfigKey: config.selectedConfigKeyForEditing,
+                      userConfig: config
+                    ) != nil
                   {
                     Button {
                       openCommandScout(forConfigKey: config.selectedConfigKeyForEditing)
@@ -487,8 +490,8 @@ struct GeneralPane: View {
       commandScoutConfigKeyToPresent = nil
     }) {
       if let selected = commandScoutConfigKeyToPresent,
-         let appContext = CommandScoutAppContext.resolve(selectedConfigKey: selected, userConfig: config) {
-        CommandScoutView(session: nativeEditorSession, appContext: appContext)
+         let target = CommandScoutTarget.resolve(selectedConfigKey: selected, userConfig: config) {
+        CommandScoutView(session: nativeEditorSession, target: target)
           .environmentObject(config)
       }
     }
@@ -557,10 +560,10 @@ struct GeneralPane: View {
       showCommandScoutMissingConfig("Command Scout requires the native outline editor.")
       return
     }
-    guard config.discoveredConfigFiles[configKey] != nil,
-      config.extractRegularAppBundleId(from: configKey) != nil
-    else {
-      showCommandScoutMissingConfig("Create an app-specific config before opening Command Scout.")
+    guard CommandScoutTarget.resolve(selectedConfigKey: configKey, userConfig: config) != nil else {
+      showCommandScoutMissingConfig(
+        "Command Scout supports Global, Fallback, and regular app configurations."
+      )
       return
     }
 

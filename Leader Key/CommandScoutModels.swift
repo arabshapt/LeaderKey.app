@@ -268,26 +268,91 @@ enum CommandScoutAIInventoryResult: Equatable {
   case parseFailure(CommandScoutAIParseDiagnostics)
 }
 
-struct CommandScoutAppContext: Equatable {
+struct CommandScoutAppTarget: Equatable, Sendable {
   let selectedConfigKey: String
   let bundleId: String
   let appName: String
   let appDisplayName: String
+}
 
-  static func resolve(selectedConfigKey: String, userConfig: UserConfig) -> CommandScoutAppContext? {
-    guard let bundleId = userConfig.extractRegularAppBundleId(from: selectedConfigKey) else { return nil }
+enum CommandScoutTarget: Equatable, Sendable {
+  case app(CommandScoutAppTarget)
+  case global
+  case fallback
 
-    let runningApp = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleId }
-    let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
-    let fallbackName = appURL?.deletingPathExtension().lastPathComponent
-    let displayName = runningApp?.localizedName ?? fallbackName ?? selectedConfigKey
+  static func resolve(selectedConfigKey: String, userConfig: UserConfig) -> CommandScoutTarget? {
+    switch userConfig.configFileKind(forDisplayKey: selectedConfigKey) {
+    case .global:
+      return .global
+    case .appFallback:
+      return .fallback
+    case .app(let bundleId):
+      let runningApp = NSWorkspace.shared.runningApplications.first {
+        $0.bundleIdentifier == bundleId
+      }
+      let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+      let fallbackName = appURL?.deletingPathExtension().lastPathComponent
+      let displayName = runningApp?.localizedName ?? fallbackName ?? selectedConfigKey
 
-    return CommandScoutAppContext(
-      selectedConfigKey: selectedConfigKey,
-      bundleId: bundleId,
-      appName: displayName,
-      appDisplayName: displayName
-    )
+      return .app(
+        CommandScoutAppTarget(
+          selectedConfigKey: selectedConfigKey,
+          bundleId: bundleId,
+          appName: displayName,
+          appDisplayName: displayName
+        )
+      )
+    case .normalFallback, .normalApp, .tag, .normalTag, .unknown:
+      return nil
+    }
+  }
+
+  var displayName: String {
+    switch self {
+    case .app(let app): return app.appDisplayName
+    case .global: return globalDefaultDisplayName
+    case .fallback: return defaultAppConfigDisplayName
+    }
+  }
+
+  var appName: String? {
+    guard case .app(let app) = self else { return nil }
+    return app.appName
+  }
+
+  var bundleId: String? {
+    guard case .app(let app) = self else { return nil }
+    return app.bundleId
+  }
+
+  var usageContext: UsageContext {
+    switch self {
+    case .app(let app): return UsageContext(scope: .app, bundleId: app.bundleId)
+    case .global: return UsageContext(scope: .global)
+    case .fallback: return UsageContext(scope: .fallback)
+    }
+  }
+
+  var supportsMenuInventory: Bool {
+    if case .app = self { return true }
+    return false
+  }
+
+  var requiresAI: Bool { !supportsMenuInventory }
+
+  var allowedActionTypes: Set<CommandScoutActionType> {
+    switch self {
+    case .app:
+      return [.menu, .shortcut, .keystroke, .url]
+    case .global:
+      return [.application, .url, .command]
+    case .fallback:
+      return [.shortcut, .keystroke]
+    }
+  }
+
+  var debugBundleIdentifier: String {
+    bundleId ?? usageContext.scope.rawValue
   }
 }
 
@@ -358,15 +423,15 @@ enum CommandScoutAIParseResult: Equatable {
 }
 
 enum CommandScoutError: LocalizedError {
-  case missingAppContext
+  case missingTarget
   case missingAPIKey
   case invalidProviderResponse(String)
   case httpFailure(statusCode: Int, body: String)
 
   var errorDescription: String? {
     switch self {
-    case .missingAppContext:
-      return "Command Scout requires an app-specific config."
+    case .missingTarget:
+      return "Command Scout requires a Global, Fallback, or regular app config."
     case .missingAPIKey:
       return "Add an API key or run a menu-only scan."
     case .invalidProviderResponse(let message):
@@ -415,44 +480,86 @@ enum CommandScoutSequenceNormalizer {
 }
 
 enum CommandScoutPrompts {
-  static let systemPrompt = """
+  static func systemPrompt(for target: CommandScoutTarget) -> String {
+    let scopeRules: String
+    switch target {
+    case .app:
+      scopeRules = """
+        Include live menu commands and reliable app shortcuts or keystrokes. Menu values must exactly match the supplied inventory.
+        """
+    case .global:
+      scopeRules = """
+        This is the Global map. Suggest useful applications, URLs, and commands only. Commands require explicit human review. Never return menu, shortcut, or keystroke actions.
+        """
+    case .fallback:
+      scopeRules = """
+        This is the cross-app Fallback map. Suggest portable shortcuts and keystrokes only. Never return menu, application, URL, or command actions.
+        """
+    }
+
+    return """
     You are Command Scout for Leader Key, a keyboard-driven launcher for macOS. Return strict JSON only — no markdown, no prose.
 
-    Your job: suggest the most useful app commands and assign mnemonic key sequences for a Leader Key config. A sequence is 1-3 compact, case-sensitive keys pressed in order (e.g. "tn" = Tabs → New, "tN" uses uppercase N). Sequences should be short, intuitive, grouped by category prefix, and must never contain spaces.
+    Your job: suggest useful actions and assign mnemonic key sequences for a Leader Key config. A sequence is 1-3 compact, case-sensitive keys pressed in order (e.g. "tn" = Tabs → New, "tN" uses uppercase N). Sequences should be short, intuitive, grouped by category prefix, and must never contain spaces.
 
     Rules:
-    - Include BOTH menu commands from the live inventory AND shortcuts/keystrokes not in the menu.
-    - Do NOT invent shortcuts. Only suggest well-known, reliable shortcuts for the app. Mark uncertain ones as low confidence.
-    - For menu actions, actionValue = "AppName > Menu > Item" exactly matching the inventory.
+    - \(scopeRules)
+    - Do NOT invent shortcuts. Only suggest well-known, reliable shortcuts. Mark uncertain ones as low confidence.
     - For each suggestion, include a suggestedSequence as a compact 1-3 character string. Allowed keys are ASCII a-z, A-Z, 0-9, comma, period, slash, semicolon, quote, minus, equals, brackets, and backslash. Preserve exact case. Slash and comma are literal keys, never separators.
     - Category prefixes: t=Tabs, w=Windows, n=Navigation, e=Editing, v=View, d=Developer, b=Bookmarks, s=Search, h=History, f=File, p=Privacy, m=Misc.
     - Avoid collisions between sequences. If two commands share a prefix, use 2-3 keys.
     - Aim for 15-30 suggestions covering the app's most valuable workflows.
     """
+  }
 
   static func inventoryPrompt(
-    appName: String,
-    bundleId: String,
+    target: CommandScoutTarget,
     existingConfigSummary: String,
     fallbackSummary: String,
     menuItemsJSON: String,
     webResearchEnabled: Bool
   ) -> String {
-    """
-    App: \(appName)
-    Bundle ID: \(bundleId)
+    let targetDetails: String
+    let actionRules: String
+    switch target {
+    case .app(let app):
+      targetDetails = "App: \(app.appName)\nBundle ID: \(app.bundleId)"
+      actionRules = """
+        Allowed action types: menu, shortcut, keystroke, url
+        - For menu actions, actionValue must be "\(app.appName) > <exact menu path>"
+        - source: "liveMenu" if from the menu inventory, "ai" if from your knowledge
+        """
+    case .global:
+      targetDetails = "Target: Global"
+      actionRules = """
+        Allowed action types: application, url, command
+        - Application values must name a real macOS application.
+        - URL values must be legitimate URLs.
+        - Commands must be useful, explicit, and marked in sourceNotes as requiring review.
+        - Never return menu, shortcut, or keystroke actions.
+        """
+    case .fallback:
+      targetDetails = "Target: Fallback"
+      actionRules = """
+        Allowed action types: shortcut, keystroke
+        - Suggest only reliable cross-app shortcuts and keystrokes.
+        - Never return menu, application, URL, or command actions.
+        """
+    }
+
+    return """
+    \(targetDetails)
     Existing Leader Key config: \(existingConfigSummary)
     Fallback config summary: \(fallbackSummary)
     Live menu inventory: \(menuItemsJSON)
-    Allowed action types: menu, shortcut, keystroke, url
+    \(actionRules)
     Web research enabled: \(webResearchEnabled)
 
     Return JSON: {"suggestions": [{title, category, source, actionType, actionValue, suggestedSequence, description, aiDescription, confidence, sourceNotes}]}
 
-    - source: "liveMenu" if from the menu inventory, "ai" if from your knowledge
+    - source: "ai" unless the action exactly matches a supplied live menu item
     - suggestedSequence: compact, case-sensitive mnemonic key path like "tn" (tabs → new). Allowed punctuation keys include comma, period, slash, semicolon, quote, minus, equals, brackets, and backslash. Spaces are invalid.
     - confidence: number 0-1 (0.9 = very sure, 0.5 = uncertain)
-    - For menu actions, actionValue must be "\(appName) > <exact menu path>"
     - Include the most useful 15-30 commands. Prioritize daily-use actions.
     """
   }

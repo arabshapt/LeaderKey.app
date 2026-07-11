@@ -53,7 +53,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
   - [x] Opt-in local store, persistence, directory switching, and Clear History
   - [x] Regular shortcut invocation telemetry
   - [x] Heat, ranking, and pruning evidence consumers
-- [ ] T3.6 Global/fallback scouting
+- [x] T3.6 Global/fallback scouting
 
 ## Stage H — Cheatsheet + low cleanups (T1.4/T1.5)
 - [ ] T1.4 Cheatsheet window reuse for .always

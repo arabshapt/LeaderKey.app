@@ -102,8 +102,7 @@ class CommandScoutService {
 
     static func runAIInventoryScan(
         provider: AIProviderClient,
-        appName: String,
-        bundleId: String,
+        target: CommandScoutTarget,
         existingRoot: Group,
         menuSuggestions: [CommandScoutSuggestion],
         settings: CommandScoutProviderSettings
@@ -133,28 +132,42 @@ class CommandScoutService {
         }
 
         let prompt = CommandScoutPrompts.inventoryPrompt(
-            appName: appName,
-            bundleId: bundleId,
+            target: target,
             existingConfigSummary: configSummary,
             fallbackSummary: "N/A",
             menuItemsJSON: menuItemsJSON,
             webResearchEnabled: settings.webResearchEnabled && provider.supportsWebResearch
         )
         let data = try await provider.generateJSON(
-            system: CommandScoutPrompts.systemPrompt,
+            system: CommandScoutPrompts.systemPrompt(for: target),
             prompt: prompt
         )
 
         switch parseAISuggestionsResult(data) {
         case .success(let aiSuggestions, let diagnostics):
+            let scopedAISuggestions = aiSuggestions.compactMap { suggestion -> CommandScoutSuggestion? in
+                guard target.allowedActionTypes.contains(suggestion.actionType) else { return nil }
+                var scopedSuggestion = suggestion
+                if target == .global, scopedSuggestion.actionType == .command {
+                    let reviewNote = "Review this command before applying it."
+                    if scopedSuggestion.reviewNotes.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty {
+                        scopedSuggestion.reviewNotes = reviewNote
+                    } else if !scopedSuggestion.reviewNotes.contains(reviewNote) {
+                        scopedSuggestion.reviewNotes += " \(reviewNote)"
+                    }
+                }
+                return scopedSuggestion
+            }
             let mergeResult = mergeMenuAndAISuggestions(
-                menuSuggestions: menuSuggestions,
-                aiSuggestions: aiSuggestions
+                menuSuggestions: target.supportsMenuInventory ? menuSuggestions : [],
+                aiSuggestions: scopedAISuggestions
             )
             return .success(
                 CommandScoutAIInventorySuccess(
                     suggestions: mergeResult.suggestions,
-                    aiSuggestionCount: aiSuggestions.count,
+                    aiSuggestionCount: scopedAISuggestions.count,
                     addedCount: mergeResult.addedCount,
                     diagnostics: diagnostics
                 ))
