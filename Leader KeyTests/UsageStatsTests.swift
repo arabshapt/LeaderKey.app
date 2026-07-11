@@ -28,6 +28,18 @@ final class UsageStatsTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: usageFile(in: directory).path))
   }
 
+  func testTelemetryPayloadRoundTripPreservesExactKeysAndRejectsMalformedInput() throws {
+    let context = UsageContext(scope: .app, bundleId: "com.example.App")
+    let payload = try XCTUnwrap(UsageTelemetryPayload(context: context, keys: ["t", "N", "/"]))
+
+    XCTAssertEqual(UsageTelemetryPayload(dictionary: payload.dictionary), payload)
+    XCTAssertEqual(payload.dictionary["v"] as? Int, 1)
+    XCTAssertEqual(payload.dictionary["type"] as? String, "usage")
+    XCTAssertEqual(payload.dictionary["bundleId"] as? String, "com.example.App")
+    XCTAssertNil(UsageTelemetryPayload(dictionary: ["v": 2, "type": "usage", "scope": "app", "keys": ["a"]]))
+    XCTAssertNil(UsageTelemetryPayload(dictionary: ["v": 1, "type": "usage", "scope": "app", "keys": []]))
+  }
+
   func testRecordFlushAndLoadRoundTripPreservesExactKeysAndContext() throws {
     let directory = makeTemporaryDirectory()
     let observedAt = Date(timeIntervalSince1970: 1_700_000_000)

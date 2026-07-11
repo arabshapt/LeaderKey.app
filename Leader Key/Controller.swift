@@ -27,6 +27,9 @@ class Controller {
   var userConfig: UserConfig
   weak var appDelegate: AppDelegate?  // Add weak reference to AppDelegate
   var keyLookupCache: KeyLookupCache?  // O(1) key lookup, set by AppDelegate on sequence start
+  var usageRecorder: (UsageContext, [String]) -> Void = { context, keys in
+    UsageStatsStore.shared.record(context: context, keys: keys)
+  }
 
   var window: MainWindow!
   private var cheatsheetWindow: NSWindow?
@@ -314,6 +317,7 @@ class Controller {
 
     switch hit {
     case .action(let action):
+      recordUsageAttempt(for: key)
       if let mods = modifiers, isInStickyMode(mods) {
         runAction(action)
       } else {
@@ -351,6 +355,22 @@ class Controller {
     delay(1) {
       self.positionCheatsheetWindow()
     }
+  }
+
+  private func recordUsageAttempt(for key: String) {
+    guard Defaults[.usageTrackingEnabled] else { return }
+
+    let context: UsageContext
+    if userState.activeConfigKey == globalDefaultDisplayName {
+      context = UsageContext(scope: .global)
+    } else if let bundleId = userState.activeBundleId {
+      context = UsageContext(scope: .app, bundleId: bundleId)
+    } else {
+      context = UsageContext(scope: .fallback)
+    }
+
+    let keys = userState.navigationPath.compactMap(\.key) + [key]
+    usageRecorder(context, keys)
   }
 
   private func shouldRunGroupSequence(_ event: NSEvent) -> Bool {

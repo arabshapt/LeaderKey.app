@@ -19,6 +19,51 @@ struct UsageContext: Codable, Hashable {
   }
 }
 
+struct UsageTelemetryPayload: Equatable {
+  static let version = 1
+  static let payloadType = "usage"
+
+  let context: UsageContext
+  let keys: [String]
+
+  init?(context: UsageContext, keys: [String]) {
+    guard !keys.isEmpty, keys.allSatisfy({ !$0.isEmpty }) else { return nil }
+    self.context = context
+    self.keys = keys
+  }
+
+  init?(dictionary: [String: Any]) {
+    guard
+      dictionary["v"] as? Int == Self.version,
+      dictionary["type"] as? String == Self.payloadType,
+      let rawScope = dictionary["scope"] as? String,
+      let scope = UsageScope(rawValue: rawScope),
+      let keys = dictionary["keys"] as? [String],
+      !keys.isEmpty,
+      keys.allSatisfy({ !$0.isEmpty })
+    else {
+      return nil
+    }
+
+    let bundleId = dictionary["bundleId"] as? String
+    self.context = UsageContext(scope: scope, bundleId: scope == .app ? bundleId : nil)
+    self.keys = keys
+  }
+
+  var dictionary: [String: Any] {
+    var payload: [String: Any] = [
+      "v": Self.version,
+      "type": Self.payloadType,
+      "scope": context.scope.rawValue,
+      "keys": keys,
+    ]
+    if context.scope == .app, let bundleId = context.bundleId {
+      payload["bundleId"] = bundleId
+    }
+    return payload
+  }
+}
+
 struct UsageRecord: Codable, Equatable {
   let context: UsageContext
   let keys: [String]

@@ -51,7 +51,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T3.4 AI-only mode for non-running apps
 - [ ] T3.5 UsageStats (default-off) + Scout/viz consumers
   - [x] Opt-in local store, persistence, directory switching, and Clear History
-  - [ ] Regular shortcut invocation telemetry
+  - [x] Regular shortcut invocation telemetry
   - [ ] Heat, ranking, and pruning evidence consumers
 - [ ] T3.6 Global/fallback scouting
 

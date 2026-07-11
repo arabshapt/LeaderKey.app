@@ -37,12 +37,49 @@ class ControllerTests: XCTestCase {
   }
 
   override func tearDownWithError() throws {
+    Defaults[.usageTrackingEnabled] = false
     controller = nil
     mockUserState = nil
     mockUserConfig = nil
     mockAppDelegate = nil
     try? FileManager.default.removeItem(atPath: tempConfigDir)
     defaultsSuite = originalSuite
+  }
+
+  func testHandleKeyRecordsExactAttemptAtTerminalOnly() {
+    let action = Action(
+      key: "N",
+      type: .normalModeDisable,
+      label: "Disable",
+      value: "",
+      iconPath: nil,
+      activates: nil,
+      stickyMode: nil,
+      macroSteps: nil
+    )
+    let group = Group(
+      key: "t",
+      label: "Tools",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(action)]
+    )
+    mockUserConfig.root.actions = [.group(group)]
+    mockUserState.activeRoot = mockUserConfig.root
+    mockUserState.activeConfigKey = "Example"
+    mockUserState.activeBundleId = "com.example.App"
+
+    var attempts: [(UsageContext, [String])] = []
+    controller.usageRecorder = { attempts.append(($0, $1)) }
+    Defaults[.usageTrackingEnabled] = true
+
+    controller.handleKey("t")
+    XCTAssertTrue(attempts.isEmpty)
+    controller.handleKey("N", withModifiers: [.option])
+
+    XCTAssertEqual(attempts.count, 1)
+    XCTAssertEqual(attempts.first?.0, UsageContext(scope: .app, bundleId: "com.example.App"))
+    XCTAssertEqual(attempts.first?.1, ["t", "N"])
   }
 
   // Test shortcut parsing logic

@@ -255,6 +255,13 @@ final class KarabinerUserCommandReceiver {
 
   private func handleV1Payload(type: String, dict: [String: Any]) {
     switch type {
+    case UsageTelemetryPayload.payloadType:
+      guard let payload = UsageTelemetryPayload(dictionary: dict) else {
+        debugLog("[KarabinerUserCommandReceiver] Invalid v1 usage payload")
+        return
+      }
+      UsageStatsStore.shared.record(context: payload.context, keys: payload.keys)
+
     case "open_app":
       guard let app = dict["app"] as? String else {
         debugLog("[KarabinerUserCommandReceiver] v1 open_app missing 'app'")

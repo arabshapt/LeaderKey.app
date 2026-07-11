@@ -964,6 +964,11 @@ extension AppDelegate {
             await self?.refreshExportForPreferenceChange()
           }
         }
+        group.addTask {
+          for await _ in Defaults.updates(.usageTrackingEnabled) {
+            await self?.refreshExportForPreferenceChange()
+          }
+        }
       }
     }
   }

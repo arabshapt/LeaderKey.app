@@ -441,6 +441,7 @@ final class Karabiner2Exporter {
 
   static var alternativeMappingsOverride: [AlternativeMapping]?
   static var stateIdOverride: (([String], String?) -> Int32?)?
+  static var usageTrackingEnabledOverride: Bool?
 
   private static func currentAlternativeMappings() -> [AlternativeMapping] {
     alternativeMappingsOverride ?? AlternativeMappingsManager.shared.mappings
@@ -2552,19 +2553,25 @@ final class Karabiner2Exporter {
         let staticStickyMode = terminalActionHasStickyMode(for: node)
         if !staticStickyMode {
           guard
-            var stickyMapping = generateKarTerminalActionMapping(
-              key: key,
-              toState: stateId,
-              hasStickyMode: true,
-              node: node,
-              bundleId: commandBundleId
+            var stickyMapping = addingUsageTelemetry(
+              to: generateKarTerminalActionMapping(
+                key: key,
+                toState: stateId,
+                hasStickyMode: true,
+                node: node,
+                bundleId: commandBundleId
+              ),
+              for: binding
             ),
-            var nonStickyMapping = generateKarTerminalActionMapping(
-              key: key,
-              toState: stateId,
-              hasStickyMode: false,
-              node: node,
-              bundleId: commandBundleId
+            var nonStickyMapping = addingUsageTelemetry(
+              to: generateKarTerminalActionMapping(
+                key: key,
+                toState: stateId,
+                hasStickyMode: false,
+                node: node,
+                bundleId: commandBundleId
+              ),
+              for: binding
             )
           else {
             return []
@@ -2582,12 +2589,15 @@ final class Karabiner2Exporter {
           return [stickyMapping, nonStickyMapping]
         }
 
-        mapping = generateKarTerminalActionMapping(
-          key: key,
-          toState: stateId,
-          hasStickyMode: true,
-          node: node,
-          bundleId: commandBundleId
+        mapping = addingUsageTelemetry(
+          to: generateKarTerminalActionMapping(
+            key: key,
+            toState: stateId,
+            hasStickyMode: true,
+            node: node,
+            bundleId: commandBundleId
+          ),
+          for: binding
         )
 
       case .suppress:
@@ -2609,6 +2619,35 @@ final class Karabiner2Exporter {
       conditioned["condition"] = [variableCondition(name: "leader_state", value: binding.parentStateId)]
       return [conditioned]
     }
+  }
+
+  private static func addingUsageTelemetry(
+    to mapping: [String: Any]?,
+    for binding: ManagedBinding
+  ) -> [String: Any]? {
+    guard usageTrackingEnabledOverride ?? Defaults[.usageTrackingEnabled], var mapping else {
+      return mapping
+    }
+
+    let context: UsageContext
+    switch binding.scope {
+    case .global:
+      context = UsageContext(scope: .global)
+    case .appShared, .fallbackOnly:
+      context = UsageContext(scope: .fallback)
+    case .appOverride:
+      context = UsageContext(scope: .app, bundleId: binding.bundleId)
+    case .appSuppress, .normalShared, .normalOverride, .normalSuppress:
+      return mapping
+    }
+
+    guard let payload = UsageTelemetryPayload(context: context, keys: binding.originalPath) else {
+      return mapping
+    }
+    var events = mapping["to"] as? [Any] ?? []
+    events.insert(["send_user_command": ["payload": payload.dictionary]], at: 0)
+    mapping["to"] = events
+    return mapping
   }
 
   private static func universalKarCatchAllMapping() -> [String: Any] {

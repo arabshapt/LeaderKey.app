@@ -15,16 +15,122 @@ final class Karabiner2BackendTests: XCTestCase {
 }
 
 final class Karabiner2ExporterKarabinerTSExportTests: XCTestCase {
+  private static let overrideLock = NSLock()
+
   override func setUp() {
     super.setUp()
+    Self.overrideLock.lock()
     Karabiner2Exporter.alternativeMappingsOverride = []
     Karabiner2Exporter.stateIdOverride = nil
+    Karabiner2Exporter.usageTrackingEnabledOverride = false
   }
 
   override func tearDown() {
     Karabiner2Exporter.alternativeMappingsOverride = nil
     Karabiner2Exporter.stateIdOverride = nil
+    Karabiner2Exporter.usageTrackingEnabledOverride = nil
+    Defaults[.usageTrackingEnabled] = false
+    Self.overrideLock.unlock()
     super.tearDown()
+  }
+
+  func testUsageTelemetryIsDefaultOffAndPreservesShortcutEventOrderingWhenEnabled() throws {
+    let config = UserConfig()
+    config.root.actions = [
+      .group(
+        Group(
+          key: "t",
+          label: "Tools",
+          iconPath: nil,
+          stickyMode: true,
+          actions: [.action(makeShortcutAction(key: "N", label: "New", value: "Ct"))]
+        )
+      )
+    ]
+
+    Karabiner2Exporter.usageTrackingEnabledOverride = false
+    let disabled = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let disabledGlobalRule = try XCTUnwrap(disabled.managedRules.first(where: {
+      $0["description"] as? String == "LeaderKeyManaged/GlobalMode"
+    }))
+    XCTAssertFalse(
+      flattenManipulators(from: [disabledGlobalRule]).contains(where: { manipulator in
+        structuredPayloads(manipulator: manipulator).contains(where: { $0["type"] as? String == "usage" })
+      })
+    )
+
+    Karabiner2Exporter.usageTrackingEnabledOverride = true
+    let enabled = try Karabiner2Exporter.generateKarabinerTSExport(globalConfig: config, appConfigs: [])
+    let enabledGlobalRule = try XCTUnwrap(enabled.managedRules.first(where: {
+      $0["description"] as? String == "LeaderKeyManaged/GlobalMode"
+    }))
+    let terminal = try XCTUnwrap(flattenManipulators(from: [enabledGlobalRule]).first(where: { manipulator in
+      structuredPayloads(manipulator: manipulator).contains(where: {
+        $0["type"] as? String == "usage" && $0["keys"] as? [String] == ["t", "N"]
+      })
+    }))
+    let payload = try XCTUnwrap(structuredPayloads(manipulator: terminal).first(where: {
+      $0["type"] as? String == "usage"
+    }))
+    XCTAssertEqual(payload["scope"] as? String, "global")
+    XCTAssertEqual(payload["keys"] as? [String], ["t", "N"])
+
+    let events = toEvents(in: terminal)
+    XCTAssertEqual((events.first as? [String: Any])?["send_user_command"] != nil, true)
+    XCTAssertTrue(eventHasSetVariable(events[1], name: "leaderkey_sticky", value: 1))
+    XCTAssertTrue(eventHasKeyCode(try XCTUnwrap(events.last), keyCode: "t"))
+  }
+
+  func testUsageTelemetryScopesFallbackAndAppOverridesButExcludesNormalMode() throws {
+    let fallbackRoot = Group(
+      key: nil,
+      label: "Fallback",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(makeCommandAction(key: "f", label: "Fallback", value: "echo fallback"))]
+    )
+    let appConfig = UserConfig()
+    appConfig.root.actions = [
+      .action(makeCommandAction(key: "a", label: "App", value: "echo app"))
+    ]
+    let normalRoot = Group(
+      key: nil,
+      label: "Normal",
+      iconPath: nil,
+      stickyMode: nil,
+      actions: [.action(makeCommandAction(key: "n", label: "Normal", value: "echo normal"))]
+    )
+
+    Karabiner2Exporter.usageTrackingEnabledOverride = true
+    try withTemporaryConfigDirectory(fallbackRoot: fallbackRoot, normalFallbackRoot: normalRoot) {
+      let export = try Karabiner2Exporter.generateKarabinerTSExport(
+        globalConfig: UserConfig(),
+        appConfigs: [(bundleId: "com.example.App", config: appConfig, customName: "Example")]
+      )
+
+      let fallbackRule = try XCTUnwrap(export.managedRules.first(where: {
+        $0["description"] as? String == "LeaderKeyManaged/FallbackMode"
+      }))
+      let appRule = try XCTUnwrap(export.managedRules.first(where: {
+        ($0["description"] as? String)?.hasPrefix("LeaderKeyManaged/AppMode/") == true
+      }))
+      let normalRule = try XCTUnwrap(export.managedRules.first(where: {
+        $0["description"] as? String == "LeaderKeyManaged/NormalFallbackMode"
+      }))
+      let fallbackPayloads = flattenManipulators(from: [fallbackRule]).flatMap(structuredPayloads)
+      let appPayloads = flattenManipulators(from: [appRule]).flatMap(structuredPayloads)
+      let normalPayloads = flattenManipulators(from: [normalRule]).flatMap(structuredPayloads)
+
+      XCTAssertTrue(fallbackPayloads.contains(where: {
+        $0["scope"] as? String == "fallback" && $0["keys"] as? [String] == ["f"]
+      }))
+      XCTAssertTrue(appPayloads.contains(where: {
+        $0["scope"] as? String == "app"
+          && $0["bundleId"] as? String == "com.example.App"
+          && $0["keys"] as? [String] == ["a"]
+      }))
+      XCTAssertFalse(normalPayloads.contains(where: { $0["type"] as? String == "usage" }))
+    }
   }
 
   func testGenerateKarabinerTSExportContainsSendUserCommandRoutes() throws {
