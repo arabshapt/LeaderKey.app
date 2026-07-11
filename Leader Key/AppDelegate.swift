@@ -1176,6 +1176,8 @@ extension AppDelegate {
     }
 
     var response = "{\"executed\":false,\"dry_run\":true,\"blocked\":true,\"needs_confirmation\":false,\"reason\":\"dispatch unavailable\",\"steps\":[]}"
+    // The router writes this method's returned JSON to the current socket as its response.
+    // Keep this synchronous so main-thread action resolution finishes before the socket reply.
     DispatchQueue.main.sync { [weak self] in
       response = self?.handleDispatchExecutePayload(payload)
         ?? "{\"executed\":false,\"dry_run\":true,\"blocked\":true,\"needs_confirmation\":false,\"reason\":\"Leader Key app delegate unavailable\",\"steps\":[]}"

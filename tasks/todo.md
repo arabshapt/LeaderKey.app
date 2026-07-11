@@ -62,7 +62,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T1.5 Karabiner2InputMethod.isActive returns bool directly
 - [x] T1.5 Cheatsheet sort hoist + stable ForEach ids
 - [x] T1.5 Theme-change: close old window
-- [ ] T1.5 Document/fix main.sync on socket queue
+- [x] T1.5 Document/fix main.sync on socket queue
 - [ ] T1.5 (optional) FileMonitor watches config dir
 
 ## Review

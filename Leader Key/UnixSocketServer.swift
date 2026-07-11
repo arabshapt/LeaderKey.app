@@ -276,6 +276,7 @@ protocol UnixSocketServerDelegate: AnyObject {
   func unixSocketServerRequestState() -> [String: Any]
   func unixSocketServerDidReceiveCommandScoutOpen(bundleId: String, source: String)
   func unixSocketServerDidReceiveShortcutMapOpen(bundleId: String?)
+  /// Returns the JSON response written directly to the requesting socket. Must complete synchronously.
   func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String
 }
 

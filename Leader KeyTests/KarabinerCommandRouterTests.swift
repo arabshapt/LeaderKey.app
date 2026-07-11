@@ -20,6 +20,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
     var hintOverlayCommand: HintOverlayCommand?
     var state: [String: Any] = ["active": true, "mode": "karabiner2"]
     var dispatchExecutePayload: [String: Any]?
+    var dispatchExecuteResponse = "OK: dispatch execute"
 
     func unixSocketServerDidReceiveActivation(bundleId: String?) {
       activationBundleId = bundleId
@@ -88,7 +89,7 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     func unixSocketServerDidReceiveDispatchExecute(_ payload: [String: Any]) -> String {
       dispatchExecutePayload = payload
-      return "OK: dispatch execute"
+      return dispatchExecuteResponse
     }
   }
 
@@ -222,6 +223,22 @@ final class KarabinerCommandRouterTests: XCTestCase {
 
     XCTAssertTrue(response.contains("\"active\""))
     XCTAssertTrue(response.contains("\"mode\""))
+  }
+
+  func testDispatchExecuteReturnsDelegateJSONSynchronouslyForSocketResponse() {
+    let delegate = MockDelegate()
+    let expectedResponse =
+      "{\"executed\":true,\"dry_run\":false,\"blocked\":false,\"steps\":[]}"
+    delegate.dispatchExecuteResponse = expectedResponse
+
+    let response = KarabinerCommandRouter.route(
+      command: "dispatch execute {\"dryRun\":false,\"steps\":[]}",
+      delegate: delegate
+    )
+
+    XCTAssertEqual(response, expectedResponse)
+    XCTAssertEqual(delegate.dispatchExecutePayload?["dryRun"] as? Bool, false)
+    XCTAssertEqual((delegate.dispatchExecutePayload?["steps"] as? [Any])?.count, 0)
   }
 
   func testRouteRejectsUnknownCommand() {

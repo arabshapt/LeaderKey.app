@@ -85,6 +85,7 @@ enum KarabinerCommandRouter {
         return "ERROR: dispatch execute requires a JSON payload"
       }
 
+      // This JSON becomes the response on the requesting socket; do not make delegate dispatch async.
       return delegate?.unixSocketServerDidReceiveDispatchExecute(payload)
         ?? "ERROR: Leader Key app delegate is not available"
     }
