@@ -34,26 +34,4 @@ enum ThreadOptimization {
       }
     }
   }
-
-  /// Debounce rapid calls to reduce excessive dispatches
-  private static var debounceTimers: [String: Timer] = [:]
-  private static let debounceQueue = DispatchQueue(label: "com.leaderkey.debounce")
-
-  static func debounce(
-    identifier: String,
-    delay: TimeInterval,
-    action: @escaping () -> Void
-  ) {
-    debounceQueue.async {
-      debounceTimers[identifier]?.invalidate()
-      let timer = Timer.scheduledTimer(
-        withTimeInterval: delay,
-        repeats: false
-      ) { _ in
-        executeOnMain(action)
-      }
-      debounceTimers[identifier] = timer
-      RunLoop.current.add(timer, forMode: .common)
-    }
-  }
 }
