@@ -16,7 +16,7 @@ final class Karabiner2InputMethod: InputMethod {
   private let grabberCacheTTL: TimeInterval = 10
 
   var isActive: Bool {
-    return socketServer.getStatistics().contains("Running: true")
+    socketServer.isRunning
   }
 
   var healthStatus: InputMethodHealthStatus {

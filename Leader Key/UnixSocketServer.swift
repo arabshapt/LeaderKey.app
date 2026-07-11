@@ -5,22 +5,40 @@ import Foundation
 final class UnixSocketServer {
   static let shared = UnixSocketServer()
 
-  private let socketPath = "/tmp/leaderkey.sock"
+  struct Statistics: Equatable, Sendable {
+    let totalCommands: UInt64
+    let socketPath: String
+    let isRunning: Bool
+  }
+
+  private let socketPath: String
   private var socketHandle: Int32 = -1
   private var acceptSource: DispatchSourceRead?
   private let queue = DispatchQueue(label: "com.leaderkey.socket", attributes: .concurrent)
   private let keyProcessingQueue = DispatchQueue(
     label: "com.leaderkey.keyprocessing", qos: .userInteractive)
+  private let stateLock = NSLock()
 
   weak var delegate: UnixSocketServerDelegate?
 
   private var totalCommands: UInt64 = 0
-  private var isRunning = false
+  private var running = false
 
-  private init() {}
+  init(socketPath: String = "/tmp/leaderkey.sock") {
+    self.socketPath = socketPath
+  }
+
+  var isRunning: Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return running
+  }
 
   func start() -> Bool {
-    guard !isRunning else {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+
+    guard !running else {
       debugLog("[UnixSocketServer] Already running")
       return true
     }
@@ -56,12 +74,14 @@ final class UnixSocketServer {
     guard bindResult >= 0 else {
       debugLog("[UnixSocketServer] Failed to bind socket: \(String(cString: strerror(errno)))")
       close(socketHandle)
+      socketHandle = -1
       return false
     }
 
     guard listen(socketHandle, 5) >= 0 else {
       debugLog("[UnixSocketServer] Failed to listen on socket: \(String(cString: strerror(errno)))")
       close(socketHandle)
+      socketHandle = -1
       return false
     }
 
@@ -71,13 +91,16 @@ final class UnixSocketServer {
     }
     acceptSource?.resume()
 
-    isRunning = true
+    running = true
     debugLog("[UnixSocketServer] Started listening on \(socketPath)")
     return true
   }
 
   func stop() {
-    guard isRunning else { return }
+    stateLock.lock()
+    defer { stateLock.unlock() }
+
+    guard running else { return }
 
     acceptSource?.cancel()
     acceptSource = nil
@@ -88,7 +111,7 @@ final class UnixSocketServer {
     }
 
     unlink(socketPath)
-    isRunning = false
+    running = false
     debugLog("[UnixSocketServer] Stopped")
   }
 
@@ -96,9 +119,14 @@ final class UnixSocketServer {
     var clientAddr = sockaddr_un()
     var clientAddrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
 
+    stateLock.lock()
+    let serverSocket = socketHandle
+    stateLock.unlock()
+    guard serverSocket >= 0 else { return }
+
     let clientSocket = withUnsafeMutablePointer(to: &clientAddr) { addrPtr in
       addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-        accept(socketHandle, sockaddrPtr, &clientAddrLen)
+        accept(serverSocket, sockaddrPtr, &clientAddrLen)
       }
     }
 
@@ -156,7 +184,9 @@ final class UnixSocketServer {
 
     let command = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
 
+    stateLock.lock()
     totalCommands += 1
+    stateLock.unlock()
 
     keyProcessingQueue.async { [weak self] in
       self?.processCommand(command, socket: socket)
@@ -210,12 +240,23 @@ final class UnixSocketServer {
     }
   }
 
+  func statisticsSnapshot() -> Statistics {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return Statistics(
+      totalCommands: totalCommands,
+      socketPath: socketPath,
+      isRunning: running
+    )
+  }
+
   func getStatistics() -> String {
+    let statistics = statisticsSnapshot()
     return """
       Unix Socket Server Statistics:
-      - Total Commands: \(totalCommands)
-      - Socket Path: \(socketPath)
-      - Running: \(isRunning)
+      - Total Commands: \(statistics.totalCommands)
+      - Socket Path: \(statistics.socketPath)
+      - Running: \(statistics.isRunning)
       """
   }
 }

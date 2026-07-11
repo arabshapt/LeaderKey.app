@@ -59,7 +59,7 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T1.4 Cheatsheet window reuse for .always
 - [x] T1.5 Delete dead CGEvent-tap machinery
 - [x] T1.5 Delete ThreadOptimization.debounce
-- [ ] T1.5 Karabiner2InputMethod.isActive returns bool directly
+- [x] T1.5 Karabiner2InputMethod.isActive returns bool directly
 - [ ] T1.5 Cheatsheet sort hoist + stable ForEach ids
 - [ ] T1.5 Theme-change: close old window
 - [ ] T1.5 Document/fix main.sync on socket queue
