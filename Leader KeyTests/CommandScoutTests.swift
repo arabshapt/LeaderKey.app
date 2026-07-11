@@ -38,8 +38,14 @@ final class CommandScoutTests: XCTestCase {
 
     func testTokensSplitBySeparators() {
         XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t > n"), ["t", "n"])
-        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t/n"), ["t", "n"])
-        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t,n"), ["t", "n"])
+        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t→N"), ["t", "N"])
+        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t / n"), ["t", "/", "n"])
+    }
+
+    func testCompactSlashAndCommaAreLiteralKeys() {
+        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t/n"), ["t", "/", "n"])
+        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "t,n"), ["t", ",", "n"])
+        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("t,n"), "t,n")
     }
 
     func testTokensCompactSequenceSplit() {
@@ -58,8 +64,9 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "   "), [])
     }
 
-    func testTokensLowercased() {
-        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "T N"), ["t", "n"])
+    func testTokensPreserveExactCase() {
+        XCTAssertEqual(CommandScoutSequenceNormalizer.tokens(from: "T N"), ["T", "N"])
+        XCTAssertEqual(CommandScoutSequenceNormalizer.normalizedSequence("b > M"), "bM")
     }
 
     func testNormalizedSequence() {
@@ -105,6 +112,39 @@ final class CommandScoutTests: XCTestCase {
         let suggestion = makeSuggestion(sequence: "t n", actionType: .menu, value: "App > Tab > Next")
         let result = CommandScoutService.validate(suggestions: [suggestion], existingRoot: existing)
         XCTAssertEqual(result[0].conflictStatus, .duplicateSequence)
+    }
+
+    func testValidationTreatsUppercaseAndLowercaseAsDistinctExactSequences() {
+        let existing = Group(key: nil, label: "Root", stickyMode: nil, actions: [
+            .action(Action(key: "T", type: .command, value: "echo uppercase")),
+        ])
+        let suggestions = [
+            makeSuggestion(
+                id: "lower", sequence: "t", actionType: .command,
+                value: "echo lowercase", title: "Lowercase"),
+            makeSuggestion(
+                id: "upper", sequence: "T", actionType: .command,
+                value: "echo another", title: "Uppercase"),
+        ]
+
+        let result = CommandScoutService.validate(suggestions: suggestions, existingRoot: existing)
+        XCTAssertEqual(result[0].conflictStatus, .clear)
+        XCTAssertEqual(result[1].conflictStatus, .duplicateSequence)
+    }
+
+    func testValidationAllowsOnlyExplicitASCIINamespace() {
+        let suggestions = [
+            makeSuggestion(id: "uppercase", sequence: "N", value: "App > File > Upper"),
+            makeSuggestion(id: "punctuation", sequence: "t/", value: "App > File > Slash"),
+            makeSuggestion(id: "unicode", sequence: "é", value: "App > File > Unicode"),
+            makeSuggestion(id: "shifted", sequence: "!", value: "App > File > Bang"),
+        ]
+
+        let result = CommandScoutService.validate(suggestions: suggestions, existingRoot: emptyRoot())
+        XCTAssertEqual(result[0].conflictStatus, .clear)
+        XCTAssertEqual(result[1].conflictStatus, .clear)
+        XCTAssertEqual(result[2].conflictStatus, .invalidSequence)
+        XCTAssertEqual(result[3].conflictStatus, .invalidSequence)
     }
 
     // MARK: - Validation: Duplicate Action
@@ -266,6 +306,28 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(result[0].suggestedSequence, "tn")
     }
 
+    func testAssignSequencesUsesUppercaseBeforePunctuation() {
+        var suggestion = makeSuggestion(
+            sequence: "", actionType: .menu, value: "App > Tab > New", title: "New Tab")
+        suggestion.category = "Tabs"
+
+        let preferred = CommandScoutService.assignSequences(
+            to: [suggestion], existingRoot: emptyRoot())
+        let lowerCandidate = preferred[0].suggestedSequence
+        XCTAssertEqual(lowerCandidate, "tw")
+
+        let uppercase = CommandScoutService.assignSequences(
+            to: [suggestion], existingRoot: emptyRoot(), reservedKeys: [lowerCandidate])
+        XCTAssertEqual(uppercase[0].suggestedSequence, "tW")
+
+        let punctuation = CommandScoutService.assignSequences(
+            to: [suggestion],
+            existingRoot: emptyRoot(),
+            reservedKeys: [lowerCandidate, "tW"]
+        )
+        XCTAssertEqual(punctuation[0].suggestedSequence, "t,")
+    }
+
     // MARK: - Menu Inventory JSON Parsing
 
     func testParseMenuInventoryJSON() {
@@ -423,6 +485,15 @@ final class CommandScoutTests: XCTestCase {
         XCTAssertEqual(suggestions[0].source, .web)
         XCTAssertEqual(suggestions[0].actionType, .shortcut)
         XCTAssertEqual(suggestions[0].reviewNotes, "docs")
+    }
+
+    func testParseAISuggestionsPreservesCaseAndPunctuationInSequencesAndAlternatives() throws {
+        let data = #"{"suggestions":[{"title":"New Tab","actionType":"menu","actionValue":"App > File > New","suggestedSequence":"t N","alternatives":["t /","T,"]}]}"#
+            .data(using: .utf8)!
+
+        let suggestion = try XCTUnwrap(CommandScoutService.parseAISuggestions(data)?.first)
+        XCTAssertEqual(suggestion.suggestedSequence, "tN")
+        XCTAssertEqual(suggestion.alternatives, ["t/", "T,"])
     }
 
     func testParseAISuggestionsTreatsUnknownActionTypeAsUnsupported() throws {
@@ -801,6 +872,30 @@ final class CommandScoutTests: XCTestCase {
         }
         XCTAssertEqual(action.key, "m")
         XCTAssertEqual(action.value, "Chrome > Bookmarks > Bookmark Manager")
+    }
+
+    func testApplyCommandScoutSuggestionsMatchesIntermediateGroupsByExactCase() {
+        let session = ConfigEditorSession()
+        session.load(
+            root: Group(key: nil, label: "Root", actions: [
+                .group(Group(key: "T", label: "Uppercase", actions: []))
+            ]),
+            validationErrors: [],
+            selectedConfigKey: "Chrome",
+            preserveExpansion: false
+        )
+
+        let result = session.applyCommandScoutSuggestions([
+            makeSuggestion(
+                sequence: "t n",
+                actionType: .menu,
+                value: "Chrome > Tab > New",
+                title: "New Tab"
+            )
+        ])
+
+        XCTAssertEqual(result.insertedCount, 1)
+        XCTAssertEqual(session.root.actions.compactMap { $0.item.key }, ["T", "t"])
     }
 
     func testApplyCommandScoutSuggestionsReportsSkippedItems() {

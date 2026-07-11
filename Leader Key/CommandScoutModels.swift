@@ -344,13 +344,17 @@ enum CommandScoutError: LocalizedError {
 }
 
 enum CommandScoutSequenceNormalizer {
+  static let punctuationTokens = [",", ".", "/", ";", "'", "-", "=", "[", "]", "\\"]
+  private static let allowedTokenSet = Set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".map(String.init)
+      + punctuationTokens
+  )
+
   static func tokens(from sequence: String) -> [String] {
     let cleaned = sequence
       .replacingOccurrences(of: ">", with: " ")
-      .replacingOccurrences(of: "/", with: " ")
-      .replacingOccurrences(of: ",", with: " ")
+      .replacingOccurrences(of: "→", with: " ")
       .trimmingCharacters(in: .whitespacesAndNewlines)
-      .lowercased()
 
     guard !cleaned.isEmpty else { return [] }
 
@@ -366,9 +370,13 @@ enum CommandScoutSequenceNormalizer {
     tokens(from: sequence).joined()
   }
 
+  static func isAllowedToken(_ token: String) -> Bool {
+    allowedTokenSet.contains(token)
+  }
+
   private static func shouldSplitCompactSequence(_ token: String) -> Bool {
     guard token.count > 1 && token.count <= 3 else { return false }
-    return token.allSatisfy { $0.isLetter || $0.isNumber }
+    return token.allSatisfy { allowedTokenSet.contains(String($0)) }
   }
 }
 
@@ -376,13 +384,13 @@ enum CommandScoutPrompts {
   static let systemPrompt = """
     You are Command Scout for Leader Key, a keyboard-driven launcher for macOS. Return strict JSON only — no markdown, no prose.
 
-    Your job: suggest the most useful app commands and assign mnemonic key sequences for a Leader Key config. A sequence is 1-3 compact keys pressed in order (e.g. "tn" = Tabs → New, "tx" = Tabs → Close). Sequences should be short, intuitive, grouped by category prefix, and must never contain spaces.
+    Your job: suggest the most useful app commands and assign mnemonic key sequences for a Leader Key config. A sequence is 1-3 compact, case-sensitive keys pressed in order (e.g. "tn" = Tabs → New, "tN" uses uppercase N). Sequences should be short, intuitive, grouped by category prefix, and must never contain spaces.
 
     Rules:
     - Include BOTH menu commands from the live inventory AND shortcuts/keystrokes not in the menu.
     - Do NOT invent shortcuts. Only suggest well-known, reliable shortcuts for the app. Mark uncertain ones as low confidence.
     - For menu actions, actionValue = "AppName > Menu > Item" exactly matching the inventory.
-    - For each suggestion, include a suggestedSequence as a compact 1-3 character string (e.g. "tn" for new tab, "wc" for close window, "nb" for back). Do not return "t n" or any value with a space.
+    - For each suggestion, include a suggestedSequence as a compact 1-3 character string. Allowed keys are ASCII a-z, A-Z, 0-9, comma, period, slash, semicolon, quote, minus, equals, brackets, and backslash. Preserve exact case. Slash and comma are literal keys, never separators.
     - Category prefixes: t=Tabs, w=Windows, n=Navigation, e=Editing, v=View, d=Developer, b=Bookmarks, s=Search, h=History, f=File, p=Privacy, m=Misc.
     - Avoid collisions between sequences. If two commands share a prefix, use 2-3 keys.
     - Aim for 15-30 suggestions covering the app's most valuable workflows.
@@ -408,7 +416,7 @@ enum CommandScoutPrompts {
     Return JSON: {"suggestions": [{title, category, source, actionType, actionValue, suggestedSequence, description, aiDescription, confidence, sourceNotes}]}
 
     - source: "liveMenu" if from the menu inventory, "ai" if from your knowledge
-    - suggestedSequence: compact mnemonic key path like "tn" (tabs → new). Use category prefix + meaningful letter. Spaces are invalid.
+    - suggestedSequence: compact, case-sensitive mnemonic key path like "tn" (tabs → new). Allowed punctuation keys include comma, period, slash, semicolon, quote, minus, equals, brackets, and backslash. Spaces are invalid.
     - confidence: number 0-1 (0.9 = very sure, 0.5 = uncertain)
     - For menu actions, actionValue must be "\(appName) > <exact menu path>"
     - Include the most useful 15-30 commands. Prioritize daily-use actions.
@@ -422,7 +430,7 @@ enum CommandScoutPrompts {
   ) -> String {
     """
     Given these suggestions and this existing sequence tree, assign Leader Key sequences.
-    Rules: prefer 1-2 compact keys, allow 3 keys for conflicts, use mnemonic category prefixes, never overwrite existing sequences, avoid reserved keys, keep related commands near each other, and provide 2 alternatives for each conflict. Return compact sequences without spaces.
+    Rules: prefer 1-2 compact keys, allow 3 keys for conflicts, preserve exact case, use mnemonic category prefixes, never overwrite existing sequences, avoid reserved keys, keep related commands near each other, and provide 2 alternatives for each conflict. Slash and comma are keys. Return compact sequences without spaces.
     Return JSON with:
     [{suggestionId, suggestedSequence, alternatives, collisionReason, mnemonicReason}]
     Existing sequence tree: \(sequenceTree)

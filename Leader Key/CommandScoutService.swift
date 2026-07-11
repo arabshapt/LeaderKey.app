@@ -229,28 +229,14 @@ class CommandScoutService {
                 continue
             }
 
-            let prefix = categoryPrefix(for: suggestion.category)
-            let mnemonic = mnemonic(for: suggestion.title)
-
-            // Try: prefix + mnemonic
-            let candidate = "\(prefix)\(mnemonic)"
-            if usedSequences.insert(candidate).inserted {
-                suggestion.suggestedSequence = candidate
-            } else {
-                // Try: prefix + first letter of title
-                let firstLetter = String(suggestion.title.lowercased().prefix(1))
-                let fallback = "\(prefix)\(firstLetter)"
-                if usedSequences.insert(fallback).inserted {
-                    suggestion.suggestedSequence = fallback
-                    suggestion.reviewNotes = "Mnemonic '\(candidate)' taken, using '\(fallback)'"
-                } else {
-                    // 3-key fallback
-                    let threeKey = "\(prefix)\(firstLetter)\(mnemonic)"
-                    if usedSequences.insert(threeKey).inserted {
-                        suggestion.suggestedSequence = threeKey
-                        suggestion.reviewNotes = "Collision: using 3-key sequence"
-                    }
+            let candidates = sequenceCandidates(for: suggestion)
+            if let candidateIndex = candidates.firstIndex(where: { usedSequences.insert($0).inserted }) {
+                suggestion.suggestedSequence = candidates[candidateIndex]
+                if candidateIndex > 0 {
+                    suggestion.reviewNotes = "Preferred mnemonic '\(candidates[0])' unavailable; using '\(candidates[candidateIndex])'"
                 }
+            } else {
+                suggestion.reviewNotes = "No free sequence candidate in the 1-3 key namespace"
             }
 
             result.append(suggestion)
@@ -292,19 +278,19 @@ class CommandScoutService {
             switch item {
             case .action(let action):
                 if let key = action.key, !key.isEmpty {
-                    let seq = (prefix + [key.lowercased()]).joined()
+                    let seq = (prefix + [key]).joined()
                     sequences.insert(seq)
                 }
             case .group(let subgroup):
                 if let key = subgroup.key, !key.isEmpty {
-                    let subPrefix = prefix + [key.lowercased()]
+                    let subPrefix = prefix + [key]
                     let seq = subPrefix.joined()
                     sequences.insert(seq)
                     sequences.formUnion(collectExistingSequences(from: subgroup, prefix: subPrefix))
                 }
             case .layer(let layer):
                 if let key = layer.key, !key.isEmpty {
-                    let subPrefix = prefix + [key.lowercased()]
+                    let subPrefix = prefix + [key]
                     let seq = subPrefix.joined()
                     sequences.insert(seq)
                     sequences.formUnion(
@@ -393,9 +379,7 @@ class CommandScoutService {
 
     private static func isValidSequenceTokens(_ tokens: [String]) -> Bool {
         guard !tokens.isEmpty, tokens.count <= 3 else { return false }
-        return tokens.allSatisfy { token in
-            token.count == 1 && token.allSatisfy { $0.isLetter || $0.isNumber }
-        }
+        return tokens.allSatisfy(CommandScoutSequenceNormalizer.isAllowedToken)
     }
 
     private static func isFilteredMenuItem(title: String, path: String) -> Bool {
@@ -469,6 +453,34 @@ class CommandScoutService {
             }
         }
         return String(chars[1])
+    }
+
+    private static func sequenceCandidates(for suggestion: CommandScoutSuggestion) -> [String] {
+        let prefix = categoryPrefix(for: suggestion.category)
+        let lowerMnemonic = mnemonic(for: suggestion.title).lowercased()
+        let upperMnemonic = lowerMnemonic.uppercased()
+        var suffixes = [lowerMnemonic, upperMnemonic]
+        suffixes.append(contentsOf: CommandScoutSequenceNormalizer.punctuationTokens)
+
+        let titleLetters = suggestion.title.lowercased().compactMap { character -> String? in
+            let token = String(character)
+            guard CommandScoutSequenceNormalizer.isAllowedToken(token), character.isLetter else {
+                return nil
+            }
+            return token
+        }
+        for token in titleLetters where !suffixes.contains(token) {
+            suffixes.append(token)
+            suffixes.append(token.uppercased())
+        }
+
+        var candidates = suffixes.map { prefix + $0 }
+        candidates.append(contentsOf: suffixes.map { prefix + lowerMnemonic + $0 })
+        var seen = Set<String>()
+        return candidates.filter { candidate in
+            let tokens = CommandScoutSequenceNormalizer.tokens(from: candidate)
+            return tokens.count <= 3 && seen.insert(candidate).inserted
+        }
     }
 
     // MARK: - AI Parsing and Debug Bundle

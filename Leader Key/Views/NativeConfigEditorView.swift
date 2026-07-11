@@ -694,7 +694,7 @@ final class ConfigEditorSession: ObservableObject {
 
     for (i, token) in tokens.dropLast().enumerated() {
       if let existingIndex = currentActions.firstIndex(where: {
-        if case .group(let g) = $0 { return g.key?.lowercased() == token }
+        if case .group(let g) = $0 { return g.key == token }
         return false
       }) {
         groupIndices.append(existingIndex)
