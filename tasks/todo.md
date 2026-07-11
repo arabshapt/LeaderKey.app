@@ -12,29 +12,30 @@ Plan: `/Users/arabshaptukaev/.claude/plans/analyze-the-code-and-cheerful-planet.
 - [x] T4.0 VoiceCoordinatorTests with mocks (happy path, toggle, stuck-recording race repro as XCTExpectFailure)
 
 ## Stage B — Voice correctness (T4.1)
-- [ ] Race fix: synchronous begin when .authorized + pendingKeyUpWhileArming
-- [ ] Watchdog timer on .transcribing/.planning (~35s)
-- [ ] VoiceTranscriber cancel() + coordinator cancels stale tasks
-- [ ] Device-change onRecordingInterrupted surfacing
+- [x] Race fix: keyUp latched while mic-permission arming; late grant finishes immediately
+- [x] Watchdog timer on .transcribing (35s) / .planning (90s)
+- [x] processingTask retained + cancelled (watchdog/stop); cancellation-aware catches
+- [x] Device-change onRecordingInterrupted surfacing + clean capture abort
 
 ## Stage C — appConfigs race fix (T1.1)
-- [ ] Locked accessors for appConfigs; route all accesses
-- [ ] root snapshot for off-main getConfig callers (after reverse-sync grep check)
-- [ ] Concurrency hammer test; run with TSan
+- [x] Locked accessors for appConfigs; routed all accesses (LoadingDecoding + Metadata)
+- [x] threadSafeRoot lock-guarded snapshot for off-main root reads
+- [x] Concurrency hammer test green under TSan
+- [x] BONUS: fixed ConfigCache pool-exhaustion deadlock (barrier queue → NSLock), found by hammer test
 
 ## Stage D — Voice latency/delivery/streaming
-- [ ] T4.2 Voice signposts (baseline)
-- [ ] T4.2 Trailing delay 0.3s → 0 (fallback 100ms if clipping)
-- [ ] T4.2 afconvert → in-process AVAudioConverter (+ fixture WAV test)
-- [ ] T4.2 Cache mic auth; stop per-press updateAudioWarmState
-- [ ] T4.3 Clipboard save/restore around paste (changeCount guard)
-- [ ] T4.3 Focus check before paste
-- [ ] T4.3 Optional trailing-period strip toggle
-- [ ] T4.4A Chunked pre-transcription while recording (local-provider gated)
+- [x] T4.2 Voice signposts (Voice.processing / Voice.transcribe / Voice.prepareAudio)
+- [x] T4.2 Trailing delay 0.3s → 0 (holdReleaseTrailingCapture tunable)
+- [x] T4.2 afconvert → in-process AVAudioConverter (+ fixture WAV test)
+- [x] T4.2 Cache mic auth; stop per-press updateAudioWarmState
+- [x] T4.3 Clipboard save/restore around paste (changeCount guard, all item types)
+- [x] T4.3 Focus check before paste (copy-only when Leader Key frontmost)
+- [x] T4.3 Optional trailing-period strip toggle (default off)
+- [x] T4.4A Chunked pre-transcription + live partial transcript in status menu (Parakeet only, default on)
 
 ## Stage E — Main-thread & hot-path (T1.2/T1.3)
-- [ ] T1.2 Offload .menu AX traversal to background (mirror v1 path)
-- [ ] T1.3 Associated objects → stored properties (one per commit)
+- [x] T1.2 `.menu` AX execution was already dispatched off-main in `selectMenuItemImpl`; no code change needed
+- [x] T1.3 Associated objects → stored properties
 
 ## Stage F — Shortcut visualization (T2)
 - [ ] T2.1 ShortcutsOverviewModel + tests

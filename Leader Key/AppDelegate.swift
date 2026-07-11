@@ -4,7 +4,6 @@ import Combine
 import Defaults
 import KeyboardShortcuts
 import Kingfisher
-import ObjectiveC
 import os
 import Settings
 import Sparkle
@@ -150,18 +149,6 @@ private struct CallbackStatistics {
   }
 }
 
-// MARK: - Associated Object Helpers
-
-// Helper functions for associated objects (needed for storing properties in extensions)
-// Moved *before* the extensions that use them.
-private func getAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer) -> T? {
-  return objc_getAssociatedObject(object, key) as? T
-}
-
-private func setAssociatedObject<T>(_ object: Any, _ key: UnsafeRawPointer, _ value: T?) {
-  objc_setAssociatedObject(object, key, value, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-}
-
 // MARK: - Settings Panes
 
 private struct OpacityPane: View {
@@ -233,6 +220,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, InputMethodDelegate, UnixSoc
   // --- Input Method Management ---
   private var currentInputMethod: InputMethod?
   private var voiceCoordinator: VoiceCoordinator?
+
+  // --- Event-handling state ---
+  // Formerly ObjC associated objects (they predate these being stored
+  // properties); every get/set went through the runtime's global
+  // associated-object table on the hot path.
+  private var eventTap: CFMachPort?
+  private var runLoopSource: CFRunLoopSource?
+  private var isMonitoring = false
+  private var activeRootGroup: Group?
+  private var currentSequenceGroup: Group?
+  private var isProcessingKey = false
+  private var keyEventQueue: [QueuedKeyEvent] = []
+  private var didShowPermissionsAlertRecently = false
+  private var stickyModeToggled = false {
+    didSet {
+      setStickyModeStatus(active: stickyModeToggled)
+    }
+  }
+  private var lastModifierFlags: NSEvent.ModifierFlags = []
+  private var activeActivationShortcut: KeyboardShortcuts.Shortcut?
+  // Track if we're in Karabiner 2.0 sticky mode
+  private var isKarabinerStickyMode = false
+  private var cpuMonitorTimer: Timer?
+  private var isHighCpuMode = false
+  private var lastNavigationTime: CFAbsoluteTime = 0
+  private var keyStringCache: [KeyCacheEntry: String] = [:]
+  // Cached activation shortcuts for O(1) lookup
+  private var cachedActivationKeyCodes: Set<UInt16> = []
+  private var cachedActivationShortcuts:
+    [UInt16: [(KeyboardShortcuts.Shortcut, Controller.ActivationType)]] = [:]
+  // Cache activation key modifiers (CGEventFlags instead of NSEvent.ModifierFlags)
+  private var cachedActivationModifiers: [UInt16: CGEventFlags] = [:]
+  // Consolidated callback optimization state
+  private var callbackState = CallbackOptimizationState()
+  // Config preprocessing for fast lookups
+  private var currentKeyLookupCache: KeyLookupCache?
+  private var currentBundleId: String?
+  // Config reload tracking
+  private var isReloading = false
 
   lazy var settingsWindowController = SettingsWindowController(
     panes: [
@@ -1572,141 +1598,12 @@ extension AppDelegate {
 // MARK: - Event Tap Handling
 extension AppDelegate {
 
-  // --- Event Tap Properties (Using Associated Objects) ---
-  private var eventTap: CFMachPort? {
-    get { getAssociatedObject(self, &AssociatedKeys.eventTap) }
-    set { setAssociatedObject(self, &AssociatedKeys.eventTap, newValue) }
-  }
-  private var runLoopSource: CFRunLoopSource? {
-    get { getAssociatedObject(self, &AssociatedKeys.runLoopSource) }
-    set { setAssociatedObject(self, &AssociatedKeys.runLoopSource, newValue) }
-  }
-  private var isMonitoring: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.isMonitoring) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.isMonitoring, newValue) }
-  }
-  private var activeRootGroup: Group? {
-    get { getAssociatedObject(self, &AssociatedKeys.activeRootGroup) }
-    set { setAssociatedObject(self, &AssociatedKeys.activeRootGroup, newValue) }
-  }
-  private var currentSequenceGroup: Group? {
-    get { getAssociatedObject(self, &AssociatedKeys.currentSequenceGroup) }
-    set { setAssociatedObject(self, &AssociatedKeys.currentSequenceGroup, newValue) }
-  }
-  private var isProcessingKey: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.isProcessingKey) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.isProcessingKey, newValue) }
-  }
-  private var keyEventQueue: [QueuedKeyEvent] {
-    get { getAssociatedObject(self, &AssociatedKeys.keyEventQueue) ?? [] }
-    set { setAssociatedObject(self, &AssociatedKeys.keyEventQueue, newValue) }
-  }
-  private var didShowPermissionsAlertRecently: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.didShowPermissionsAlertRecently, newValue) }
-  }
-  private var stickyModeToggled: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.stickyModeToggled) ?? false }
-    set {
-      setAssociatedObject(self, &AssociatedKeys.stickyModeToggled, newValue)
-      setStickyModeStatus(active: newValue)
-    }
-  }
-  private var lastModifierFlags: NSEvent.ModifierFlags {
-    get {
-      NSEvent.ModifierFlags(
-        rawValue: getAssociatedObject(self, &AssociatedKeys.lastModifierFlags) ?? 0)
-    }
-    set { setAssociatedObject(self, &AssociatedKeys.lastModifierFlags, newValue.rawValue) }
-  }
-  private var activeActivationShortcut: KeyboardShortcuts.Shortcut? {
-    get { getAssociatedObject(self, &AssociatedKeys.activeActivationShortcut) }
-    set { setAssociatedObject(self, &AssociatedKeys.activeActivationShortcut, newValue) }
-  }
-  
-  // Track if we're in Karabiner 2.0 sticky mode
-  private var isKarabinerStickyMode: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.isKarabinerStickyMode) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.isKarabinerStickyMode, newValue) }
-  }
-  private var cpuMonitorTimer: Timer? {
-    get { getAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer) }
-    set { setAssociatedObject(self, &AssociatedKeys.cpuMonitorTimer, newValue) }
-  }
-  private var isHighCpuMode: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.isHighCpuMode) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.isHighCpuMode, newValue) }
-  }
-  private var lastNavigationTime: CFAbsoluteTime {
-    get { getAssociatedObject(self, &AssociatedKeys.lastNavigationTime) ?? 0 }
-    set { setAssociatedObject(self, &AssociatedKeys.lastNavigationTime, newValue) }
-  }
-
-  // --- Key String Cache for Performance ---
+  // --- Key String Cache entry type ---
+  // (The event-handling state itself lives as stored properties in the main
+  // class body; extensions cannot declare stored properties.)
   private struct KeyCacheEntry: Hashable {
     let keyCode: UInt16
     let modifierFlags: UInt  // Use UInt instead of NSEvent.ModifierFlags for simpler hashing
-  }
-
-  private var keyStringCache: [KeyCacheEntry: String] {
-    get { getAssociatedObject(self, &AssociatedKeys.keyStringCache) ?? [:] }
-    set { setAssociatedObject(self, &AssociatedKeys.keyStringCache, newValue) }
-  }
-
-  // --- Cached Activation Shortcuts for O(1) lookup ---
-  private var cachedActivationKeyCodes: Set<UInt16> {
-    get { getAssociatedObject(self, &AssociatedKeys.cachedActivationKeyCodes) ?? [] }
-    set { setAssociatedObject(self, &AssociatedKeys.cachedActivationKeyCodes, newValue) }
-  }
-
-  private var cachedActivationShortcuts:
-    [UInt16: [(KeyboardShortcuts.Shortcut, Controller.ActivationType)]]
-  {
-    get { getAssociatedObject(self, &AssociatedKeys.cachedActivationShortcuts) ?? [:] }
-    set { setAssociatedObject(self, &AssociatedKeys.cachedActivationShortcuts, newValue) }
-  }
-
-  // --- Config Preprocessing for Fast Lookups ---
-  private var currentKeyLookupCache: KeyLookupCache? {
-    get { getAssociatedObject(self, &AssociatedKeys.currentKeyLookupCache) }
-    set { setAssociatedObject(self, &AssociatedKeys.currentKeyLookupCache, newValue) }
-  }
-
-  private var currentBundleId: String? {
-    get { getAssociatedObject(self, &AssociatedKeys.currentBundleId) }
-    set { setAssociatedObject(self, &AssociatedKeys.currentBundleId, newValue) }
-  }
-
-  // --- Config Reload Tracking ---
-  private var isReloading: Bool {
-    get { getAssociatedObject(self, &AssociatedKeys.isReloading) ?? false }
-    set { setAssociatedObject(self, &AssociatedKeys.isReloading, newValue) }
-  }
-
-  private struct AssociatedKeys {
-    static var eventTap = "eventTap"
-    static var runLoopSource = "runLoopSource"
-    static var isMonitoring = "isMonitoring"
-    static var activeRootGroup = "activeRootGroup"
-    static var currentSequenceGroup = "currentSequenceGroup"
-    static var isProcessingKey = "isProcessingKey"
-    static var keyEventQueue = "keyEventQueue"
-    static var didShowPermissionsAlertRecently = "didShowPermissionsAlertRecently"
-    static var stickyModeToggled = "stickyModeToggled"
-    static var lastModifierFlags = "lastModifierFlags"
-    static var activeActivationShortcut = "activeActivationShortcut"
-    static var cpuMonitorTimer = "cpuMonitorTimer"
-    static var isHighCpuMode = "isHighCpuMode"
-    static var lastNavigationTime = "lastNavigationTime"
-    static var keyStringCache = "keyStringCache"
-    static var isKarabinerStickyMode = "isKarabinerStickyMode"
-    static var cachedActivationKeyCodes = "cachedActivationKeyCodes"
-    static var cachedActivationShortcuts = "cachedActivationShortcuts"
-    static var cachedActivationModifiers = "cachedActivationModifiers"
-    static var callbackOptimizationState = "callbackOptimizationState"
-    static var currentKeyLookupCache = "currentKeyLookupCache"
-    static var currentBundleId = "currentBundleId"
-    static var isReloading = "isReloading"
   }
 
   // --- Event Tap Logic Methods ---
@@ -1962,21 +1859,6 @@ extension AppDelegate {
       // Wait for main thread processing to complete before allowing next event
       semaphore.wait()
     }
-  }
-
-  // Cache activation key modifiers (CGEventFlags instead of NSEvent.ModifierFlags)
-  private var cachedActivationModifiers: [UInt16: CGEventFlags] {
-    get { getAssociatedObject(self, &AssociatedKeys.cachedActivationModifiers) ?? [:] }
-    set { setAssociatedObject(self, &AssociatedKeys.cachedActivationModifiers, newValue) }
-  }
-
-  // Consolidated callback optimization state (single associated object lookup)
-  private var callbackState: CallbackOptimizationState {
-    get {
-      getAssociatedObject(self, &AssociatedKeys.callbackOptimizationState)
-        ?? CallbackOptimizationState()
-    }
-    set { setAssociatedObject(self, &AssociatedKeys.callbackOptimizationState, newValue) }
   }
 
   // Track if we have a pending activation being processed
@@ -3732,5 +3614,3 @@ extension AppDelegate {
     }
   }
 }
-
-// NOTE: Associated object helpers are now defined globally above AppDelegate.
